@@ -2,24 +2,61 @@
 
 # Isolated Development Environment Tools for Mac using OrbStack
 
-A toolkit for creating secure, isolated development environments using OrbStack VMs and Docker containers. This system protects your host machine by running all development work in sandboxed environments while maintaining seamless integration with your local development workflow.
+A comprehensive toolkit for creating secure, isolated development environments using OrbStack VMs and Docker containers. This system protects your host machine by running all development work in sandboxed environments while maintaining seamless integration with your local development workflow.
 
 ## 🚀 Features
 
-- **🏗️ Multiple Language Support**: Pre-built templates for Python, Node.js, Go, Rust, Java, PHP, and Bash
-- **🔒 Security First**: All development work runs in isolated containers with non-root users
-- **⚡ Quick Setup**: One-command environment creation and project bootstrapping
-- **🔄 Smart Management**: Automatic VM lifecycle management and resource optimization
-- **🛠️ Developer Tools**: Each template includes essential development tools (git, vim, curl, etc.)
-- **📦 Template System**: Quickly create new projects with language-specific Dockerfiles
-- **🎯 Enhanced Developer Experience**: 
-  - Automatic port forwarding detection (Node.js 3000, Python 8000, etc.)
-  - SSH key mounting for seamless git operations
-  - Git configuration sharing between host and container
-- **🧠 Smart Template Matching**: Intelligent version selection when exact versions aren't available
-- **⚙️ Comprehensive Configuration**: Global and project-local configuration files
-- **🔄 Dynamic Version Detection**: Real-time template updates from Docker Hub APIs
-- **📖 Comprehensive Help System**: Command-specific help, troubleshooting guides, and better error messages
+### 🏗️ **Core Development Features**
+- **Multiple Language Support**: Pre-built templates for Python, Node.js, Go, Rust, Java, PHP, and Bash
+- **Security First**: All development work runs in isolated containers with non-root users
+- **Quick Setup**: One-command environment creation and project bootstrapping
+- **Smart Management**: Automatic VM lifecycle management and resource optimization
+- **Developer Tools**: Each template includes essential development tools (git, vim, curl, etc.)
+
+### 🎯 **Enhanced Developer Experience**
+- **Automatic Port Forwarding**: Intelligent detection based on project type (Node.js 3000, Python 8000, etc.)
+- **SSH Key Integration**: Seamless git operations with automatic key mounting
+- **Git Configuration Sharing**: Consistent commits between host and container
+- **Smart Template Matching**: Intelligent version selection when exact versions aren't available
+- **Project Scaffolding**: Language-specific starter files with `--init` flag
+
+### ⚙️ **Advanced Management**
+- **Unified Command Structure**: Single `dev` command with integrated environment management
+- **Template Lifecycle Management**: Smart cleanup, usage tracking, and automatic updates
+- **Dynamic Version Detection**: Real-time template updates from Docker Hub APIs
+- **Comprehensive Configuration**: Global and project-local configuration files
+- **Template Statistics**: Usage analytics and cleanup recommendations
+
+### 📖 **Usability Enhancements**
+- **Comprehensive Help System**: Command-specific help, troubleshooting guides, and contextual error messages
+- **Intelligent Naming**: Consistent, predictable naming conventions across all components
+- **Better Error Messages**: Clear diagnostics with actionable suggestions
+- **Cross-Platform Compatibility**: Works across different bash versions and macOS configurations
+
+-----
+
+## 🆕 What's New in v2.0
+
+### 🎯 **Unified Command Structure**
+- **Single `dev` command**: Environment management integrated as `dev env` subcommands
+- **Simplified workflow**: No more separate `devenv` command - everything unified under `dev`
+- **Consistent interface**: Coherent command structure with better help and error messages
+
+### 🧹 **Intelligent Template Management**
+- **Smart Cleanup**: `dev templates prune` removes old templates while protecting latest versions
+- **Usage Tracking**: System learns which templates you use for intelligent cleanup decisions  
+- **Template Statistics**: `dev templates stats` shows usage patterns and storage information
+- **Auto-Update System**: Latest versions automatically detected from Docker Hub APIs
+
+### ⚡ **Enhanced Reliability**
+- **Improved Stability**: Removed cache mounting to prevent VM conflicts and improve reliability
+- **Cross-Platform Compatibility**: Works across different bash versions and macOS configurations
+- **Better Error Handling**: Clear diagnostics with actionable suggestions for common issues
+
+### 📚 **Comprehensive Help System**
+- **Command-specific Help**: `dev help <command>` provides detailed guidance for each feature
+- **Troubleshooting Guide**: `dev troubleshoot` offers solutions for common problems
+- **Contextual Messages**: Better error messages with specific next steps
 
 -----
 
@@ -166,10 +203,10 @@ dev list
 
 # Create a new project (smart matching)
 mkdir my-python-project && cd my-python-project
-dev new python      # Uses python-3.11 automatically
+dev new python      # Multiple versions available - will prompt for selection
 
 # Or specify exact version
-dev new python-3.11 # Explicit version
+dev new python-3.14 # Latest version (auto-detected from Docker Hub)
 
 # Start developing immediately
 dev
@@ -233,22 +270,24 @@ dev new node-22
 dev new golang-1.22
 
 # Create with project scaffolding (starter files)
-dev new python-3.13 --init    # Creates requirements.txt, main.py, .gitignore
-dev new node-22 --init        # Creates package.json, index.js, .gitignore
-dev new golang-1.22 --init    # Creates go.mod, main.go, .gitignore
+dev new python-3.14 --init    # Creates requirements.txt, main.py, .gitignore
+dev new node-25 --init        # Creates package.json, index.js, .gitignore
+dev new golang-1.25 --init    # Creates go.mod, main.go, .gitignore
 ```
 
 ### 📋 **Template Catalog**
 
 | Language | Available Versions | Latest Template | Includes |
 |----------|-------------------|----------------|-----------|
-| **Python** | 3.11, 3.12, 3.13 | `python-3.13` | Python interpreter, pip, development tools |
-| **Node.js** | 20, 22 | `node-22` | Node.js LTS, npm, development tools |
-| **Go** | 1.21, 1.22 | `golang-1.22` | Go compiler, go tools, gopls, delve debugger |
-| **Rust** | 1.75 | `rust-1.75` | Rust toolchain, cargo, clippy, rustfmt |
+| **Python** | 3.11, 3.12, 3.13, 3.14* | `python-3.14` | Python interpreter, pip, development tools |
+| **Node.js** | 20, 22, 25* | `node-25` | Node.js LTS, npm, development tools |
+| **Go** | 1.21, 1.22, 1.25* | `golang-1.25` | Go compiler, go tools, gopls, delve debugger |
+| **Rust** | 1.75, 1.90* | `rust-1.90` | Rust toolchain, cargo, clippy, rustfmt |
 | **Java** | 21 | `java-21` | OpenJDK 21 LTS, Maven 3.9.5, Gradle 8.4 |
 | **PHP** | 8.3 | `php-8.3` | PHP 8.3, Composer, common extensions |
 | **Bash** | latest | `bash-latest` | Shell scripting tools, shellcheck, utilities |
+
+*_Latest versions are automatically detected and updated from Docker Hub APIs_
 
 ### 🔮 **Smart Template Matching & Dynamic Updates**
 - **Unversioned names** (e.g., `python`) automatically use the available version
@@ -430,6 +469,9 @@ dev config --init                 # Create project-local configuration
 ```bash
 dev templates update              # Update all templates to latest versions
 dev templates check               # Check for available template updates
+dev templates prune               # Smart cleanup of old/unused templates
+dev templates cleanup [days]      # Remove templates unused for X days (default: 60)
+dev templates stats               # Show template statistics and usage information
 ```
 
 
@@ -472,7 +514,7 @@ chmod +x k8s-container
 ## 🔧 Configuration
 
 ### Configuration System
-The isolated development environment supports both global and project-local configuration:
+The isolated development environment supports both global and project-local configuration with automatic template management:
 
 #### Global Configuration (`~/.dev-envs/config.yaml`)
 ```yaml
@@ -480,7 +522,7 @@ The isolated development environment supports both global and project-local conf
 vm_name = "dev-vm-docker-host"
 
 # Default template when language has multiple versions
-default_template = "python-3.13"
+default_template = "python-3.14"
 
 # Automatically start VM if not running
 auto_start_vm = "true"
@@ -499,30 +541,48 @@ Example project config:
 ```yaml
 # Project-specific overrides
 vm_name = "dev-vm-my-project"
-default_template = "node-22"
+default_template = "node-25"
 container_prefix = "myproject"
 ```
+
+#### Template Management Configuration
+The system automatically tracks template usage and provides intelligent cleanup:
+- **Usage Tracking**: Logs when templates are used for smart cleanup decisions
+- **Smart Cleanup**: Protects latest versions while removing old, unused templates
+- **Automatic Updates**: Fetches latest versions from Docker Hub APIs
+- **Cross-Platform Compatibility**: Works across different bash versions and systems
 
 ### Directory Structure
 After installation:
 ```
 ~/.dev-envs/
-├── config.yaml      # Global configuration file
-├── setups/           # VM configuration files
+├── config.yaml          # Global configuration file
+├── template_usage.log    # Template usage tracking for smart cleanup
+├── setups/               # VM configuration files
 │   └── docker-host.yaml
-└── templates/        # Dockerfile templates
+└── templates/            # Dockerfile templates (auto-managed)
     ├── Dockerfile-python-3.11
     ├── Dockerfile-python-3.12
     ├── Dockerfile-python-3.13
+    ├── Dockerfile-python-3.14    # Latest Python (auto-updated)
     ├── Dockerfile-node-20
     ├── Dockerfile-node-22
+    ├── Dockerfile-node-25         # Latest Node.js (auto-updated)
     ├── Dockerfile-golang-1.21
     ├── Dockerfile-golang-1.22
+    ├── Dockerfile-golang-1.25    # Latest Go (auto-updated)
     ├── Dockerfile-rust-1.75
+    ├── Dockerfile-rust-1.90      # Latest Rust (auto-updated)
     ├── Dockerfile-java-21
     ├── Dockerfile-php-8.3
     └── Dockerfile-bash-latest
 ```
+
+**Template Management Features:**
+- **Auto-Discovery**: New versions are automatically detected from Docker Hub
+- **Smart Cleanup**: Old templates are intelligently pruned while preserving latest versions
+- **Usage Tracking**: System learns which templates you use to make better cleanup decisions
+- **Statistics**: View template usage patterns with `dev templates stats`
 
 ### VM Management
 The Docker host VM runs automatically but you can manage it manually:
@@ -625,6 +685,12 @@ dev templates update
 # Check for available updates
 dev templates check
 
+# View current template statistics
+dev templates stats
+
+# Clean up old/unused templates
+dev templates prune
+
 # Reinstall to get latest templates
 ./install.sh --force
 ```
@@ -656,6 +722,18 @@ orb delete dev-vm-old-project
 
 # Or use uninstall-all for complete cleanup (DESTRUCTIVE)
 ./install.sh --uninstall-all
+```
+
+**"Template directory getting cluttered"**
+```bash
+# View template usage statistics
+dev templates stats
+
+# Smart cleanup (keeps latest versions, removes old unused ones)
+dev templates prune
+
+# Remove templates unused for specific period
+dev templates cleanup 30    # Remove templates unused for 30+ days
 ```
 
 ### Getting Help
