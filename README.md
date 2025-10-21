@@ -87,7 +87,7 @@ After uninstalling, you can reinstall anytime by running `./install.sh` again.
 Before working on projects, create the Docker host VM (only needed once):
 
 ```bash
-devenv new docker-host
+dev env new docker-host
 ```
 
 This creates a lightweight Linux VM running Docker. After setup, you'll be connected to it. Type `exit` to return to your Mac - the VM continues running in the background.
@@ -132,12 +132,12 @@ EOF
 2. **Create and use the environment:**
 ```bash
 # Create the custom environment
-devenv new k8s-dev
+dev env new k8s-dev
 
 # The VM will be named 'dev-vm-k8s-dev'
 # You can start/stop it like any other environment
-devenv down k8s-dev
-devenv up k8s-dev
+dev env down k8s-dev
+dev env up k8s-dev
 ```
 
 3. **Use with dev:**
@@ -394,13 +394,14 @@ dev config --init    # Creates .devenv.yaml
 
 ## 🎛️ Command Reference
 
-### Environment Management (`devenv`)
+### Environment Management
 ```bash
-devenv --help                     # Show help and available environments
-devenv new docker-host            # Create Docker host VM (one-time setup)
-devenv up docker-host             # Start the VM
-devenv down docker-host           # Stop the VM (save battery)
-devenv rm docker-host             # Permanently delete VM
+dev env list                      # Show help and available environments  
+dev env new docker-host           # Create Docker host VM (one-time setup)
+dev env up docker-host            # Start the VM
+dev env down docker-host          # Stop the VM (save battery)
+dev env status docker-host        # Check VM status
+dev env rm docker-host            # Permanently delete VM
 ```
 
 ### Container Development (`dev`)
@@ -528,14 +529,14 @@ The Docker host VM runs automatically but you can manage it manually:
 
 ```bash
 # Check VM status
-orb status dev-vm-docker-host
+dev env status docker-host
 
 # Connect to VM directly (advanced)
 orb -m dev-vm-docker-host
 
 # VM lifecycle
-devenv down docker-host     # Stop when not needed
-devenv up docker-host       # Restart (or let dev do it)
+dev env down docker-host    # Stop when not needed
+dev env up docker-host      # Restart (or let dev do it)
 ```
 
 -----
@@ -590,13 +591,13 @@ dev list
 **"Docker host VM not running"**
 ```bash
 # Start it manually
-devenv up docker-host
+dev env up docker-host
 
 # Or let dev start it automatically
 dev
 
 # Check VM status
-devenv status
+dev env status docker-host
 ```
 
 **"Port forwarding not working"**
@@ -659,9 +660,9 @@ orb delete dev-vm-old-project
 
 ### Getting Help
 ```bash
-devenv --help           # Environment management help
+dev env list            # Environment management help
 dev --help              # Container development help
-dev help <command>      # Command-specific help (new, config, templates)
+dev help <command>      # Command-specific help (new, config, templates, env)
 dev troubleshoot        # Comprehensive troubleshooting guide
 ./install.sh --help     # Installation and uninstall options
 ```
