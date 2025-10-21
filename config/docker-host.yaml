@@ -1,0 +1,16 @@
+#cloud-config
+# This is a cloud-init file for setting up the Docker host.
+
+# First, install the Docker package.
+package_update: true
+packages:
+  - docker.io
+
+# Now, configure users. This is the robust way to handle permissions.
+users:
+  # The 'default' user is a special name that refers to the main user
+  # created by the system (in this case, your user, 'miso_lith').
+  - name: default
+    # Add the 'docker' group to this user's existing groups.
+    groups: [docker]
+    append: true
