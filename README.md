@@ -1,8 +1,8 @@
 -----
 
-# Isolated Development Environment Tools
+# Isolated Development Environment Tools for Mac using OrbStack
 
-A comprehensive toolkit for creating secure, isolated development environments using OrbStack VMs and Docker containers. This system protects your host machine by running all development work in sandboxed environments while maintaining seamless integration with your local development workflow.
+A toolkit for creating secure, isolated development environments using OrbStack VMs and Docker containers. This system protects your host machine by running all development work in sandboxed environments while maintaining seamless integration with your local development workflow.
 
 ## 🚀 Features
 
@@ -55,6 +55,67 @@ env-ctl create docker-host
 ```
 
 This creates a lightweight Linux VM running Docker. After setup, you'll be connected to it. Type `exit` to return to your Mac - the VM continues running in the background.
+
+### 🌐 Multiple Environment Support
+
+While most users only need the `docker-host` environment, the system supports multiple environments for advanced use cases:
+
+- **🔧 Tool specialization**: Different VMs with specialized tool sets (Kubernetes, databases, etc.)
+- **📊 Resource isolation**: Separate VMs for heavy vs. light workloads  
+- **🔒 Security levels**: Isolated environments with different network access policies
+- **👥 Team workflows**: Project-specific development environments
+- **🧪 Testing environments**: Different OS versions or configurations
+
+#### Creating Custom Environments
+
+1. **Create a cloud-init configuration file:**
+```bash
+# Example: Create a Kubernetes development environment
+cat > ~/.dev-envs/setups/k8s-dev.yaml << 'EOF'
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - curl
+
+users:
+  - name: default
+    groups: [docker]
+    append: true
+
+runcmd:
+  # Install kubectl
+  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+  # Install kind
+  - curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+  - chmod +x ./kind && mv ./kind /usr/local/bin/kind
+EOF
+```
+
+2. **Create and use the environment:**
+```bash
+# Create the custom environment
+env-ctl create k8s-dev
+
+# The VM will be named 'dev-vm-k8s-dev'
+# You can start/stop it like any other environment
+env-ctl stop k8s-dev
+env-ctl start k8s-dev
+```
+
+3. **Use with dev-container:**
+```bash
+# Update dev-container to use the custom environment
+# Edit the VM_NAME in dev-container script or use environment variable
+VM_NAME="dev-vm-k8s-dev" dev-container
+```
+
+**💡 Pro Tips:**
+- Custom environments inherit the same naming pattern: `dev-vm-<environment-name>`
+- Cloud-init files support packages, users, files, and arbitrary commands
+- Each environment is completely isolated with its own resources
+- You can have multiple environments running simultaneously
 
 -----
 
@@ -215,6 +276,30 @@ dev-container -t my-custom-tag -n my-container
 
 # Different Dockerfile locations
 dev-container -f docker/Dockerfile.production
+
+# Using custom environments (instead of default docker-host)
+VM_NAME="dev-vm-k8s-dev" dev-container
+VM_NAME="dev-vm-ml-gpu" dev-container build
+
+# Combining custom environment with other options
+VM_NAME="dev-vm-secure" dev-container -f Dockerfile.secure -t secure-app
+```
+
+### Environment Configuration
+To permanently use a custom environment, you can modify the `dev-container` script or set an environment variable:
+
+```bash
+# Option 1: Set environment variable for session
+export VM_NAME="dev-vm-k8s-dev"
+dev-container
+
+# Option 2: Create environment-specific wrapper script
+cat > k8s-container << 'EOF'
+#!/bin/bash
+VM_NAME="dev-vm-k8s-dev" dev-container "$@"
+EOF
+chmod +x k8s-container
+./k8s-container --create golang
 ```
 
 -----
