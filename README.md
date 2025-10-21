@@ -223,6 +223,11 @@ dev new node      # Multiple versions available - will prompt
 dev new python-3.13
 dev new node-22
 dev new golang-1.22
+
+# Create with project scaffolding (starter files)
+dev new python-3.13 --init    # Creates requirements.txt, main.py, .gitignore
+dev new node-22 --init        # Creates package.json, index.js, .gitignore
+dev new golang-1.22 --init    # Creates go.mod, main.go, .gitignore
 ```
 
 ### 📋 **Template Catalog**
@@ -249,6 +254,19 @@ All templates include:
 - 🎨 **Color terminal**: Enhanced developer experience
 - 🏗️ **Build tools**: Language-specific development toolchain
 
+### 🚀 **Project Initialization**
+Add `--init` to any `dev new` command to create language-specific starter files:
+
+| Language | Scaffolding Includes |
+|----------|---------------------|
+| **Python** | `requirements.txt`, `main.py`, `.gitignore` |
+| **Node.js** | `package.json`, `index.js`, `.gitignore` |
+| **Go** | `go.mod`, `main.go`, `.gitignore` |
+| **Java** | `pom.xml`, `src/main/java/.../Main.java`, `.gitignore` |
+| **Rust** | `Cargo.toml`, `src/main.rs`, `.gitignore` |
+| **PHP** | `composer.json`, `index.php`, `src/`, `.gitignore` |
+| **Bash** | `script.sh`, `README.md`, `.gitignore` |
+
 -----
 
 ## 💻 Development Workflow
@@ -257,7 +275,7 @@ All templates include:
 ```bash
 # New project with template
 mkdir my-app && cd my-app
-dev new python
+dev new python-3.13 --init  # Creates Dockerfile + project scaffolding
 
 # Existing project
 cd existing-project
