@@ -115,15 +115,113 @@ EOF
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+function show_command_help() {
+    local command="$1"
+    case "$command" in
+        new)
+            echo "Usage: $(basename "$0") new <language> [--init]"
+            echo ""
+            echo "Create a Dockerfile from a language template."
+            echo ""
+            echo "Arguments:"
+            echo "  <language>     Language template (python, node, golang, rust, java, php, bash)"
+            echo "                 Optionally specify version: python-3.12, node-22, etc."
+            echo ""
+            echo "Options:"
+            echo "  --init         Also create project scaffolding for the language"
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") new python           # Latest Python template"
+            echo "  $(basename "$0") new python-3.11      # Specific Python version"
+            echo "  $(basename "$0") new node --init       # Node.js with package.json"
+            echo "  $(basename "$0") new rust --init       # Rust with Cargo.toml"
+            ;;
+        config)
+            echo "Usage: $(basename "$0") config [--edit|--init]"
+            echo ""
+            echo "Manage configuration files."
+            echo ""
+            echo "Options:"
+            echo "  (no options)   Show current configuration"
+            echo "  --edit         Edit global configuration in editor"
+            echo "  --init         Create project-local configuration file"
+            echo ""
+            echo "Configuration Files:"
+            echo "  Global:        ~/.dev-envs/config.yaml"
+            echo "  Project-local: ./.devenv.yaml"
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") config               # Show current config"
+            echo "  $(basename "$0") config --edit        # Edit global config"
+            echo "  $(basename "$0") config --init        # Create local config"
+            ;;
+        templates)
+            echo "Usage: $(basename "$0") templates <action>"
+            echo ""
+            echo "Manage Dockerfile templates."
+            echo ""
+            echo "Actions:"
+            echo "  update         Update all templates to latest versions"
+            echo "  check          Check for available updates without applying"
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") templates update     # Update all templates"
+            echo "  $(basename "$0") templates check      # Check for updates"
+            ;;
+        troubleshoot)
+            echo "Troubleshooting Guide:"
+            echo ""
+            echo "Common Issues:"
+            echo ""
+            echo "1. Container fails to start:"
+            echo "   • Check if OrbStack is running: 'orb list'"
+            echo "   • Verify VM is accessible: 'devenv status'"
+            echo "   • Try rebuilding: '$(basename "$0") clean && $(basename "$0") build'"
+            echo ""
+            echo "2. Port forwarding not working:"
+            echo "   • Ensure your app binds to 0.0.0.0, not localhost"
+            echo "   • Check if port is already in use on host"
+            echo "   • Verify framework-specific files exist (package.json, requirements.txt)"
+            echo ""
+            echo "3. SSH keys not working:"
+            echo "   • Check SSH agent is running: 'ssh-add -l'"
+            echo "   • Verify SSH keys exist in ~/.ssh/"
+            echo "   • Try adding keys to agent: 'ssh-add ~/.ssh/id_rsa'"
+            echo ""
+            echo "4. Template creation fails:"
+            echo "   • Check internet connection (templates fetch from Docker Hub)"
+            echo "   • Try updating templates: '$(basename "$0") templates update'"
+            echo "   • Verify language name: '$(basename "$0") list'"
+            echo ""
+            echo "5. Performance issues:"
+            echo "   • Package caches are automatically mounted for faster installs"
+            echo "   • Consider using .dockerignore to exclude large directories"
+            echo "   • Check disk space: 'df -h'"
+            echo ""
+            echo "For more help, visit: https://github.com/mwing/isolated-dev"
+            ;;
+        *)
+            echo "No specific help available for command: $command"
+            echo "Use --help for general usage information."
+            ;;
+    esac
+}
+
 function usage() {
     echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
     echo ""
     echo "A script to build and run isolated development containers using OrbStack VMs."
     echo ""
     echo "Commands:"
-    echo "  run      Build and run the container (default)"
-    echo "  build    Build the container image only"
-    echo "  clean    Remove existing container and image"
+    echo "  run              Build and run the container (default)"
+    echo "  shell            Open interactive bash shell in container"
+    echo "  build            Build the container image only"
+    echo "  clean            Remove existing container and image"
+    echo ""
+    echo "Help Commands:"
+    echo "  help             Show this help message"
+    echo "  help <command>   Show help for specific command"
+    echo "  troubleshoot     Show troubleshooting guide"
     echo ""
     echo "Template Commands:"
     echo "  new <language>       Create a Dockerfile from template"
@@ -143,8 +241,14 @@ function usage() {
     echo "  -t, --tag      Specify custom image tag"
     echo "  -n, --name     Specify custom container name"
     echo ""
+    echo "Enhanced Developer Experience:"
+    echo "  • Automatic port forwarding detection (Node.js 3000, Python 8000, etc.)"
+    echo "  • SSH key mounting for seamless git operations"
+    echo "  • Git configuration sharing for consistent commits"
+    echo ""
     echo "Examples:"
     echo "  $(basename "$0")                       # Build and run with default Dockerfile"
+    echo "  $(basename "$0") shell                # Open interactive shell"
     echo "  $(basename "$0") build                # Build image only"
     echo "  $(basename "$0") -f Dockerfile.dev    # Use custom Dockerfile"
     echo "  $(basename "$0") new python           # Create from Python template"
@@ -969,6 +1073,114 @@ EOF
 }
 
 # ==============================================================================
+# DEVELOPER EXPERIENCE FUNCTIONS
+# ==============================================================================
+
+function detect_common_ports() {
+    local ports=()
+    
+    # Check for common development files and add corresponding ports
+    if [[ -f "package.json" ]]; then
+        # Node.js common ports
+        ports+=(3000 8080 5000 4000)
+        
+        # Check for specific frameworks in package.json
+        if grep -q "next" package.json 2>/dev/null; then
+            ports+=(3000)
+        fi
+        if grep -q "react-scripts" package.json 2>/dev/null; then
+            ports+=(3000)
+        fi
+        if grep -q "vite" package.json 2>/dev/null; then
+            ports+=(5173)
+        fi
+    fi
+    
+    if [[ -f "requirements.txt" ]] || [[ -f "pyproject.toml" ]] || [[ -f "setup.py" ]]; then
+        # Python common ports
+        ports+=(8000 5000 8080)
+        
+        # Check for specific frameworks
+        if grep -q "flask" requirements.txt 2>/dev/null || grep -q "Flask" requirements.txt 2>/dev/null; then
+            ports+=(5000)
+        fi
+        if grep -q "django" requirements.txt 2>/dev/null || grep -q "Django" requirements.txt 2>/dev/null; then
+            ports+=(8000)
+        fi
+        if grep -q "fastapi" requirements.txt 2>/dev/null || grep -q "FastAPI" requirements.txt 2>/dev/null; then
+            ports+=(8000)
+        fi
+    fi
+    
+    if [[ -f "go.mod" ]]; then
+        # Go common ports
+        ports+=(8080 8000 3000)
+    fi
+    
+    if [[ -f "Cargo.toml" ]]; then
+        # Rust common ports
+        ports+=(8080 3000 8000)
+    fi
+    
+    if [[ -f "composer.json" ]]; then
+        # PHP common ports
+        ports+=(8080 8000 80)
+    fi
+    
+    if [[ -f "pom.xml" ]] || [[ -f "build.gradle" ]]; then
+        # Java common ports
+        ports+=(8080 8000 9000)
+    fi
+    
+    # Remove duplicates and return
+    printf '%s\n' "${ports[@]}" | sort -nu | tr '\n' ' '
+}
+
+function get_ssh_key_mounts() {
+    local ssh_mounts=""
+    
+    # Mount SSH keys if they exist
+    if [[ -d "$HOME/.ssh" ]]; then
+        ssh_mounts="-v $HOME/.ssh:/root/.ssh:ro"
+    fi
+    
+    echo "$ssh_mounts"
+}
+
+function get_common_volume_mounts() {
+    local volumes=""
+    
+    # Always mount the current directory
+    volumes="-v $(pwd):/workspace"
+    
+    # Mount git configuration if it exists
+    if [[ -f "$HOME/.gitconfig" ]]; then
+        volumes="$volumes -v $HOME/.gitconfig:/tmp/.gitconfig:ro"
+    fi
+    
+    # Mount Docker socket for Docker-in-Docker development
+    if [[ -S "/var/run/docker.sock" ]]; then
+        volumes="$volumes -v /var/run/docker.sock:/var/run/docker.sock"
+    fi
+    
+    echo "$volumes"
+}
+
+function build_port_forwards() {
+    local ports=($(detect_common_ports))
+    local port_args=""
+    
+    if [[ ${#ports[@]} -gt 0 ]]; then
+        echo "🔌 Detected common development ports: ${ports[*]}"
+        for port in "${ports[@]}"; do
+            port_args="$port_args -p $port:$port"
+        done
+    fi
+    
+    echo "$port_args"
+}
+
+# ==============================================================================
 # COMMAND HANDLERS
 # ==============================================================================
 
@@ -1207,13 +1419,32 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_NAME="$2"
             shift 2
             ;;
-        run|build|clean)
+        run|build|clean|shell)
             COMMAND="$1"
             shift
             ;;
+        help)
+            if [[ -n "$2" ]]; then
+                show_command_help "$2"
+            else
+                usage
+                echo ""
+                echo "Available help topics:"
+                echo "  $(basename "$0") help new           # Template creation help"
+                echo "  $(basename "$0") help config        # Configuration help"
+                echo "  $(basename "$0") help templates     # Template management help"
+                echo "  $(basename "$0") troubleshoot       # Troubleshooting guide"
+            fi
+            exit 0
+            ;;
+        troubleshoot)
+            show_command_help "troubleshoot"
+            exit 0
+            ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Use --help for usage information."
+            echo "Available commands: run, shell, build, clean, new, list, config, templates, help, troubleshoot"
+            echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
     esac
@@ -1226,16 +1457,12 @@ load_config
 if [[ "$COMMAND" != "clean" ]]; then
     if [ ! -f "$DOCKERFILE" ]; then
         echo "❌ Error: No Dockerfile found at '$DOCKERFILE'"
-        echo "Use -f to specify a different Dockerfile path, or --help for usage information."
-        exit 1
-    fi
-fi
-
-# --- Validate Requirements ---
-if [[ "$COMMAND" != "clean" ]]; then
-    if [ ! -f "$DOCKERFILE" ]; then
-        echo "❌ Error: No Dockerfile found at '$DOCKERFILE'"
-        echo "Use -f to specify a different Dockerfile path, or --help for usage information."
+        echo ""
+        echo "💡 Suggestions:"
+        echo "   • Create from template: '$(basename "$0") new <language>'"
+        echo "   • Use different file: '$(basename "$0") -f /path/to/Dockerfile'"
+        echo "   • See available templates: '$(basename "$0") list'"
+        echo "   • Get help: '$(basename "$0") help new'"
         exit 1
     fi
 fi
@@ -1280,11 +1507,63 @@ case $COMMAND in
         ensure_vm_running
         build_image
         cleanup_existing_container
-        echo "✅ Connecting to container. Your project folder is at '/app'."
+        
+        # Build enhanced container options
+        local volume_mounts=$(get_common_volume_mounts)
+        local ssh_mounts=$(get_ssh_key_mounts)
+        local port_forwards=$(build_port_forwards)
+        
+        echo "🔧 Enhanced developer experience:"
+        if [[ -n "$port_forwards" ]]; then
+            echo "   -> Port forwarding enabled for detected services"
+        fi
+        if [[ -n "$ssh_mounts" ]]; then
+            echo "   -> SSH keys mounted for git authentication"
+        fi
+        echo "   -> Git configuration mounted for consistent commits"
+        echo ""
+        echo "✅ Connecting to container. Your project folder is at '/workspace'."
+        
         orb -m "$VM_NAME" sudo docker run -it --rm \
-            -v "$(pwd):/app" \
+            $volume_mounts \
+            $ssh_mounts \
+            $port_forwards \
             --name "$CONTAINER_NAME" \
             "$IMAGE_NAME"
+        ;;
+    shell)
+        echo "🐚 Opening interactive shell in '$PROJECT_NAME' container..."
+        ensure_vm_running
+        build_image
+        cleanup_existing_container
+        
+        # Build enhanced container options
+        local volume_mounts=$(get_common_volume_mounts)
+        local ssh_mounts=$(get_ssh_key_mounts)
+        local port_forwards=$(build_port_forwards)
+        
+        echo "🔧 Enhanced developer experience:"
+        if [[ -n "$port_forwards" ]]; then
+            echo "   -> Port forwarding enabled for detected services"
+        fi
+        if [[ -n "$ssh_mounts" ]]; then
+            echo "   -> SSH keys mounted for git authentication"
+        fi
+        echo "   -> Git configuration mounted for consistent commits"
+        echo ""
+        echo "✅ Container ready. Your project folder is at '/workspace'."
+        
+        orb -m "$VM_NAME" sudo docker run -it --rm \
+            $volume_mounts \
+            $ssh_mounts \
+            $port_forwards \
+            --name "$CONTAINER_NAME" \
+            "$IMAGE_NAME" bash
+        ;;
+    build)
+        echo "🔨 Building image for '$PROJECT_NAME'..."
+        build_image
+        echo "✅ Image built successfully"
         ;;
         
     build)

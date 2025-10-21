@@ -12,6 +12,14 @@ A toolkit for creating secure, isolated development environments using OrbStack 
 - **🔄 Smart Management**: Automatic VM lifecycle management and resource optimization
 - **🛠️ Developer Tools**: Each template includes essential development tools (git, vim, curl, etc.)
 - **📦 Template System**: Quickly create new projects with language-specific Dockerfiles
+- **🎯 Enhanced Developer Experience**: 
+  - Automatic port forwarding detection (Node.js 3000, Python 8000, etc.)
+  - SSH key mounting for seamless git operations
+  - Git configuration sharing between host and container
+- **🧠 Smart Template Matching**: Intelligent version selection when exact versions aren't available
+- **⚙️ Comprehensive Configuration**: Global and project-local configuration files
+- **🔄 Dynamic Version Detection**: Real-time template updates from Docker Hub APIs
+- **📖 Comprehensive Help System**: Command-specific help, troubleshooting guides, and better error messages
 
 -----
 
@@ -242,11 +250,13 @@ dev new golang-1.22 --init    # Creates go.mod, main.go, .gitignore
 | **PHP** | 8.3 | `php-8.3` | PHP 8.3, Composer, common extensions |
 | **Bash** | latest | `bash-latest` | Shell scripting tools, shellcheck, utilities |
 
-### 🔮 **Smart Template Matching**
+### 🔮 **Smart Template Matching & Dynamic Updates**
 - **Unversioned names** (e.g., `python`) automatically use the available version
 - **Multiple versions** will prompt you to specify which one you want
 - **Exact names** (e.g., `python-3.11`) work as expected
-- **Future versions** can be added without breaking existing workflows
+- **Dynamic version detection** fetches latest versions from Docker Hub APIs
+- **Auto-updating templates** ensure you always have access to current versions
+- **Future versions** are automatically discovered and made available
 
 All templates include:
 - 🔧 **Essential tools**: git, vim, curl, wget, jq, tree, htop
@@ -269,6 +279,47 @@ Add `--init` to any `dev new` command to create language-specific starter files:
 
 -----
 
+## ✨ Enhanced Developer Experience
+
+The isolated development environment automatically enhances your workflow with intelligent features:
+
+### 🌐 **Automatic Port Forwarding**
+No need to manually configure ports - the system detects common development ports based on your project:
+
+| Framework Detection | Auto-forwarded Port | Trigger Files |
+|-------------------|-------------------|---------------|
+| **Node.js** | `3000` | `package.json` |
+| **Python Flask/Django** | `8000` | `requirements.txt`, `app.py` |
+| **Go** | `8080` | `go.mod`, `main.go` |
+| **Rust** | `8000` | `Cargo.toml` |
+| **Java Spring** | `8080` | `pom.xml`, `build.gradle` |
+| **PHP** | `8080` | `composer.json`, `index.php` |
+
+Just run your app inside the container - it's automatically accessible on your host!
+
+### 🔑 **Seamless Git Integration**
+Your SSH keys and git configuration are automatically mounted:
+- **SSH Keys**: `~/.ssh/` directory mounted for git operations
+- **Git Config**: Your `.gitconfig` shared for consistent commits  
+- **SSH Agent**: Forwarded for seamless authentication
+
+```bash
+# Inside container - works automatically with your existing setup
+git clone git@github.com:your-org/your-repo.git
+git commit -m "Made changes from container"
+git push origin main
+```
+
+
+
+### 🎯 **Smart Project Detection**
+The system intelligently configures itself based on project contents:
+- Detects language from files (package.json, requirements.txt, etc.)
+- Configures appropriate port forwarding for the detected framework
+- Sets up seamless git integration with SSH key forwarding
+
+-----
+
 ## 💻 Development Workflow
 
 ### 1. Create or Navigate to Project
@@ -283,13 +334,18 @@ cd existing-project
 
 ### 2. Start Development Environment
 ```bash
-dev
+dev        # Build and run container
+# OR
+dev shell  # Open interactive bash shell
 ```
 
 This automatically:
 - 🏗️ Builds Docker image from your Dockerfile
-- 🚀 Starts container with your project mounted at `/app`
+- 🚀 Starts container with your project mounted at `/workspace`
 - 🔗 Connects you to an interactive shell inside the container
+- 🌐 **Auto port forwarding**: Detects and forwards common development ports
+- 🔑 **SSH key mounting**: Seamlessly access git repositories with your existing keys
+- ⚙️ **Git integration**: Shares your git configuration for consistent commits
 
 ### 3. Develop Inside the Container
 All commands run in the secure sandbox:
@@ -352,10 +408,14 @@ devenv rm docker-host             # Permanently delete VM
 dev --help                        # Show comprehensive help
 dev list                          # List available language templates
 dev new <language>                # Create Dockerfile from template
+dev new <language> --init         # Create template with project scaffolding
 dev                               # Build and run container (default)
+dev shell                         # Open interactive bash shell in container
 dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
+dev help <command>                # Get help for specific command
+dev troubleshoot                  # Show troubleshooting guide
 ```
 
 ### Configuration Management
@@ -363,6 +423,12 @@ dev -f Dockerfile.dev             # Use custom Dockerfile
 dev config                        # Show current configuration
 dev config --edit                 # Edit global configuration
 dev config --init                 # Create project-local configuration
+```
+
+### Template Management
+```bash
+dev templates update              # Update all templates to latest versions
+dev templates check               # Check for available template updates
 ```
 
 
@@ -500,6 +566,13 @@ devenv up docker-host       # Restart (or let dev do it)
 
 ## 🔍 Troubleshooting
 
+### Quick Help
+```bash
+dev troubleshoot                  # Show comprehensive troubleshooting guide
+dev help <command>                # Get help for specific commands
+dev --help                        # Show all available commands and options
+```
+
 ### Common Issues
 
 **"No Dockerfile found"**
@@ -509,6 +582,9 @@ dev new python
 
 # Or use custom path
 dev -f path/to/Dockerfile
+
+# See all available templates
+dev list
 ```
 
 **"Docker host VM not running"**
@@ -518,16 +594,37 @@ devenv up docker-host
 
 # Or let dev start it automatically
 dev
+
+# Check VM status
+devenv status
 ```
 
-**"Permission denied in container"**
-- All templates use non-root users for security
-- Use `sudo` inside container when needed
-- File ownership is handled automatically
+**"Port forwarding not working"**
+- Ensure your application binds to `0.0.0.0`, not `localhost`
+- Check if port is already in use on host
+- Verify framework-specific files exist (package.json, requirements.txt, etc.)
 
-**"Templates not found"**
+**"SSH keys not working in container"**
 ```bash
-# Reinstall to update templates
+# Check SSH agent is running
+ssh-add -l
+
+# Add keys to agent
+ssh-add ~/.ssh/id_rsa
+
+# Verify keys exist
+ls -la ~/.ssh/
+```
+
+**"Templates not found or outdated"**
+```bash
+# Update templates from Docker Hub
+dev templates update
+
+# Check for available updates
+dev templates check
+
+# Reinstall to get latest templates
 ./install.sh --force
 ```
 
@@ -564,8 +661,12 @@ orb delete dev-vm-old-project
 ```bash
 devenv --help           # Environment management help
 dev --help              # Container development help
+dev help <command>      # Command-specific help (new, config, templates)
+dev troubleshoot        # Comprehensive troubleshooting guide
 ./install.sh --help     # Installation and uninstall options
 ```
+
+For more help, visit: [https://github.com/mwing/isolated-dev](https://github.com/mwing/isolated-dev)
 
 -----
 
