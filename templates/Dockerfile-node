@@ -1,0 +1,33 @@
+# Start with a specific version of Node.js
+FROM node:20
+
+# Add color support to the terminal
+ENV TERM=xterm-256color
+
+# Install common development tools
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    wget \
+    jq \
+    tree \
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user for development
+RUN useradd -m -s /bin/bash nodedev && \
+    usermod -aG sudo nodedev && \
+    echo 'nodedev ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Set the working directory
+WORKDIR /app
+
+# Change ownership of the workspace to the nodedev user
+RUN chown -R nodedev:nodedev /app
+
+# Switch to the nodedev user
+USER nodedev
+
+# Set the default command to an interactive bash shell
+CMD [ "bash" ]

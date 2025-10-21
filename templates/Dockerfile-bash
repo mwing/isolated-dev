@@ -1,0 +1,75 @@
+# Use Ubuntu as the base image for shell scripting
+FROM ubuntu:22.04
+
+# Add color support to the terminal
+ENV TERM=xterm-256color
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install shell scripting tools and utilities
+RUN apt-get update && apt-get install -y \
+    bash \
+    zsh \
+    fish \
+    git \
+    vim \
+    nano \
+    curl \
+    wget \
+    jq \
+    yq \
+    tree \
+    htop \
+    grep \
+    sed \
+    awk \
+    cut \
+    sort \
+    uniq \
+    bc \
+    zip \
+    unzip \
+    tar \
+    gzip \
+    bzip2 \
+    xz-utils \
+    file \
+    which \
+    man \
+    man-db \
+    manpages \
+    shellcheck \
+    bats \
+    make \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install additional useful tools
+RUN curl -fsSL https://github.com/sharkdp/fd/releases/download/v8.7.0/fd_8.7.0_amd64.deb -o fd.deb && \
+    dpkg -i fd.deb && rm fd.deb && \
+    curl -fsSL https://github.com/sharkdp/bat/releases/download/v0.24.0/bat_0.24.0_amd64.deb -o bat.deb && \
+    dpkg -i bat.deb && rm bat.deb
+
+# Create a non-root user for development
+RUN useradd -m -s /bin/bash scripter && \
+    usermod -aG sudo scripter && \
+    echo 'scripter ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Set the working directory
+WORKDIR /app
+
+# Change ownership of the workspace to the scripter user
+RUN chown -R scripter:scripter /app
+
+# Switch to the scripter user
+USER scripter
+
+# Set up a nice shell environment
+RUN echo 'alias ll="ls -la"' >> ~/.bashrc && \
+    echo 'alias la="ls -la"' >> ~/.bashrc && \
+    echo 'alias grep="grep --color=auto"' >> ~/.bashrc && \
+    echo 'export PS1="\[\033[01;32m\]\u@\h\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> ~/.bashrc
+
+# Set the default command to an interactive bash shell
+CMD [ "bash" ]

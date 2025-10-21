@@ -1,0 +1,44 @@
+# Use the official Rust image as the base
+FROM rust:1.75
+
+# Add color support to the terminal
+ENV TERM=xterm-256color
+
+# Install common development tools
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    wget \
+    jq \
+    tree \
+    htop \
+    pkg-config \
+    libssl-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user for development
+RUN useradd -m -s /bin/bash rustacean && \
+    usermod -aG sudo rustacean && \
+    echo 'rustacean ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Set the working directory
+WORKDIR /app
+
+# Change ownership of the workspace to the rustacean user
+RUN chown -R rustacean:rustacean /app
+
+# Switch to the rustacean user
+USER rustacean
+
+# Install useful Rust tools and components
+RUN rustup component add rustfmt clippy rust-analyzer && \
+    cargo install cargo-watch cargo-edit cargo-tree cargo-outdated
+
+# Set up cargo environment
+ENV CARGO_HOME=/home/rustacean/.cargo
+ENV PATH="$CARGO_HOME/bin:$PATH"
+
+# Set the default command to an interactive bash shell
+CMD [ "bash" ]

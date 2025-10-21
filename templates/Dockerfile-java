@@ -1,0 +1,50 @@
+# Use the official OpenJDK image as the base
+FROM openjdk:21-jdk
+
+# Add color support to the terminal
+ENV TERM=xterm-256color
+
+# Install common development tools
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    wget \
+    jq \
+    tree \
+    htop \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Maven
+RUN curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.5/binaries/apache-maven-3.9.5-bin.tar.gz \
+    | tar -xzC /opt && \
+    ln -s /opt/apache-maven-3.9.5 /opt/maven
+
+# Install Gradle
+RUN curl -fsSL https://services.gradle.org/distributions/gradle-8.4-bin.zip -o gradle.zip && \
+    unzip gradle.zip -d /opt && \
+    ln -s /opt/gradle-8.4 /opt/gradle && \
+    rm gradle.zip
+
+# Set environment variables
+ENV MAVEN_HOME=/opt/maven
+ENV GRADLE_HOME=/opt/gradle
+ENV PATH="$MAVEN_HOME/bin:$GRADLE_HOME/bin:$PATH"
+
+# Create a non-root user for development
+RUN useradd -m -s /bin/bash javadev && \
+    usermod -aG sudo javadev && \
+    echo 'javadev ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Set the working directory
+WORKDIR /app
+
+# Change ownership of the workspace to the javadev user
+RUN chown -R javadev:javadev /app
+
+# Switch to the javadev user
+USER javadev
+
+# Set the default command to an interactive bash shell
+CMD [ "bash" ]

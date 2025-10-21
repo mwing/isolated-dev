@@ -1,0 +1,227 @@
+#!/bin/bash
+set -e
+
+# --- Configuration ---
+VM_NAME="dev-vm-docker-host"
+TEMPLATES_DIR="$HOME/.dev-envs/templates"
+# --- End Configuration ---
+
+# --- Helper Functions ---
+function usage() {
+    echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
+    echo ""
+    echo "A script to build and run isolated development containers using OrbStack VMs."
+    echo ""
+    echo "Commands:"
+    echo "  run      Build and run the container (default)"
+    echo "  build    Build the container image only"
+    echo "  clean    Remove existing container and image"
+    echo ""
+    echo "Template Commands:"
+    echo "  --create <language>    Create a Dockerfile from template"
+    echo "  --list-templates       List available language templates"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help     Show this help message"
+    echo "  -f, --file     Specify Dockerfile path (default: ./Dockerfile)"
+    echo "  -t, --tag      Specify custom image tag"
+    echo "  -n, --name     Specify custom container name"
+    echo ""
+    echo "Examples:"
+    echo "  $(basename "$0")                    # Build and run with default Dockerfile"
+    echo "  $(basename "$0") build             # Build image only"
+    echo "  $(basename "$0") -f Dockerfile.dev # Use custom Dockerfile"
+    echo "  $(basename "$0") --create python   # Create Dockerfile from Python template"
+    echo "  $(basename "$0") --list-templates  # Show available templates"
+    echo ""
+    echo "Requirements:"
+    echo "  - Dockerfile in current directory (or specified with -f)"
+    echo "  - OrbStack VM '$VM_NAME' available"
+    exit 0
+}
+
+function list_templates() {
+    echo "Available Dockerfile templates:"
+    if [[ -d "$TEMPLATES_DIR" ]]; then
+        local templates_found=false
+        # List all Dockerfile templates, exclude backup files, extract language names, sort uniquely
+        find "$TEMPLATES_DIR" -name "Dockerfile-*" -type f | \
+            grep -v '\.backup\.' | \
+            sed 's|.*/Dockerfile-||' | \
+            sort -u | \
+            while read -r lang; do
+                echo "  $lang"
+                templates_found=true
+            done
+        
+        # Check if we found any templates (need to check differently since we're in a pipeline)
+        local template_count=$(find "$TEMPLATES_DIR" -name "Dockerfile-*" -type f | grep -v '\.backup\.' | wc -l)
+        if [[ $template_count -eq 0 ]]; then
+            echo "  (No templates found - run installer first)"
+        fi
+    else
+        echo "  (Templates directory not found - run installer first)"
+    fi
+    exit 0
+}
+
+function create_from_template() {
+    local language="$1"
+    local template_file="$TEMPLATES_DIR/Dockerfile-$language"
+    local target_file="./Dockerfile"
+    
+    if [[ ! -d "$TEMPLATES_DIR" ]]; then
+        echo "❌ Error: Templates directory not found at $TEMPLATES_DIR"
+        echo "Please run the installer first."
+        exit 1
+    fi
+    
+    if [[ ! -f "$template_file" ]]; then
+        echo "❌ Error: Template for '$language' not found."
+        echo "Available templates:"
+        list_templates
+        exit 1
+    fi
+    
+    if [[ -f "$target_file" ]]; then
+        echo "⚠️  Warning: Dockerfile already exists in current directory."
+        echo -n "Do you want to overwrite it? (y/N): "
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            echo "Operation cancelled."
+            exit 0
+        fi
+    fi
+    
+    cp "$template_file" "$target_file" || {
+        echo "❌ Error: Failed to copy template"
+        exit 1
+    }
+    
+    echo "✅ Created Dockerfile from $language template"
+    echo "You can now run 'dev-container' to build and run your container."
+    exit 0
+}
+
+# --- Parse Arguments ---
+DOCKERFILE="Dockerfile"
+COMMAND="run"
+CUSTOM_TAG=""
+CUSTOM_NAME=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+        --list-templates)
+            list_templates
+            ;;
+        --create)
+            if [[ -z "$2" ]]; then
+                echo "❌ Error: --create requires a language argument"
+                echo "Use --list-templates to see available options."
+                exit 1
+            fi
+            create_from_template "$2"
+            ;;
+        -f|--file)
+            DOCKERFILE="$2"
+            shift 2
+            ;;
+        -t|--tag)
+            CUSTOM_TAG="$2"
+            shift 2
+            ;;
+        -n|--name)
+            CUSTOM_NAME="$2"
+            shift 2
+            ;;
+        run|build|clean)
+            COMMAND="$1"
+            shift
+            ;;
+        *)
+            echo "❌ Error: Unknown option '$1'"
+            echo "Use --help for usage information."
+            exit 1
+            ;;
+    esac
+done
+
+# --- Validate Requirements ---
+if [[ "$COMMAND" != "clean" ]]; then
+    if [ ! -f "$DOCKERFILE" ]; then
+        echo "❌ Error: No Dockerfile found at '$DOCKERFILE'"
+        echo "Use -f to specify a different Dockerfile path, or --help for usage information."
+        exit 1
+    fi
+fi
+
+# --- Validate Requirements ---
+if [[ "$COMMAND" != "clean" ]]; then
+    if [ ! -f "$DOCKERFILE" ]; then
+        echo "❌ Error: No Dockerfile found at '$DOCKERFILE'"
+        echo "Use -f to specify a different Dockerfile path, or --help for usage information."
+        exit 1
+    fi
+fi
+
+# --- Generate Names ---
+PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+IMAGE_NAME="${CUSTOM_TAG:-dev-img-${PROJECT_NAME}}"
+CONTAINER_NAME="${CUSTOM_NAME:-dev-ctn-${PROJECT_NAME}}"
+
+# --- Helper Functions for Container Operations ---
+ensure_vm_running() {
+    if ! orb status "$VM_NAME" 2>/dev/null | grep -q "running"; then
+        echo "   -> Starting Docker Host VM..."
+        orb start "$VM_NAME"
+    fi
+}
+
+build_image() {
+    echo "   -> Building Docker image '$IMAGE_NAME'..."
+    orb -m "$VM_NAME" sudo docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+}
+
+cleanup_existing_container() {
+    if orb -m "$VM_NAME" sudo docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "   -> Stopping existing container..."
+        orb -m "$VM_NAME" sudo docker stop "$CONTAINER_NAME" >/dev/null 2>&1
+        orb -m "$VM_NAME" sudo docker rm "$CONTAINER_NAME" >/dev/null 2>&1
+    fi
+}
+
+# --- Main Logic ---
+case $COMMAND in
+    run)
+        echo "🚀 Preparing isolated container for '$PROJECT_NAME'..."
+        ensure_vm_running
+        build_image
+        cleanup_existing_container
+        echo "✅ Connecting to container. Your project folder is at '/app'."
+        orb -m "$VM_NAME" sudo docker run -it --rm \
+            -v "$(pwd):/app" \
+            --name "$CONTAINER_NAME" \
+            "$IMAGE_NAME"
+        ;;
+        
+    build)
+        echo "🔨 Building container image for '$PROJECT_NAME'..."
+        ensure_vm_running
+        build_image
+        echo "✅ Image '$IMAGE_NAME' built successfully."
+        ;;
+        
+    clean)
+        echo "🧹 Cleaning up containers and images for '$PROJECT_NAME'..."
+        ensure_vm_running
+        cleanup_existing_container
+        if orb -m "$VM_NAME" sudo docker images --format '{{.Repository}}' | grep -q "^${IMAGE_NAME}$"; then
+            echo "   -> Removing image '$IMAGE_NAME'..."
+            orb -m "$VM_NAME" sudo docker rmi "$IMAGE_NAME" >/dev/null 2>&1
+        fi
+        echo "✅ Cleanup complete."
+        ;;
+esac
