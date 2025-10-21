@@ -25,10 +25,12 @@ Isolated Development Environment Installer v$VERSION
 Usage: $0 [OPTIONS]
 
 Options:
-    -h, --help     Show this help message
-    -f, --force    Force installation, overwriting existing files
-    -q, --quiet    Quiet mode, minimal output
-    --version      Show version information
+    -h, --help       Show this help message
+    -f, --force      Force installation, overwriting existing files
+    -q, --quiet      Quiet mode, minimal output
+    --version        Show version information
+    --uninstall      Remove all installed files and directories
+    --uninstall-all  Remove everything including VMs (DESTRUCTIVE)
 
 This script installs the isolated development environment tools to your system.
 EOF
@@ -37,6 +39,8 @@ EOF
 # Parse command line arguments
 FORCE=false
 QUIET=false
+UNINSTALL=false
+UNINSTALL_ALL=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -55,6 +59,14 @@ while [[ $# -gt 0 ]]; do
         --version)
             echo "Isolated Development Environment Installer v$VERSION"
             exit 0
+            ;;
+        --uninstall)
+            UNINSTALL=true
+            shift
+            ;;
+        --uninstall-all)
+            UNINSTALL_ALL=true
+            shift
             ;;
         *)
             echo -e "${RED}Error: Unknown option $1${NC}" >&2
@@ -76,6 +88,107 @@ error_exit() {
     echo -e "${RED}Error: $1${NC}" >&2
     exit 1
 }
+
+# Uninstall functions
+uninstall_files() {
+    log "${YELLOW}🗑️  Uninstalling isolated development environment...${NC}"
+    
+    # Remove scripts
+    log "   -> Removing scripts from $BIN_DIR"
+    rm -f "$BIN_DIR/env-ctl" "$BIN_DIR/dev-container"
+    
+    # Remove entire .dev-envs directory
+    if [[ -d "$HOME/.dev-envs" ]]; then
+        log "   -> Removing configuration directory ~/.dev-envs"
+        rm -rf "$HOME/.dev-envs"
+    fi
+    
+    log "${GREEN}✅ Files and directories removed successfully${NC}"
+}
+
+uninstall_with_vms() {
+    log "${RED}🔥 DESTRUCTIVE UNINSTALL: Removing everything including VMs...${NC}"
+    
+    # First remove files
+    uninstall_files
+    
+    # List and remove all dev VMs
+    log "   -> Searching for development VMs..."
+    local vms_found=false
+    
+    # Check for VMs that match our naming pattern
+    if command -v orb >/dev/null 2>&1; then
+        while IFS= read -r vm_name; do
+            if [[ "$vm_name" =~ ^dev-vm- ]]; then
+                log "   -> Found VM: $vm_name"
+                vms_found=true
+                echo -n "     Delete VM '$vm_name'? (y/N): "
+                read -r response
+                if [[ "$response" =~ ^[Yy]$ ]]; then
+                    log "     -> Deleting VM: $vm_name"
+                    orb delete "$vm_name" 2>/dev/null || log "     -> Warning: Failed to delete $vm_name"
+                else
+                    log "     -> Skipped: $vm_name"
+                fi
+            fi
+        done < <(orb list -q 2>/dev/null || echo "")
+        
+        if [[ "$vms_found" == false ]]; then
+            log "   -> No development VMs found"
+        fi
+    else
+        log "   -> OrbStack not found, skipping VM cleanup"
+    fi
+    
+    log "${GREEN}✅ Complete uninstallation finished${NC}"
+}
+
+confirm_uninstall() {
+    local uninstall_type="$1"
+    
+    echo -e "${YELLOW}⚠️  WARNING: This will remove the isolated development environment.${NC}"
+    
+    if [[ "$uninstall_type" == "all" ]]; then
+        echo -e "${RED}⚠️  DESTRUCTIVE: This will also delete all development VMs and their data!${NC}"
+        echo ""
+        echo "This will remove:"
+        echo "  - Scripts: env-ctl, dev-container"
+        echo "  - Configuration directory: ~/.dev-envs"
+        echo "  - All development VMs (dev-vm-*)"
+        echo "  - All VM data and containers"
+        echo ""
+        echo -e "${RED}This action cannot be undone!${NC}"
+    else
+        echo ""
+        echo "This will remove:"
+        echo "  - Scripts: env-ctl, dev-container"  
+        echo "  - Configuration directory: ~/.dev-envs"
+        echo "  - Templates and setup files"
+        echo ""
+        echo "VMs will be left running and can be managed manually with 'orb' commands."
+    fi
+    
+    echo ""
+    echo -n "Are you sure you want to proceed? (y/N): "
+    read -r response
+    
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        log "Uninstall cancelled."
+        exit 0
+    fi
+}
+
+# Handle uninstall modes
+if [[ "$UNINSTALL" == true ]] || [[ "$UNINSTALL_ALL" == true ]]; then
+    if [[ "$UNINSTALL_ALL" == true ]]; then
+        confirm_uninstall "all"
+        uninstall_with_vms
+    else
+        confirm_uninstall "files"
+        uninstall_files
+    fi
+    exit 0
+fi
 
 log "${BLUE}🚀 Installing isolated development environment scripts...${NC}"
 

@@ -28,11 +28,12 @@ function usage() {
     echo "  -n, --name     Specify custom container name"
     echo ""
     echo "Examples:"
-    echo "  $(basename "$0")                    # Build and run with default Dockerfile"
-    echo "  $(basename "$0") build             # Build image only"
-    echo "  $(basename "$0") -f Dockerfile.dev # Use custom Dockerfile"
-    echo "  $(basename "$0") --create python   # Create Dockerfile from Python template"
-    echo "  $(basename "$0") --list-templates  # Show available templates"
+    echo "  $(basename "$0")                       # Build and run with default Dockerfile"
+    echo "  $(basename "$0") build                # Build image only"
+    echo "  $(basename "$0") -f Dockerfile.dev    # Use custom Dockerfile"
+    echo "  $(basename "$0") --create python      # Create from latest Python template"
+    echo "  $(basename "$0") --create python-3.11 # Create from specific Python version"
+    echo "  $(basename "$0") --list-templates     # Show available templates with versions"
     echo ""
     echo "Requirements:"
     echo "  - Dockerfile in current directory (or specified with -f)"
@@ -44,19 +45,56 @@ function list_templates() {
     echo "Available Dockerfile templates:"
     if [[ -d "$TEMPLATES_DIR" ]]; then
         local templates_found=false
-        # List all Dockerfile templates, exclude backup files, extract language names, sort uniquely
-        find "$TEMPLATES_DIR" -name "Dockerfile-*" -type f | \
-            grep -v '\.backup\.' | \
-            sed 's|.*/Dockerfile-||' | \
-            sort -u | \
-            while read -r lang; do
-                echo "  $lang"
-                templates_found=true
-            done
         
-        # Check if we found any templates (need to check differently since we're in a pipeline)
-        local template_count=$(find "$TEMPLATES_DIR" -name "Dockerfile-*" -type f | grep -v '\.backup\.' | wc -l)
-        if [[ $template_count -eq 0 ]]; then
+        # Create a simple formatted list
+        printf "  %-12s %s\n" "Language" "Available Versions"
+        printf "  %-12s %s\n" "--------" "------------------"
+        
+        # Process templates by language - simplified approach
+        for lang in bash golang java node php python rust; do
+            local versions=""
+            local found_templates=false
+            
+            # Check for non-versioned template (should only be bash)
+            local non_versioned_exists=false
+            if [[ -f "$TEMPLATES_DIR/Dockerfile-$lang" ]]; then
+                versions="latest"
+                found_templates=true
+                templates_found=true
+                non_versioned_exists=true
+            fi
+            
+            # Check for versioned templates
+            local version_list=""
+            for template_path in "$TEMPLATES_DIR/Dockerfile-$lang"-*; do
+                if [[ -f "$template_path" ]] && [[ "$template_path" != *".backup."* ]]; then
+                    local template_name=$(basename "$template_path" | sed 's/Dockerfile-//')
+                    local version="${template_name#*-}"
+                    
+                    if [[ -n "$version_list" ]]; then
+                        version_list="$version_list, $version"
+                    else
+                        version_list="$version"
+                    fi
+                    found_templates=true
+                    templates_found=true
+                fi
+            done
+            
+            # Combine versions
+            if [[ "$non_versioned_exists" == true && -n "$version_list" ]]; then
+                versions="$versions, $version_list"
+            elif [[ -n "$version_list" ]]; then
+                versions="$version_list"
+            fi
+            
+            # Display if we found templates for this language
+            if [[ "$found_templates" == true ]]; then
+                printf "  %-12s %s\n" "$lang" "$versions"
+            fi
+        done
+        
+        if [[ "$templates_found" == false ]]; then
             echo "  (No templates found - run installer first)"
         fi
     else
@@ -67,7 +105,7 @@ function list_templates() {
 
 function create_from_template() {
     local language="$1"
-    local template_file="$TEMPLATES_DIR/Dockerfile-$language"
+    local template_file=""
     local target_file="./Dockerfile"
     
     if [[ ! -d "$TEMPLATES_DIR" ]]; then
@@ -76,11 +114,40 @@ function create_from_template() {
         exit 1
     fi
     
-    if [[ ! -f "$template_file" ]]; then
-        echo "❌ Error: Template for '$language' not found."
-        echo "Available templates:"
-        list_templates
-        exit 1
+    # Smart template matching logic
+    # 1. Try exact match first (e.g., "python-3.11" -> "Dockerfile-python-3.11")
+    if [[ -f "$TEMPLATES_DIR/Dockerfile-$language" ]]; then
+        template_file="$TEMPLATES_DIR/Dockerfile-$language"
+    else
+        # 2. Try to find templates that start with the language name
+        local matching_templates=($(find "$TEMPLATES_DIR" -name "Dockerfile-${language}-*" -type f | grep -v '\.backup\.'))
+        
+        if [[ ${#matching_templates[@]} -eq 1 ]]; then
+            # Found exactly one versioned template for this language
+            template_file="${matching_templates[0]}"
+            local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+            echo "📋 Using template: $template_name"
+        elif [[ ${#matching_templates[@]} -gt 1 ]]; then
+            # Multiple versions available, ask user to be specific
+            echo "❌ Error: Multiple versions available for '$language'."
+            echo "Please specify the version you want:"
+            echo ""
+            printf "  %-20s %s\n" "Template Name" "Usage"
+            printf "  %-20s %s\n" "-------------" "-----"
+            for template in "${matching_templates[@]}"; do
+                local template_name=$(basename "$template" | sed 's/Dockerfile-//')
+                printf "  %-20s %s\n" "$template_name" "dev-container --create $template_name"
+            done
+            echo ""
+            echo "Or run 'dev-container --list-templates' to see all available options."
+            exit 1
+        else
+            # No templates found for this language
+            echo "❌ Error: No template found for '$language'."
+            echo "Available templates:"
+            list_templates
+            exit 1
+        fi
     fi
     
     if [[ -f "$target_file" ]]; then
