@@ -1,15 +1,20 @@
 #!/bin/bash
 set -e
 
-# --- Configuration ---
+# ==============================================================================
+# CONFIGURATION
+# ==============================================================================
+
 DEFAULT_VM_NAME="dev-vm-docker-host"
 TEMPLATES_DIR="$HOME/.dev-envs/templates"
 CONFIG_DIR="$HOME/.dev-envs"
 GLOBAL_CONFIG="$CONFIG_DIR/config.yaml"
 PROJECT_CONFIG=".devenv.yaml"
-# --- End Configuration ---
 
-# --- Configuration Functions ---
+# ==============================================================================
+# CONFIGURATION FUNCTIONS
+# ==============================================================================
+
 function load_config() {
     # Set defaults
     VM_NAME="$DEFAULT_VM_NAME"
@@ -106,7 +111,10 @@ EOF
     fi
 }
 
-# --- Helper Functions ---
+# ==============================================================================
+# UTILITY FUNCTIONS
+# ==============================================================================
+
 function usage() {
     echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
     echo ""
@@ -122,6 +130,7 @@ function usage() {
     echo "  new <language> --init Create Dockerfile and project scaffolding"
     echo "  list                 List available language templates"
     echo "  templates update     Update templates to latest versions"
+    echo "  templates check      Check for available template updates"
     echo ""
     echo "Configuration Commands:"
     echo "  config               Show current configuration"
@@ -196,6 +205,253 @@ function list_templates() {
     fi
     exit 0
 }
+
+# ==============================================================================
+# TEMPLATE VERSION DETECTION FUNCTIONS
+# ==============================================================================
+
+function get_latest_python_version() {
+    # Fetch latest stable Python version from Docker Hub API
+    local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/python/tags/?page_size=100" 2>/dev/null | \
+        jq -r '.results[].name' 2>/dev/null | \
+        grep -E '^3\.[0-9]+$' | \
+        sort -V | tail -1 2>/dev/null)
+    echo "${latest:-3.14}"
+}
+
+function get_latest_node_version() {
+    # Fetch latest stable Node.js version from Docker Hub API
+    local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/node/tags/?page_size=100" 2>/dev/null | \
+        jq -r '.results[].name' 2>/dev/null | \
+        grep -E '^[0-9]+$' | \
+        sort -n | tail -1 2>/dev/null)
+    echo "${latest:-22}"
+}
+
+function get_latest_golang_version() {
+    # Fetch latest stable Go version from Docker Hub API
+    local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/golang/tags/?page_size=100" 2>/dev/null | \
+        jq -r '.results[].name' 2>/dev/null | \
+        grep -E '^1\.[0-9]+$' | \
+        sort -V | tail -1 2>/dev/null)
+    echo "${latest:-1.23}"
+}
+
+function get_latest_rust_version() {
+    # Fetch latest stable Rust version from Docker Hub API
+    local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/rust/tags/?page_size=100" 2>/dev/null | \
+        jq -r '.results[].name' 2>/dev/null | \
+        grep -E '^1\.[0-9]+$' | \
+        sort -V | tail -1 2>/dev/null)
+    echo "${latest:-1.82}"
+}
+
+function check_template_updates() {
+    echo "🔍 Checking for latest template versions..."
+    echo "⏳ Fetching current versions from official sources..."
+    
+    local templates_dir="$TEMPLATES_DIR"
+    local missing_templates=()
+    
+    # Fetch current latest versions dynamically
+    local python_latest="python-$(get_latest_python_version)"
+    local node_latest="node-$(get_latest_node_version)"
+    local golang_latest="golang-$(get_latest_golang_version)"
+    local rust_latest="rust-$(get_latest_rust_version)"
+    
+    # Only check for languages where we can fetch latest versions
+    local recommended=(
+        "$python_latest"
+        "$node_latest"
+        "$golang_latest"
+        "$rust_latest"
+    )
+    
+    echo "📋 Latest versions detected:"
+    for template in "${recommended[@]}"; do
+        echo "  - $template"
+    done
+    echo ""
+    
+    # Check which templates are missing
+    for template in "${recommended[@]}"; do
+        if [[ ! -f "$templates_dir/Dockerfile-$template" ]]; then
+            missing_templates+=("$template")
+        fi
+    done
+    
+    if [[ ${#missing_templates[@]} -eq 0 ]]; then
+        echo "✅ All latest template versions are available!"
+    else
+        echo "📦 Missing latest templates:"
+        for template in "${missing_templates[@]}"; do
+            echo "  - $template"
+        done
+        echo ""
+        echo "💡 Run 'dev templates update' to create missing versions."
+    fi
+}
+
+function update_templates() {
+    echo "🔄 Creating missing template versions..."
+    echo "⏳ Fetching latest versions..."
+    echo ""
+    
+    local templates_dir="$TEMPLATES_DIR"
+    local created_count=0
+    
+    # Get latest versions dynamically
+    local python_version=$(get_latest_python_version)
+    local node_version=$(get_latest_node_version)
+    local golang_version=$(get_latest_golang_version)
+    local rust_version=$(get_latest_rust_version)
+    
+    # Python latest (if missing)
+    if [[ ! -f "$templates_dir/Dockerfile-python-$python_version" ]]; then
+        echo "📦 Adding Python $python_version template..."
+        cat > "$templates_dir/Dockerfile-python-$python_version" << EOF
+FROM python:$python_version-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    git \
+    vim \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Install common Python development tools
+RUN pip install --no-cache-dir \
+    pip-tools \
+    black \
+    flake8 \
+    pytest \
+    ipython \
+    jupyter
+
+# Copy requirements if they exist
+COPY requirements*.txt* ./
+RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+# Keep container running
+CMD ["bash"]
+EOF
+        echo "   ✅ Python $python_version template created"
+        ((created_count++))
+    fi
+    
+    # Node.js latest (if missing)  
+    if [[ ! -f "$templates_dir/Dockerfile-node-$node_version" ]]; then
+        echo "📦 Adding Node.js $node_version template..."
+        cat > "$templates_dir/Dockerfile-node-$node_version" << EOF
+FROM node:$node_version-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Install common development tools
+RUN npm install -g \
+    nodemon \
+    typescript \
+    @types/node \
+    eslint \
+    prettier
+
+# Copy package files if they exist
+COPY package*.json* ./
+RUN if [ -f package.json ]; then npm install; fi
+
+# Keep container running
+CMD ["bash"]
+EOF
+        echo "   ✅ Node.js $node_version template created"
+        ((created_count++))
+    fi
+    
+    # Golang latest (if missing)
+    if [[ ! -f "$templates_dir/Dockerfile-golang-$golang_version" ]]; then
+        echo "📦 Adding Go $golang_version template..."
+        cat > "$templates_dir/Dockerfile-golang-$golang_version" << EOF
+FROM golang:$golang_version-bullseye
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Install common Go tools
+RUN go install golang.org/x/tools/cmd/goimports@latest && \
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
+    go install github.com/air-verse/air@latest
+
+# Keep container running
+CMD ["bash"]
+EOF
+        echo "   ✅ Go $golang_version template created"
+        ((created_count++))
+    fi
+    
+    # Rust latest (if missing)
+    if [[ ! -f "$templates_dir/Dockerfile-rust-$rust_version" ]]; then
+        echo "📦 Adding Rust $rust_version template..."
+        cat > "$templates_dir/Dockerfile-rust-$rust_version" << EOF
+FROM rust:$rust_version-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    git \
+    vim \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Install common Rust tools
+RUN cargo install cargo-watch cargo-edit
+
+# Copy Cargo files if they exist
+COPY Cargo*.toml* ./
+RUN if [ -f Cargo.toml ]; then cargo fetch; fi
+
+# Keep container running
+CMD ["bash"]
+EOF
+        echo "   ✅ Rust $rust_version template created"
+        ((created_count++))
+    fi
+    
+    echo ""
+    if [[ $created_count -gt 0 ]]; then
+        echo "✅ Template updates completed! Created $created_count new templates."
+    else
+        echo "✅ All templates were already up to date."
+    fi
+    echo ""
+    echo "💡 Tip: Use 'dev list' to see all available templates"
+}
+
+# ==============================================================================
+# PROJECT SCAFFOLDING FUNCTIONS
+# ==============================================================================
 
 function init_project_scaffolding() {
     local language="$1"
@@ -363,11 +619,14 @@ EOF
             # Get project name from current directory
             local project_name=$(basename "$(pwd)")
             
+            # Get latest Go version dynamically
+            local go_version=$(get_latest_golang_version)
+            
             # Create go.mod
             cat > go.mod << EOF
 module $project_name
 
-go 1.22
+go $go_version
 
 require ()
 EOF
@@ -709,6 +968,10 @@ EOF
     esac
 }
 
+# ==============================================================================
+# COMMAND HANDLERS
+# ==============================================================================
+
 function handle_config_command() {
     local subcommand="$1"
     
@@ -879,12 +1142,17 @@ function create_from_template() {
     exit 0
 }
 
-# --- Parse Arguments ---
+# ==============================================================================
+# MAIN EXECUTION
+# ==============================================================================
+
+# Initialize default values
 DOCKERFILE="Dockerfile"
 COMMAND="run"
 CUSTOM_TAG=""
 CUSTOM_NAME=""
 
+# Process command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         -h|--help)
@@ -892,6 +1160,23 @@ while [[ $# -gt 0 ]]; do
             ;;
         list)
             list_templates
+            ;;
+        templates)
+            case "$2" in
+                update)
+                    update_templates
+                    exit 0
+                    ;;
+                check)
+                    check_template_updates
+                    exit 0
+                    ;;
+                *)
+                    echo "❌ Error: Unknown templates subcommand '$2'"
+                    echo "Available: update, check"
+                    exit 1
+                    ;;
+            esac
             ;;
         config)
             handle_config_command "$2"
