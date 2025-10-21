@@ -44,6 +44,34 @@ The installer will:
 - Set up Dockerfile templates for all supported languages
 - Optionally add `~/.local/bin` to your PATH
 
+### 🗑️ Uninstallation
+
+If you need to remove the isolated development environment:
+
+```bash
+# Remove files and directories only (VMs remain)
+./install.sh --uninstall
+
+# Complete removal including all VMs (DESTRUCTIVE)
+./install.sh --uninstall-all
+```
+
+#### Uninstall Options:
+
+| Option | What Gets Removed | VMs | Data Loss Risk |
+|--------|------------------|-----|----------------|
+| `--uninstall` | ✅ Scripts<br>✅ Config files<br>✅ Templates | ❌ Preserved | 🟢 **Safe** - No project data lost |
+| `--uninstall-all` | ✅ Scripts<br>✅ Config files<br>✅ Templates<br>✅ All dev VMs | ✅ **Deleted** | 🔴 **DESTRUCTIVE** - All VM data lost |
+
+**⚠️ Important Notes:**
+- `--uninstall` is safe and preserves your VMs and project data
+- `--uninstall-all` will **permanently delete all development VMs** and their data
+- Your actual project files (on your Mac) are never affected
+- You can manually manage remaining VMs with `orb list` and `orb delete <vm-name>`
+
+**🔄 Re-installation:**
+After uninstalling, you can reinstall anytime by running `./install.sh` again.
+
 -----
 
 ## 🏗️ One-Time Setup: Creating the Host VM
@@ -125,12 +153,15 @@ VM_NAME="dev-vm-k8s-dev" dev-container
 Create a new project with a pre-configured environment:
 
 ```bash
-# List available language templates
+# List available language templates with versions
 dev-container --list-templates
 
-# Create a new project
+# Create a new project (smart matching)
 mkdir my-python-project && cd my-python-project
-dev-container --create python
+dev-container --create python      # Uses python-3.11 automatically
+
+# Or specify exact version
+dev-container --create python-3.11 # Explicit version
 
 # Start developing immediately
 dev-container
@@ -179,15 +210,37 @@ dev-container -f Dockerfile.local
 
 The following language templates are available with `dev-container --create <language>`:
 
-| Language | Template | Includes |
-|----------|----------|----------|
-| **Python** | `python` | Python 3.11, pip, development tools |
-| **Node.js** | `node` | Node.js 20 LTS, npm, development tools |
-| **Go** | `golang` | Go 1.21, go tools, gopls, delve debugger |
-| **Rust** | `rust` | Rust 1.75, cargo tools, clippy, rustfmt |
-| **Java** | `java` | OpenJDK 21, Maven 3.9.5, Gradle 8.4 |
-| **PHP** | `php` | PHP 8.3, Composer, common extensions |
-| **Bash** | `bash` | Shell scripting tools, shellcheck, utilities |
+### 🎯 **Quick Reference**
+```bash
+# List all templates with versions
+dev-container --list-templates
+
+# Create with latest/default version (smart matching)
+dev-container --create python    # Uses python-3.11
+dev-container --create node      # Uses node-20
+
+# Create with specific version
+dev-container --create python-3.11
+dev-container --create node-20
+```
+
+### 📋 **Template Catalog**
+
+| Language | Current Version | Template Name | Includes |
+|----------|----------------|---------------|-----------|
+| **Python** | 3.11 | `python-3.11` | Python 3.11, pip, development tools |
+| **Node.js** | 20 LTS | `node-20` | Node.js 20 LTS, npm, development tools |
+| **Go** | 1.21 | `golang-1.21` | Go 1.21, go tools, gopls, delve debugger |
+| **Rust** | 1.75 | `rust-1.75` | Rust 1.75, cargo tools, clippy, rustfmt |
+| **Java** | 21 LTS | `java-21` | OpenJDK 21, Maven 3.9.5, Gradle 8.4 |
+| **PHP** | 8.3 | `php-8.3` | PHP 8.3, Composer, common extensions |
+| **Bash** | latest | `bash` | Shell scripting tools, shellcheck, utilities |
+
+### 🔮 **Smart Template Matching**
+- **Unversioned names** (e.g., `python`) automatically use the available version
+- **Multiple versions** will prompt you to specify which one you want
+- **Exact names** (e.g., `python-3.11`) work as expected
+- **Future versions** can be added without breaking existing workflows
 
 All templates include:
 - 🔧 **Essential tools**: git, vim, curl, wget, jq, tree, htop
@@ -396,10 +449,40 @@ dev-container
 ./install.sh --force
 ```
 
+**"Want to completely start over"**
+```bash
+# Clean uninstall and reinstall
+./install.sh --uninstall-all  # WARNING: Deletes all VMs
+./install.sh                  # Fresh installation
+```
+
+**"Partial installation issues"**
+```bash
+# Force reinstall over existing files
+./install.sh --force
+
+# Or clean uninstall first, then reinstall
+./install.sh --uninstall
+./install.sh
+```
+
+**"Old VMs taking up space"**
+```bash
+# List all VMs
+orb list
+
+# Delete specific VM
+orb delete dev-vm-old-project
+
+# Or use uninstall-all for complete cleanup (DESTRUCTIVE)
+./install.sh --uninstall-all
+```
+
 ### Getting Help
 ```bash
 env-ctl --help          # Environment management help
 dev-container --help    # Container development help
+./install.sh --help     # Installation and uninstall options
 ```
 
 -----
