@@ -317,6 +317,23 @@ cargo run
 exit  # Leave container and return to host
 ```
 
+## ⚙️ **Optional: Customize Your Setup**
+
+### Set Default Templates
+Avoid version prompts by setting preferred defaults:
+```bash
+dev config --edit    # Opens global config
+# Set: default_template = "python-3.13"
+```
+
+### Per-Project Configuration
+Create project-specific settings:
+```bash
+cd my-special-project
+dev config --init    # Creates .devenv.yaml
+# Customize VM, templates, container names per project
+```
+
 -----
 
 ## 🎛️ Command Reference
@@ -339,6 +356,13 @@ dev                               # Build and run container (default)
 dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
+```
+
+### Configuration Management
+```bash
+dev config                        # Show current configuration
+dev config --edit                 # Edit global configuration
+dev config --init                 # Create project-local configuration
 ```
 
 
@@ -380,20 +404,57 @@ chmod +x k8s-container
 
 ## 🔧 Configuration
 
+### Configuration System
+The isolated development environment supports both global and project-local configuration:
+
+#### Global Configuration (`~/.dev-envs/config.yaml`)
+```yaml
+# Default VM name to use for containers
+vm_name = "dev-vm-docker-host"
+
+# Default template when language has multiple versions
+default_template = "python-3.13"
+
+# Automatically start VM if not running
+auto_start_vm = "true"
+
+# Prefix for container and image names
+container_prefix = "dev"
+```
+
+#### Project-Local Configuration (`.devenv.yaml`)
+Create in any project directory to override global settings:
+```bash
+dev config --init    # Creates .devenv.yaml in current directory
+```
+
+Example project config:
+```yaml
+# Project-specific overrides
+vm_name = "dev-vm-my-project"
+default_template = "node-22"
+container_prefix = "myproject"
+```
+
 ### Directory Structure
 After installation:
 ```
 ~/.dev-envs/
+├── config.yaml      # Global configuration file
 ├── setups/           # VM configuration files
 │   └── docker-host.yaml
 └── templates/        # Dockerfile templates
-    ├── Dockerfile-python
-    ├── Dockerfile-node
-    ├── Dockerfile-golang
-    ├── Dockerfile-rust
-    ├── Dockerfile-java
-    ├── Dockerfile-php
-    └── Dockerfile-bash
+    ├── Dockerfile-python-3.11
+    ├── Dockerfile-python-3.12
+    ├── Dockerfile-python-3.13
+    ├── Dockerfile-node-20
+    ├── Dockerfile-node-22
+    ├── Dockerfile-golang-1.21
+    ├── Dockerfile-golang-1.22
+    ├── Dockerfile-rust-1.75
+    ├── Dockerfile-java-21
+    ├── Dockerfile-php-8.3
+    └── Dockerfile-bash-latest
 ```
 
 ### VM Management
