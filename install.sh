@@ -95,7 +95,7 @@ uninstall_files() {
     
     # Remove scripts
     log "   -> Removing scripts from $BIN_DIR"
-    rm -f "$BIN_DIR/env-ctl" "$BIN_DIR/dev-container"
+    rm -f "$BIN_DIR/devenv" "$BIN_DIR/dev"
     
     # Remove entire .dev-envs directory
     if [[ -d "$HOME/.dev-envs" ]]; then
@@ -152,7 +152,7 @@ confirm_uninstall() {
         echo -e "${RED}⚠️  DESTRUCTIVE: This will also delete all development VMs and their data!${NC}"
         echo ""
         echo "This will remove:"
-        echo "  - Scripts: env-ctl, dev-container"
+        echo "  - Scripts: devenv, dev"
         echo "  - Configuration directory: ~/.dev-envs"
         echo "  - All development VMs (dev-vm-*)"
         echo "  - All VM data and containers"
@@ -161,7 +161,7 @@ confirm_uninstall() {
     else
         echo ""
         echo "This will remove:"
-        echo "  - Scripts: env-ctl, dev-container"  
+        echo "  - Scripts: devenv, dev"  
         echo "  - Configuration directory: ~/.dev-envs"
         echo "  - Templates and setup files"
         echo ""
@@ -194,8 +194,9 @@ log "${BLUE}🚀 Installing isolated development environment scripts...${NC}"
 
 # Validate source files exist
 log "   -> Validating source files..."
-[[ -f "$SRC_DIR/scripts/env-ctl" ]] || error_exit "Source file scripts/env-ctl not found"
-[[ -f "$SRC_DIR/scripts/dev-container" ]] || error_exit "Source file scripts/dev-container not found"
+# Source files validation
+[[ -f "$SRC_DIR/scripts/devenv" ]] || error_exit "Source file scripts/devenv not found"
+[[ -f "$SRC_DIR/scripts/dev" ]] || error_exit "Source file scripts/dev not found"
 [[ -f "$SRC_DIR/config/docker-host.yaml" ]] || error_exit "Source file config/docker-host.yaml not found"
 [[ -d "$SRC_DIR/templates" ]] || error_exit "Source directory templates not found"
 
@@ -235,13 +236,13 @@ backup_existing() {
 
 # Install scripts
 log "   -> Installing scripts to $BIN_DIR"
-backup_existing "$BIN_DIR/env-ctl"
-backup_existing "$BIN_DIR/dev-container"
+backup_existing "$BIN_DIR/devenv"
+backup_existing "$BIN_DIR/dev"
 
-cp "$SRC_DIR/scripts/env-ctl" "$BIN_DIR/" || error_exit "Failed to copy env-ctl"
-cp "$SRC_DIR/scripts/dev-container" "$BIN_DIR/" || error_exit "Failed to copy dev-container"
-chmod +x "$BIN_DIR/env-ctl" || error_exit "Failed to make env-ctl executable"
-chmod +x "$BIN_DIR/dev-container" || error_exit "Failed to make dev-container executable"
+cp "$SRC_DIR/scripts/devenv" "$BIN_DIR/" || error_exit "Failed to copy devenv"
+cp "$SRC_DIR/scripts/dev" "$BIN_DIR/" || error_exit "Failed to copy dev"
+chmod +x "$BIN_DIR/devenv" || error_exit "Failed to make devenv executable"
+chmod +x "$BIN_DIR/dev" || error_exit "Failed to make dev executable"
 
 # Install config
 log "   -> Installing config to $CONFIG_DIR"
@@ -321,8 +322,8 @@ setup_path() {
 # Verify installation
 verify_installation() {
     log "   -> Verifying installation..."
-    [[ -x "$BIN_DIR/env-ctl" ]] || error_exit "env-ctl is not executable"
-    [[ -x "$BIN_DIR/dev-container" ]] || error_exit "dev-container is not executable"
+    [[ -x "$BIN_DIR/devenv" ]] || error_exit "devenv is not executable"
+    [[ -x "$BIN_DIR/dev" ]] || error_exit "dev is not executable"
     [[ -f "$CONFIG_DIR/docker-host.yaml" ]] || error_exit "Config file not found"
     [[ -d "$TEMPLATES_DIR" ]] || error_exit "Templates directory not found"
     local template_count=$(find "$TEMPLATES_DIR" -name "Dockerfile-*" | wc -l)
@@ -336,12 +337,12 @@ setup_path
 
 log ""
 log "${GREEN}🎉 Installation complete!${NC}"
-log "${BLUE}You can now run 'env-ctl' and 'dev-container' from your terminal.${NC}"
+log "${BLUE}You can now run 'devenv' and 'dev' from your terminal.${NC}"
 
 # Show quick usage
 if [[ "$QUIET" == false ]]; then
     log ""
     log "${BLUE}Quick start:${NC}"
-    log "  env-ctl --help      # Show environment control options"
-    log "  dev-container --help # Show container management options"
+    log "  devenv --help       # Show environment control options"
+    log "  dev --help          # Show container management options"
 fi

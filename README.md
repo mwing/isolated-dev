@@ -79,7 +79,7 @@ After uninstalling, you can reinstall anytime by running `./install.sh` again.
 Before working on projects, create the Docker host VM (only needed once):
 
 ```bash
-env-ctl create docker-host
+devenv new docker-host
 ```
 
 This creates a lightweight Linux VM running Docker. After setup, you'll be connected to it. Type `exit` to return to your Mac - the VM continues running in the background.
@@ -124,19 +124,19 @@ EOF
 2. **Create and use the environment:**
 ```bash
 # Create the custom environment
-env-ctl create k8s-dev
+devenv new k8s-dev
 
 # The VM will be named 'dev-vm-k8s-dev'
 # You can start/stop it like any other environment
-env-ctl stop k8s-dev
-env-ctl start k8s-dev
+devenv down k8s-dev
+devenv up k8s-dev
 ```
 
-3. **Use with dev-container:**
+3. **Use with dev:**
 ```bash
-# Update dev-container to use the custom environment
-# Edit the VM_NAME in dev-container script or use environment variable
-VM_NAME="dev-vm-k8s-dev" dev-container
+# Update dev to use the custom environment
+# Edit the VM_NAME in dev script or use environment variable
+VM_NAME="dev-vm-k8s-dev" dev
 ```
 
 **💡 Pro Tips:**
@@ -154,17 +154,17 @@ Create a new project with a pre-configured environment:
 
 ```bash
 # List available language templates with versions
-dev-container --list-templates
+dev list
 
 # Create a new project (smart matching)
 mkdir my-python-project && cd my-python-project
-dev-container --create python      # Uses python-3.11 automatically
+dev new python      # Uses python-3.11 automatically
 
 # Or specify exact version
-dev-container --create python-3.11 # Explicit version
+dev new python-3.11 # Explicit version
 
 # Start developing immediately
-dev-container
+dev
 ```
 
 ### Method 2: Existing Project
@@ -172,7 +172,7 @@ For projects with existing Dockerfiles:
 
 ```bash
 cd my-existing-project
-dev-container
+dev
 ```
 
 ### Method 3: Custom Dockerfile
@@ -181,7 +181,7 @@ Create your own Dockerfile and use the development tools:
 ```bash
 cd my-custom-project
 # Create your Dockerfile
-dev-container
+dev
 ```
 
 ### 📝 Custom Dockerfile Names
@@ -190,16 +190,16 @@ If your project already has a `Dockerfile` (e.g., for production), you can use c
 
 ```bash
 # Create development Dockerfile with custom name
-dev-container --create python  # Creates "Dockerfile" by default
+dev new python              # Creates "Dockerfile" by default
 mv Dockerfile Dockerfile.dev   # Rename for development
 
 # Use the custom Dockerfile
-dev-container -f Dockerfile.dev
+dev -f Dockerfile.dev
 
 # Other naming examples
-dev-container -f docker/Dockerfile.development
-dev-container -f .devcontainer/Dockerfile
-dev-container -f Dockerfile.local
+dev -f docker/Dockerfile.development
+dev -f .devcontainer/Dockerfile
+dev -f Dockerfile.local
 ```
 
 **💡 Tip**: This keeps your production `Dockerfile` separate from development configurations, allowing different tool sets, debug symbols, or development-specific optimizations.
@@ -208,33 +208,34 @@ dev-container -f Dockerfile.local
 
 ## 📋 Available Templates
 
-The following language templates are available with `dev-container --create <language>`:
+The following language templates are available with `dev new <language>`:
 
 ### 🎯 **Quick Reference**
 ```bash
 # List all templates with versions
-dev-container --list-templates
+dev list
 
 # Create with latest/default version (smart matching)
-dev-container --create python    # Uses python-3.11
-dev-container --create node      # Uses node-20
+dev new python    # Multiple versions available - will prompt
+dev new node      # Multiple versions available - will prompt
 
 # Create with specific version
-dev-container --create python-3.11
-dev-container --create node-20
+dev new python-3.13
+dev new node-22
+dev new golang-1.22
 ```
 
 ### 📋 **Template Catalog**
 
-| Language | Current Version | Template Name | Includes |
-|----------|----------------|---------------|-----------|
-| **Python** | 3.11 | `python-3.11` | Python 3.11, pip, development tools |
-| **Node.js** | 20 LTS | `node-20` | Node.js 20 LTS, npm, development tools |
-| **Go** | 1.21 | `golang-1.21` | Go 1.21, go tools, gopls, delve debugger |
-| **Rust** | 1.75 | `rust-1.75` | Rust 1.75, cargo tools, clippy, rustfmt |
-| **Java** | 21 LTS | `java-21` | OpenJDK 21, Maven 3.9.5, Gradle 8.4 |
+| Language | Available Versions | Latest Template | Includes |
+|----------|-------------------|----------------|-----------|
+| **Python** | 3.11, 3.12, 3.13 | `python-3.13` | Python interpreter, pip, development tools |
+| **Node.js** | 20, 22 | `node-22` | Node.js LTS, npm, development tools |
+| **Go** | 1.21, 1.22 | `golang-1.22` | Go compiler, go tools, gopls, delve debugger |
+| **Rust** | 1.75 | `rust-1.75` | Rust toolchain, cargo, clippy, rustfmt |
+| **Java** | 21 | `java-21` | OpenJDK 21 LTS, Maven 3.9.5, Gradle 8.4 |
 | **PHP** | 8.3 | `php-8.3` | PHP 8.3, Composer, common extensions |
-| **Bash** | latest | `bash` | Shell scripting tools, shellcheck, utilities |
+| **Bash** | latest | `bash-latest` | Shell scripting tools, shellcheck, utilities |
 
 ### 🔮 **Smart Template Matching**
 - **Unversioned names** (e.g., `python`) automatically use the available version
@@ -256,7 +257,7 @@ All templates include:
 ```bash
 # New project with template
 mkdir my-app && cd my-app
-dev-container --create python
+dev new python
 
 # Existing project
 cd existing-project
@@ -264,7 +265,7 @@ cd existing-project
 
 ### 2. Start Development Environment
 ```bash
-dev-container
+dev
 ```
 
 This automatically:
@@ -302,57 +303,59 @@ exit  # Leave container and return to host
 
 ## 🎛️ Command Reference
 
-### Environment Management (`env-ctl`)
+### Environment Management (`devenv`)
 ```bash
-env-ctl --help                    # Show help and available environments
-env-ctl create docker-host        # Create Docker host VM (one-time setup)
-env-ctl start docker-host         # Start the VM
-env-ctl stop docker-host          # Stop the VM (save battery)
-env-ctl delete docker-host        # Permanently delete VM
+devenv --help                     # Show help and available environments
+devenv new docker-host            # Create Docker host VM (one-time setup)
+devenv up docker-host             # Start the VM
+devenv down docker-host           # Stop the VM (save battery)
+devenv rm docker-host             # Permanently delete VM
 ```
 
-### Container Development (`dev-container`)
+### Container Development (`dev`)
 ```bash
-dev-container --help              # Show comprehensive help
-dev-container --list-templates    # List available language templates
-dev-container --create <language> # Create Dockerfile from template
-dev-container                     # Build and run container (default)
-dev-container build               # Build image only
-dev-container clean               # Remove containers and images
-dev-container -f Dockerfile.dev   # Use custom Dockerfile
+dev --help                        # Show comprehensive help
+dev list                          # List available language templates
+dev new <language>                # Create Dockerfile from template
+dev                               # Build and run container (default)
+dev build                         # Build image only
+dev clean                         # Remove containers and images
+dev -f Dockerfile.dev             # Use custom Dockerfile
 ```
+
+
 
 ### Advanced Options
 ```bash
 # Custom container names and tags
-dev-container -t my-custom-tag -n my-container
+dev -t my-custom-tag -n my-container
 
 # Different Dockerfile locations
-dev-container -f docker/Dockerfile.production
+dev -f docker/Dockerfile.production
 
 # Using custom environments (instead of default docker-host)
-VM_NAME="dev-vm-k8s-dev" dev-container
-VM_NAME="dev-vm-ml-gpu" dev-container build
+VM_NAME="dev-vm-k8s-dev" dev
+VM_NAME="dev-vm-ml-gpu" dev build
 
 # Combining custom environment with other options
-VM_NAME="dev-vm-secure" dev-container -f Dockerfile.secure -t secure-app
+VM_NAME="dev-vm-secure" dev -f Dockerfile.secure -t secure-app
 ```
 
 ### Environment Configuration
-To permanently use a custom environment, you can modify the `dev-container` script or set an environment variable:
+To permanently use a custom environment, you can modify the `dev` script or set an environment variable:
 
 ```bash
 # Option 1: Set environment variable for session
 export VM_NAME="dev-vm-k8s-dev"
-dev-container
+dev
 
 # Option 2: Create environment-specific wrapper script
 cat > k8s-container << 'EOF'
 #!/bin/bash
-VM_NAME="dev-vm-k8s-dev" dev-container "$@"
+VM_NAME="dev-vm-k8s-dev" dev "$@"
 EOF
 chmod +x k8s-container
-./k8s-container --create golang
+./k8s-container new golang
 ```
 
 -----
@@ -386,8 +389,8 @@ orb status dev-vm-docker-host
 orb -m dev-vm-docker-host
 
 # VM lifecycle
-env-ctl stop docker-host    # Stop when not needed
-env-ctl start docker-host   # Restart (or let dev-container do it)
+devenv down docker-host     # Stop when not needed
+devenv up docker-host       # Restart (or let dev do it)
 ```
 
 -----
@@ -423,19 +426,19 @@ env-ctl start docker-host   # Restart (or let dev-container do it)
 **"No Dockerfile found"**
 ```bash
 # Create one from template
-dev-container --create python
+dev new python
 
 # Or use custom path
-dev-container -f path/to/Dockerfile
+dev -f path/to/Dockerfile
 ```
 
 **"Docker host VM not running"**
 ```bash
 # Start it manually
-env-ctl start docker-host
+devenv up docker-host
 
-# Or let dev-container start it automatically
-dev-container
+# Or let dev start it automatically
+dev
 ```
 
 **"Permission denied in container"**
@@ -480,8 +483,8 @@ orb delete dev-vm-old-project
 
 ### Getting Help
 ```bash
-env-ctl --help          # Environment management help
-dev-container --help    # Container development help
+devenv --help           # Environment management help
+dev --help              # Container development help
 ./install.sh --help     # Installation and uninstall options
 ```
 
