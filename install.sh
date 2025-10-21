@@ -152,7 +152,7 @@ confirm_uninstall() {
         echo -e "${RED}⚠️  DESTRUCTIVE: This will also delete all development VMs and their data!${NC}"
         echo ""
         echo "This will remove:"
-        echo "  - Scripts: devenv, dev"
+        echo "  - Script: dev"
         echo "  - Configuration directory: ~/.dev-envs"
         echo "  - All development VMs (dev-vm-*)"
         echo "  - All VM data and containers"
@@ -161,7 +161,7 @@ confirm_uninstall() {
     else
         echo ""
         echo "This will remove:"
-        echo "  - Scripts: devenv, dev"  
+        echo "  - Script: dev"  
         echo "  - Configuration directory: ~/.dev-envs"
         echo "  - Templates and setup files"
         echo ""
@@ -195,7 +195,6 @@ log "${BLUE}🚀 Installing isolated development environment scripts...${NC}"
 # Validate source files exist
 log "   -> Validating source files..."
 # Source files validation
-[[ -f "$SRC_DIR/scripts/devenv" ]] || error_exit "Source file scripts/devenv not found"
 [[ -f "$SRC_DIR/scripts/dev" ]] || error_exit "Source file scripts/dev not found"
 [[ -f "$SRC_DIR/config/docker-host.yaml" ]] || error_exit "Source file config/docker-host.yaml not found"
 [[ -d "$SRC_DIR/templates" ]] || error_exit "Source directory templates not found"
@@ -236,12 +235,11 @@ backup_existing() {
 
 # Install scripts
 log "   -> Installing scripts to $BIN_DIR"
-backup_existing "$BIN_DIR/devenv"
 backup_existing "$BIN_DIR/dev"
+# Clean up any old devenv script
+rm -f "$BIN_DIR/devenv"
 
-cp "$SRC_DIR/scripts/devenv" "$BIN_DIR/" || error_exit "Failed to copy devenv"
 cp "$SRC_DIR/scripts/dev" "$BIN_DIR/" || error_exit "Failed to copy dev"
-chmod +x "$BIN_DIR/devenv" || error_exit "Failed to make devenv executable"
 chmod +x "$BIN_DIR/dev" || error_exit "Failed to make dev executable"
 
 # Install config
@@ -322,7 +320,6 @@ setup_path() {
 # Verify installation
 verify_installation() {
     log "   -> Verifying installation..."
-    [[ -x "$BIN_DIR/devenv" ]] || error_exit "devenv is not executable"
     [[ -x "$BIN_DIR/dev" ]] || error_exit "dev is not executable"
     [[ -f "$CONFIG_DIR/docker-host.yaml" ]] || error_exit "Config file not found"
     [[ -d "$TEMPLATES_DIR" ]] || error_exit "Templates directory not found"
@@ -337,12 +334,13 @@ setup_path
 
 log ""
 log "${GREEN}🎉 Installation complete!${NC}"
-log "${BLUE}You can now run 'devenv' and 'dev' from your terminal.${NC}"
+log "${BLUE}You can now run 'dev' from your terminal.${NC}"
 
 # Show quick usage
 if [[ "$QUIET" == false ]]; then
     log ""
     log "${BLUE}Quick start:${NC}"
-    log "  devenv --help       # Show environment control options"
-    log "  dev --help          # Show container management options"
+    log "  dev env new docker-host # Create Docker host VM (one-time setup)"
+    log "  dev --help             # Show all available commands"
+    log "  dev env list           # Show environment management help"
 fi

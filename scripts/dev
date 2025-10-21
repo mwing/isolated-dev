@@ -115,6 +115,146 @@ EOF
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+function handle_env_command() {
+    local env_command="$1"
+    local env_name="$2"
+    local setup_dir="$HOME/.dev-envs/setups"
+    
+    case "$env_command" in
+        new|up|down|rm|status)
+            if [[ -z "$env_name" ]]; then
+                echo "❌ Error: Environment name required"
+                echo "Usage: $(basename "$0") env $env_command <environment>"
+                echo ""
+                echo "Available environments:"
+                if [[ -d "$setup_dir" ]]; then
+                    ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
+                else
+                    echo "  (No environments found - run installer first)"
+                fi
+                exit 1
+            fi
+            
+            # Handle VM name construction - if env_name already starts with dev-vm-, use it as-is
+            local vm_name
+            if [[ "$env_name" == dev-vm-* ]]; then
+                vm_name="$env_name"
+                # Extract the actual environment name for setup file lookup
+                local actual_env_name="${env_name#dev-vm-}"
+                local setup_file=$(find "$setup_dir" -type f -name "${actual_env_name}.*" 2>/dev/null | head -n 1)
+            else
+                vm_name="dev-vm-${env_name}"
+                local setup_file=$(find "$setup_dir" -type f -name "${env_name}.*" 2>/dev/null | head -n 1)
+            fi
+            
+            case "$env_command" in
+                new)
+                    echo "🚀 Creating and provisioning '$env_name' using cloud-init..."
+                    if [[ ! -f "$setup_file" ]]; then
+                        echo "❌ Error: Setup file for '$env_name' not found in $setup_dir"
+                        echo ""
+                        echo "Available environments:"
+                        if [[ -d "$setup_dir" ]]; then
+                            ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
+                        fi
+                        exit 1
+                    fi
+                    
+                    orb create --user-data "$setup_file" ubuntu "$vm_name"
+                    echo "✅ Environment '$env_name' is ready. Connecting..."
+                    orb -m "$vm_name"
+                    ;;
+                up)
+                    echo "🚀 Starting environment '$env_name' and connecting..."
+                    orb -m "$vm_name"
+                    ;;
+                down)
+                    echo "🛑 Stopping environment '$env_name'..."
+                    orb stop "$vm_name"
+                    echo "✅ VM '$vm_name' stopped."
+                    ;;
+                status)
+                    echo "📊 Status of environment '$env_name':"
+                    echo "   VM Name: $vm_name"
+                    
+                    # Check if VM exists in orb list and get its status
+                    if orb list | grep -q "^$vm_name"; then
+                        local vm_info=$(orb list | grep "^$vm_name")
+                        local state=$(echo "$vm_info" | awk '{print $2}')
+                        local distro=$(echo "$vm_info" | awk '{print $3}')
+                        local ip=$(echo "$vm_info" | awk '{print $NF}')
+                        
+                        case "$state" in
+                            running)
+                                echo "   Status: ✅ Running"
+                                echo "   IP: $ip"
+                                echo "   Distro: $distro"
+                                ;;
+                            stopped)
+                                echo "   Status: ⏸️  Stopped"
+                                echo "   Distro: $distro"
+                                ;;
+                            *)
+                                echo "   Status: $state"
+                                ;;
+                        esac
+                    else
+                        echo "   Status: ❌ VM not found"
+                        echo ""
+                        echo "💡 Available VMs:"
+                        orb list | grep "^dev-vm-" | awk '{print "   " $1 " (" $2 ")"}'
+                        if ! orb list | grep -q "^dev-vm-"; then
+                            echo "   (No development VMs found)"
+                            echo ""
+                            echo "💡 Create one with: $(basename "$0") env new docker-host"
+                        fi
+                    fi
+                    ;;
+                rm)
+                    echo "🔥 Deleting environment '$env_name'..."
+                    read -p "Are you sure you want to permanently delete VM '$vm_name'? (y/N) " -n 1 -r
+                    echo
+                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                        orb delete "$vm_name"
+                        echo "✅ VM '$vm_name' deleted."
+                    else
+                        echo "Deletion cancelled."
+                    fi
+                    ;;
+            esac
+            ;;
+        list|--help|-h|help)
+            echo "Usage: $(basename "$0") env <command> [environment]"
+            echo ""
+            echo "Environment Management Commands:"
+            echo "  new <env>        Create and provision a new environment VM"
+            echo "  up <env>         Start an existing environment VM and connect"
+            echo "  down <env>       Stop a running environment VM"
+            echo "  status <env>     Show status of an environment VM"
+            echo "  rm <env>         Delete an environment VM permanently"
+            echo "  list             Show this help and available environments"
+            echo ""
+            echo "Available environments:"
+            if [[ -d "$setup_dir" ]]; then
+                ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
+            else
+                echo "  (No environments found - run installer first)"
+            fi
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") env new docker-host    # Create Docker host VM"
+            echo "  $(basename "$0") env up docker-host     # Start and connect to VM"
+            echo "  $(basename "$0") env status docker-host # Check VM status"
+            echo "  $(basename "$0") env down docker-host   # Stop VM to save resources"
+            ;;
+        *)
+            echo "❌ Error: Unknown env command '$env_command'"
+            echo "Use '$(basename "$0") env help' for usage information."
+            exit 1
+            ;;
+    esac
+}
+
 function show_command_help() {
     local command="$1"
     case "$command" in
@@ -175,7 +315,7 @@ function show_command_help() {
             echo ""
             echo "1. Container fails to start:"
             echo "   • Check if OrbStack is running: 'orb list'"
-            echo "   • Verify VM is accessible: 'devenv status'"
+            echo "   • Verify VM is accessible: '$(basename "$0") env status docker-host'"
             echo "   • Try rebuilding: '$(basename "$0") clean && $(basename "$0") build'"
             echo ""
             echo "2. Port forwarding not working:"
@@ -200,6 +340,27 @@ function show_command_help() {
             echo ""
             echo "For more help, visit: https://github.com/mwing/isolated-dev"
             ;;
+        env)
+            echo "Usage: $(basename "$0") env <command> [environment]"
+            echo ""
+            echo "Manage OrbStack VMs for isolated development environments."
+            echo ""
+            echo "Commands:"
+            echo "  new <env>        Create and provision new environment VM"
+            echo "  up <env>         Start existing environment VM and connect"
+            echo "  down <env>       Stop running environment VM"
+            echo "  status <env>     Show environment VM status"
+            echo "  rm <env>         Delete environment VM permanently"
+            echo "  list             List available environments"
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") env new docker-host    # One-time setup"
+            echo "  $(basename "$0") env up docker-host     # Start & connect"
+            echo "  $(basename "$0") env down docker-host   # Stop to save battery"
+            echo "  $(basename "$0") env status docker-host # Check if running"
+            echo ""
+            echo "Note: Most users only need the 'docker-host' environment."
+            ;;
         *)
             echo "No specific help available for command: $command"
             echo "Use --help for general usage information."
@@ -217,6 +378,10 @@ function usage() {
     echo "  shell            Open interactive bash shell in container"
     echo "  build            Build the container image only"
     echo "  clean            Remove existing container and image"
+    echo ""
+    echo "Environment Commands:"
+    echo "  env <command>    Manage OrbStack VMs (new, up, down, status, rm)"
+    echo "  env list         Show available environments and help"
     echo ""
     echo "Help Commands:"
     echo "  help             Show this help message"
@@ -247,14 +412,13 @@ function usage() {
     echo "  • Git configuration sharing for consistent commits"
     echo ""
     echo "Examples:"
-    echo "  $(basename "$0")                       # Build and run with default Dockerfile"
-    echo "  $(basename "$0") shell                # Open interactive shell"
-    echo "  $(basename "$0") build                # Build image only"
-    echo "  $(basename "$0") -f Dockerfile.dev    # Use custom Dockerfile"
-    echo "  $(basename "$0") new python           # Create from Python template"
-    echo "  $(basename "$0") new python-3.13      # Create from specific Python version"
-    echo "  $(basename "$0") new node-22 --init   # Create Node.js template with project scaffolding"
-    echo "  $(basename "$0") list                 # Show available templates with versions"
+    echo "  $(basename "$0") env new docker-host           # One-time VM setup"
+    echo "  $(basename "$0")                              # Build and run with default Dockerfile"
+    echo "  $(basename "$0") shell                        # Open interactive shell"
+    echo "  $(basename "$0") new python                   # Create from Python template"
+    echo "  $(basename "$0") new node-22 --init           # Create Node.js template with scaffolding"
+    echo "  $(basename "$0") env down docker-host         # Stop VM to save battery"
+    echo "  $(basename "$0") list                         # Show available templates with versions"
     echo ""
     echo "Requirements:"
     echo "  - Dockerfile in current directory (or specified with -f)"
@@ -1433,6 +1597,7 @@ while [[ $# -gt 0 ]]; do
                 echo "  $(basename "$0") help new           # Template creation help"
                 echo "  $(basename "$0") help config        # Configuration help"
                 echo "  $(basename "$0") help templates     # Template management help"
+                echo "  $(basename "$0") help env           # Environment management help"
                 echo "  $(basename "$0") troubleshoot       # Troubleshooting guide"
             fi
             exit 0
@@ -1441,9 +1606,13 @@ while [[ $# -gt 0 ]]; do
             show_command_help "troubleshoot"
             exit 0
             ;;
+        env)
+            handle_env_command "$2" "$3"
+            exit 0
+            ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, list, config, templates, help, troubleshoot"
+            echo "Available commands: run, shell, build, clean, new, list, config, templates, env, help, troubleshoot"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
@@ -1480,7 +1649,7 @@ ensure_vm_running() {
             orb start "$VM_NAME"
         else
             echo "❌ Error: VM '$VM_NAME' is not running"
-            echo "   Start it manually with: devenv up docker-host"
+            echo "   Start it manually with: dev env up docker-host"
             echo "   Or set auto_start_vm=true in your config"
             exit 1
         fi
