@@ -303,10 +303,16 @@ function show_command_help() {
             echo "Actions:"
             echo "  update         Update all templates to latest versions"
             echo "  check          Check for available updates without applying"
+            echo "  prune          Remove old/unused templates (smart cleanup)"
+            echo "  cleanup [days] Remove templates unused for X days (default: 60)"
+            echo "  stats          Show template statistics and usage information"
             echo ""
             echo "Examples:"
             echo "  $(basename "$0") templates update     # Update all templates"
             echo "  $(basename "$0") templates check      # Check for updates"
+            echo "  $(basename "$0") templates prune      # Smart cleanup of old templates"
+            echo "  $(basename "$0") templates cleanup 30 # Remove templates unused 30+ days"
+            echo "  $(basename "$0") templates stats      # Show detailed statistics"
             ;;
         troubleshoot)
             echo "Troubleshooting Guide:"
@@ -394,6 +400,9 @@ function usage() {
     echo "  list                 List available language templates"
     echo "  templates update     Update templates to latest versions"
     echo "  templates check      Check for available template updates"
+    echo "  templates prune      Remove old/unused templates automatically"
+    echo "  templates cleanup    Remove templates unused for specified days"
+    echo "  templates stats      Show template statistics and usage information"
     echo ""
     echo "Configuration Commands:"
     echo "  config               Show current configuration"
@@ -715,6 +724,379 @@ EOF
     fi
     echo ""
     echo "💡 Tip: Use 'dev list' to see all available templates"
+}
+
+# ==============================================================================
+# TEMPLATE CLEANUP FUNCTIONS
+# ==============================================================================
+
+function prune_old_templates() {
+    echo "🧹 Analyzing template usage and removing old versions..."
+    echo ""
+    
+    local templates_dir="$TEMPLATES_DIR"
+    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local current_date=$(date +%s)
+    local days_threshold=30
+    local threshold_date=$((current_date - days_threshold * 86400))
+    
+    # Create usage tracking file if it doesn't exist
+    if [[ ! -f "$usage_file" ]]; then
+        touch "$usage_file"
+        echo "📝 Created template usage tracking file"
+    fi
+    
+    # Find the most recently created template for each language (these are "latest")
+    local temp_file=$(mktemp)
+    
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local file_time=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+        
+        echo "$language:$template_name:$file_time" >> "$temp_file"
+    done
+    
+    echo "🔒 Protected templates (latest per language):"
+    # Find latest template for each language
+    for language in $(cut -d: -f1 "$temp_file" | sort -u); do
+        local latest=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+        echo "   ✅ $latest (latest $language)"
+    done
+    echo ""
+    
+    local removed_count=0
+    local total_templates=0
+    local kept_count=0
+    
+    # Analyze each template
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        ((total_templates++))
+        
+        # Always keep the latest template for each language
+        local latest=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+        if [[ "$latest" == "$template_name" ]]; then
+            echo "🔒 Keeping latest: $template_name"
+            ((kept_count++))
+            continue
+        fi
+        
+        # Check if template has been used recently
+        local last_used=$(grep "^$template_name:" "$usage_file" 2>/dev/null | tail -1 | cut -d: -f2)
+        
+        if [[ -z "$last_used" ]]; then
+            # Never used, check file age instead
+            local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+            if [[ $file_age -lt $threshold_date ]]; then
+                echo "🗑️  Removing unused: $template_name (created >$days_threshold days ago, never used)"
+                rm "$template_file"
+                ((removed_count++))
+            else
+                echo "⏳ Keeping recent: $template_name (created recently, not yet used)"
+                ((kept_count++))
+            fi
+        elif [[ $last_used -lt $threshold_date ]]; then
+            echo "🗑️  Removing old: $template_name (last used >$days_threshold days ago)"
+            rm "$template_file"
+            ((removed_count++))
+        else
+            echo "✅ Keeping active: $template_name (used recently)"
+            ((kept_count++))
+        fi
+    done
+    
+    local language_count=$(cut -d: -f1 "$temp_file" | sort -u | wc -l)
+    rm "$temp_file"
+    
+    echo ""
+    echo "📊 Pruning Summary:"
+    echo "   Total templates: $total_templates"
+    echo "   Removed: $removed_count"
+    echo "   Kept: $kept_count"
+    echo "   Languages with templates: $language_count"
+    
+    if [[ $removed_count -gt 0 ]]; then
+        echo ""
+        echo "✅ Template cleanup complete! Freed up space by removing $removed_count old templates."
+        echo "💡 Run 'dev templates update' to recreate current versions if needed."
+    else
+        echo ""
+        echo "✨ No templates needed removal - all are recent, active, or latest versions!"
+    fi
+}
+
+function cleanup_unused_templates() {
+    local days="${1:-60}"
+    echo "🧹 Cleaning up templates unused for $days+ days..."
+    echo ""
+    
+    local templates_dir="$TEMPLATES_DIR"
+    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local current_date=$(date +%s)
+    local threshold_date=$((current_date - days * 86400))
+    
+    if [[ ! -f "$usage_file" ]]; then
+        echo "📝 No usage tracking file found - analyzing by file age instead"
+        echo ""
+    fi
+    
+    # Find latest templates per language to protect them
+    local temp_file=$(mktemp)
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local file_time=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+        
+        echo "$language:$template_name:$file_time" >> "$temp_file"
+    done
+    
+    local removed_count=0
+    
+    # Show what would be removed
+    echo "🔍 Templates that would be removed:"
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local should_remove=false
+        
+        # Never remove the latest template for each language
+        local latest_for_lang=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+        if [[ "$latest_for_lang" == "$template_name" ]]; then
+            continue
+        fi
+        
+        if [[ -f "$usage_file" ]]; then
+            local last_used=$(grep "^$template_name:" "$usage_file" 2>/dev/null | tail -1 | cut -d: -f2)
+            if [[ -n "$last_used" && $last_used -lt $threshold_date ]]; then
+                should_remove=true
+            elif [[ -z "$last_used" ]]; then
+                local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+                if [[ $file_age -lt $threshold_date ]]; then
+                    should_remove=true
+                fi
+            fi
+        else
+            local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+            if [[ $file_age -lt $threshold_date ]]; then
+                should_remove=true
+            fi
+        fi
+        
+        if [[ "$should_remove" == "true" ]]; then
+            local latest=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+            echo "   🗑️  $template_name (keeping latest: $latest)"
+            ((removed_count++))
+        fi
+    done
+    
+    if [[ $removed_count -eq 0 ]]; then
+        echo "   ✨ No old templates need cleanup!"
+        echo "   💡 All templates are either recent, in use, or the latest version of their language."
+        return
+    fi
+    
+    echo ""
+    echo "⚠️  This will remove $removed_count old template version(s)."
+    echo "   Latest templates for each language will be preserved."
+    read -p "Continue? (y/N) " -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Cleanup cancelled."
+        return
+    fi
+    
+    # Actually remove them
+    removed_count=0
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local should_remove=false
+        
+        # Never remove the latest template for each language
+        local latest_for_lang=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+        if [[ "$latest_for_lang" == "$template_name" ]]; then
+            continue
+        fi
+        
+        if [[ -f "$usage_file" ]]; then
+            local last_used=$(grep "^$template_name:" "$usage_file" 2>/dev/null | tail -1 | cut -d: -f2)
+            if [[ -n "$last_used" && $last_used -lt $threshold_date ]]; then
+                should_remove=true
+            elif [[ -z "$last_used" ]]; then
+                local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+                if [[ $file_age -lt $threshold_date ]]; then
+                    should_remove=true
+                fi
+            fi
+        else
+            local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+            if [[ $file_age -lt $threshold_date ]]; then
+                should_remove=true
+            fi
+        fi
+        
+        if [[ "$should_remove" == "true" ]]; then
+            echo "🗑️  Removing: $template_name"
+            rm "$template_file"
+            ((removed_count++))
+        fi
+    done
+    
+    echo ""
+    echo "✅ Cleanup complete! Removed $removed_count old template versions."
+    echo "💡 Latest version of each language preserved for future use."
+}
+
+function show_template_stats() {
+    echo "📊 Template Statistics"
+    echo ""
+    
+    local templates_dir="$TEMPLATES_DIR"
+    local usage_file="$HOME/.dev-envs/template_usage.log"
+    
+    if [[ ! -d "$templates_dir" ]]; then
+        echo "❌ Templates directory not found: $templates_dir"
+        return 1
+    fi
+    
+    # Get template information using a simpler approach
+    local total_templates=0
+    local temp_file=$(mktemp)
+    
+    # Create a temporary file with language data
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local file_time=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+        
+        echo "$language:$template_name:$file_time" >> "$temp_file"
+        ((total_templates++))
+    done
+    
+    echo "📦 Templates by Language:"
+    printf "   %-12s %-8s %s\n" "Language" "Count" "Latest Version"
+    printf "   %-12s %-8s %s\n" "--------" "-----" "--------------"
+    
+    # Process languages and show counts/latest
+    for language in $(cut -d: -f1 "$temp_file" | sort -u); do
+        local count=$(grep "^$language:" "$temp_file" | wc -l)
+        local latest=$(grep "^$language:" "$temp_file" | sort -t: -k3 -nr | head -1 | cut -d: -f2)
+        printf "   %-12s %-8s %s\n" "$language" "$count" "$latest"
+    done
+    
+    rm "$temp_file"
+    
+    echo ""
+    echo "📈 Usage Statistics:"
+    if [[ -f "$usage_file" ]]; then
+        echo "   Total usage records: $(wc -l < "$usage_file" 2>/dev/null || echo 0)"
+        
+        # Show most used templates
+        if [[ -s "$usage_file" ]]; then
+            echo ""
+            echo "   🔥 Most Used Templates (last 30 days):"
+            local thirty_days_ago=$(($(date +%s) - 30 * 86400))
+            
+            awk -F: -v threshold="$thirty_days_ago" '
+                $2 >= threshold { count[$1]++ }
+                END {
+                    for (template in count) {
+                        print count[template], template
+                    }
+                }
+            ' "$usage_file" | sort -nr | head -5 | while read count template; do
+                printf "      %-3s uses: %s\n" "$count" "$template"
+            done
+        fi
+    else
+        echo "   No usage tracking data available"
+        echo "   (Usage tracking starts when templates are first used)"
+    fi
+    
+    echo ""
+    echo "💾 Storage Information:"
+    local total_size=0
+    if command -v du >/dev/null 2>&1; then
+        total_size=$(du -sh "$templates_dir" 2>/dev/null | cut -f1 || echo "Unknown")
+        echo "   Total template storage: $total_size"
+    fi
+    echo "   Total templates: $total_templates"
+    echo "   Languages supported: ${#lang_counts[@]}"
+    
+    # Show potential cleanup opportunities
+    echo ""
+    echo "🧹 Cleanup Opportunities:"
+    local old_count=0
+    local unused_count=0
+    local thirty_days_ago=$(($(date +%s) - 30 * 86400))
+    
+    for template_file in "$templates_dir"/Dockerfile-*; do
+        [[ -f "$template_file" ]] || continue
+        
+        local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+        local language=$(echo "$template_name" | sed 's/-.*$//')
+        local file_age=$(stat -f %B "$template_file" 2>/dev/null || stat -c %Y "$template_file" 2>/dev/null || echo 0)
+        
+        # Skip if it's the latest for this language
+        if [[ "${lang_latest[$language]}" == "$template_name" ]]; then
+            continue
+        fi
+        
+        # Check if old
+        if [[ $file_age -lt $thirty_days_ago ]]; then
+            ((old_count++))
+        fi
+        
+        # Check if unused
+        if [[ -f "$usage_file" ]]; then
+            if ! grep -q "^$template_name:" "$usage_file"; then
+                ((unused_count++))
+            fi
+        fi
+    done
+    
+    if [[ $old_count -gt 0 || $unused_count -gt 0 ]]; then
+        [[ $old_count -gt 0 ]] && echo "   📅 $old_count templates older than 30 days (excluding latest versions)"
+        [[ $unused_count -gt 0 ]] && echo "   🚫 $unused_count templates never used"
+        echo ""
+        echo "💡 Run 'dev templates prune' for smart cleanup"
+    else
+        echo "   ✨ All templates are recent or actively used!"
+    fi
+}
+
+function track_template_usage() {
+    local template_name="$1"
+    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local timestamp=$(date +%s)
+    
+    # Create usage directory if it doesn't exist
+    mkdir -p "$(dirname "$usage_file")"
+    
+    # Log usage
+    echo "$template_name:$timestamp" >> "$usage_file"
+    
+    # Keep only last 100 entries per template to prevent log bloat
+    local temp_file=$(mktemp)
+    awk -F: -v template="$template_name" '
+        $1 == template { entries[template]++; if(entries[template] <= 100) print }
+        $1 != template { print }
+    ' "$usage_file" > "$temp_file"
+    mv "$temp_file" "$usage_file"
 }
 
 # ==============================================================================
@@ -1506,6 +1888,10 @@ function create_from_template() {
         exit 1
     }
     
+    # Track template usage for cleanup purposes
+    local template_name=$(basename "$template_file" | sed 's/Dockerfile-//')
+    track_template_usage "$template_name"
+    
     echo "✅ Created Dockerfile from $language template"
     
     # Initialize project scaffolding if requested
@@ -1547,9 +1933,21 @@ while [[ $# -gt 0 ]]; do
                     check_template_updates
                     exit 0
                     ;;
+                prune)
+                    prune_old_templates
+                    exit 0
+                    ;;
+                cleanup)
+                    cleanup_unused_templates "$3"
+                    exit 0
+                    ;;
+                stats)
+                    show_template_stats
+                    exit 0
+                    ;;
                 *)
                     echo "❌ Error: Unknown templates subcommand '$2'"
-                    echo "Available: update, check"
+                    echo "Available: update, check, prune, cleanup, stats"
                     exit 1
                     ;;
             esac
