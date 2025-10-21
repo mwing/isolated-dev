@@ -92,6 +92,26 @@ cd my-custom-project
 dev-container
 ```
 
+### 📝 Custom Dockerfile Names
+
+If your project already has a `Dockerfile` (e.g., for production), you can use custom names for development:
+
+```bash
+# Create development Dockerfile with custom name
+dev-container --create python  # Creates "Dockerfile" by default
+mv Dockerfile Dockerfile.dev   # Rename for development
+
+# Use the custom Dockerfile
+dev-container -f Dockerfile.dev
+
+# Other naming examples
+dev-container -f docker/Dockerfile.development
+dev-container -f .devcontainer/Dockerfile
+dev-container -f Dockerfile.local
+```
+
+**💡 Tip**: This keeps your production `Dockerfile` separate from development configurations, allowing different tool sets, debug symbols, or development-specific optimizations.
+
 -----
 
 ## 📋 Available Templates
