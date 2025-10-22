@@ -1,9 +1,29 @@
 # Isolated Development Environment Tools for Mac using OrbStack
 
-Secure, isolated development environments using OrbStack VMs and Docker containers. Run all development work in sandboxed environments while maintaining seamless integration with your local workflow.
+**Secure, lightweight, Mac-native development environments** that protect against supply chain attacks and dependency conflicts. Zero-configuration containerized development with automatic image management - just code, don't manage Docker.
+
+## Why Use Isolated Development?
+
+**Security & Isolation:**
+- **Supply chain protection** - Run untrusted dependencies in sandboxed containers
+- **Project isolation** - Each project runs in its own secure environment
+- **Zero host pollution** - No language runtimes or packages installed on your Mac
+- **Attack surface reduction** - Malicious code can't access your system
+
+**Lightweight & Fast:**
+- **Quick startup** - Containers boot in seconds, not minutes
+- **Mac-native performance** - OrbStack's optimized virtualization
+- **Automatic management** - No Docker image maintenance required
+- **Minimal overhead** - Efficient resource usage
+
+**Developer Experience:**
+- **Zero configuration** - Templates handle all setup automatically
+- **Multiple projects** - Switch between isolated environments instantly
+- **Seamless integration** - SSH keys, git config, and ports work transparently
 
 ## Table of Contents
 
+- [Why Use Isolated Development?](#why-use-isolated-development)
 - [Use Cases](#use-cases)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
@@ -20,10 +40,14 @@ Secure, isolated development environments using OrbStack VMs and Docker containe
 
 ## Use Cases
 
-- **Experimentation**: Try new languages without polluting your system
-- **Security**: Run untrusted code in isolated environments
-- **Team Consistency**: Standardize development environments across team members
-- **CI/CD Integration**: Test locally in production-like containers
+- **Security-first development** - Protect against supply chain attacks and malicious dependencies
+- **Multi-project workflows** - Handle dozens of projects without version conflicts
+- **Safe experimentation** - Try new languages, frameworks, and tools risk-free
+- **Team standardization** - Consistent environments across all developers
+- **Dependency testing** - Safely evaluate new packages and versions
+- **Legacy project maintenance** - Run old projects without installing outdated runtimes
+
+> **For complex setups:** Use VS Code Dev Containers, Docker Compose, or Podman for multi-service architectures, custom networking, or advanced orchestration needs.
 
 ## Prerequisites
 
