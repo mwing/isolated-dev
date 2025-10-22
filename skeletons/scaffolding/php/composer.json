@@ -1,0 +1,17 @@
+{
+    "name": "example/{{PROJECT_NAME}}",
+    "description": "A PHP project",
+    "type": "project",
+    "require": {
+        "php": "^8.3"
+    },
+    "require-dev": {},
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

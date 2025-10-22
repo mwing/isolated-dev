@@ -1,0 +1,14 @@
+# Project-specific configuration for {{PROJECT_NAME}}
+# This file uses simple key=value format and overrides global settings
+
+# VM name for this project (uncomment to override global)
+# vm_name = "dev-vm-{{PROJECT_NAME}}"
+
+# Default template for this project
+# default_template = "python-3.13"
+
+# Auto-start VM for this project
+# auto_start_vm = "true"
+
+# Container prefix for this project
+# container_prefix = "{{PROJECT_NAME}}"
