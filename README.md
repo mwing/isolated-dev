@@ -42,9 +42,10 @@ cd isolated-dev
 
 ### Installation Options
 ```bash
-./install.sh --help     # Show all options
-./install.sh --force    # Force overwrite existing files
-./install.sh --yes      # Skip prompts (for automation)
+./install.sh --help        # Show all options
+./install.sh --force       # Force overwrite existing files
+./install.sh --yes         # Skip prompts (for automation)
+./install.sh --completion  # Install zsh/bash completion (optional)
 ```
 
 The installer creates:
@@ -305,6 +306,13 @@ vm_name: dev-vm-docker-host
 default_template: python-3.13
 auto_start_vm: true
 container_prefix: dev
+
+# Network optimization settings
+network_mode: bridge                    # bridge, host, none, or custom network name
+auto_host_networking: false             # Auto-use host networking for single services
+port_range: "3000-9000"                 # Port range for auto-detection
+enable_port_health_check: true          # Check if ports are accessible
+port_health_timeout: 5                  # Timeout for port health checks (seconds)
 ```
 
 ### Project Configuration (`.devenv.yaml`)
@@ -325,6 +333,13 @@ container_prefix: myproject
 DEV_VM_NAME=custom-vm dev
 DEV_DEFAULT_TEMPLATE=python-3.14 dev new python
 DEV_CONTAINER_PREFIX=myapp dev build
+
+# Network configuration overrides
+DEV_NETWORK_MODE=host dev                           # Use host networking
+DEV_AUTO_HOST_NETWORKING=true dev                   # Enable auto host networking
+DEV_PORT_RANGE="8000-8999" dev                      # Custom port range
+DEV_ENABLE_PORT_HEALTH_CHECK=false dev              # Disable port health checks
+DEV_PORT_HEALTH_TIMEOUT=10 dev                      # Custom health check timeout
 ```
 
 ### Configuration Validation
@@ -380,6 +395,68 @@ dev --platform linux/amd64     # x86_64 (Intel)
 - Native builds (ARM64 on Apple Silicon, x86_64 on Intel): Fastest
 - Cross-platform builds: Slower due to emulation
 
+## Network Optimization
+
+### Network Configuration Options
+
+Configure networking behavior through configuration files or environment variables:
+
+```yaml
+# Network optimization settings in ~/.dev-envs/config.yaml
+network_mode: bridge                    # Default: bridge networking
+auto_host_networking: false             # Auto-detect when to use host networking
+port_range: "3000-9000"                 # Port range for auto-detection
+enable_port_health_check: true          # Verify port accessibility
+port_health_timeout: 5                  # Health check timeout (seconds)
+```
+
+### Network Modes
+
+**Bridge Mode (Default):**
+- Isolated container networking
+- Port forwarding required
+- Best for security and multi-container setups
+
+**Host Mode:**
+- Direct access to host network
+- No port forwarding needed
+- Better performance for single services
+- Use when `auto_host_networking: true` or `network_mode: host`
+
+**Custom Networks:**
+- Set `network_mode` to custom network name
+- Enables service discovery between containers
+- Useful for multi-container development
+
+### Port Management
+
+**Auto-Detection:**
+- Scans project files for framework-specific ports
+- Respects configured `port_range`
+- Automatically forwards detected ports
+
+**Health Checking:**
+- Verifies port accessibility when `enable_port_health_check: true`
+- Configurable timeout with `port_health_timeout`
+- Helps identify port conflicts
+
+### Performance Tips
+
+1. **Use host networking for single services:**
+   ```bash
+   DEV_NETWORK_MODE=host dev
+   ```
+
+2. **Optimize port range for your stack:**
+   ```yaml
+   port_range: "8000-8999"  # Narrow range for faster detection
+   ```
+
+3. **Disable health checks for faster startup:**
+   ```yaml
+   enable_port_health_check: false
+   ```
+
 ## Troubleshooting
 
 ### Quick Diagnostics
@@ -421,6 +498,32 @@ dev clean && dev build            # Rebuild with correct architecture
 ```
 
 For more help: [https://github.com/mwing/isolated-dev](https://github.com/mwing/isolated-dev)
+
+## Auto-completion
+
+Optional bash/zsh completion for enhanced productivity:
+
+```bash
+# Install completion
+./install.sh --completion
+
+# Or install manually
+bash completions/install-completion.sh .
+```
+
+**Features:**
+- Tab completion for all commands and flags
+- Dynamic language template suggestions
+- Context-aware completions
+- VM name completion from OrbStack
+
+**Examples:**
+```bash
+dev <TAB>                    # Shows: new, list, config, security...
+dev new <TAB>                # Shows: python-3.13, node-22, golang-1.22...
+dev config <TAB>             # Shows: --edit, --init, validate
+dev --platform <TAB>         # Shows: linux/amd64, linux/arm64
+```
 
 ## Features
 

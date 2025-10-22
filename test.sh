@@ -469,6 +469,42 @@ test_config_validation() {
         log "${YELLOW}⏭️  SKIP${NC}: Config validation test failed (exit code: $validation_exit_code)"
     fi
     
+    # Test network configuration validation with valid values
+    cat > .devenv.yaml << 'EOF'
+network_mode: bridge
+auto_host_networking: true
+port_range: "3000-9000"
+enable_port_health_check: false
+port_health_timeout: 10
+EOF
+    
+    local network_validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    local network_exit_code=$?
+    
+    if [[ $network_exit_code -eq 0 ]]; then
+        assert_contains "$network_validation" "Configuration is valid" "Network config validation passes for valid values"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Network config validation test failed"
+    fi
+    
+    # Test network configuration validation with invalid values
+    cat > .devenv.yaml << 'EOF'
+network_mode: invalid_mode
+port_range: "not-a-range"
+port_health_timeout: not_a_number
+EOF
+    
+    local invalid_validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    local invalid_exit_code=$?
+    
+    if [[ $invalid_exit_code -ne 0 ]]; then
+        assert_contains "$invalid_validation" "must be 'bridge', 'host', 'none'" "Network mode validation catches invalid values"
+        assert_contains "$invalid_validation" "must be in format 'start-end'" "Port range validation catches invalid format"
+        assert_contains "$invalid_validation" "must be a positive number" "Timeout validation catches non-numeric values"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Invalid network config validation test failed"
+    fi
+    
     cd - > /dev/null
 }
 
@@ -479,7 +515,7 @@ test_environment_overrides() {
     mkdir -p "$test_project"
     cd "$test_project"
     
-    # Test environment variable override
+    # Test basic environment variable override
     local config_output=$(DEV_VM_NAME=override-vm bash "$ORIGINAL_DIR/scripts/dev" config 2>&1 || echo "CONFIG_FAILED")
     
     if [[ "$config_output" != "CONFIG_FAILED" ]]; then
@@ -487,6 +523,28 @@ test_environment_overrides() {
         assert_contains "$config_output" "Environment overrides active" "Shows environment overrides status"
     else
         log "${YELLOW}⏭️  SKIP${NC}: Environment override test failed (expected in test environment)"
+    fi
+    
+    # Test network configuration overrides
+    local network_config_output=$(DEV_NETWORK_MODE=host DEV_PORT_RANGE="8000-8999" bash "$ORIGINAL_DIR/scripts/dev" config 2>&1 || echo "NETWORK_CONFIG_FAILED")
+    
+    if [[ "$network_config_output" != "NETWORK_CONFIG_FAILED" ]]; then
+        assert_contains "$network_config_output" "Network Mode: host" "Network mode override works"
+        assert_contains "$network_config_output" "Port Range: 8000-8999" "Port range override works"
+        assert_contains "$network_config_output" "DEV_NETWORK_MODE" "Shows network mode override in active list"
+        assert_contains "$network_config_output" "DEV_PORT_RANGE" "Shows port range override in active list"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Network config override test failed"
+    fi
+    
+    # Test boolean network configuration override
+    local bool_config_output=$(DEV_AUTO_HOST_NETWORKING=true DEV_ENABLE_PORT_HEALTH_CHECK=false bash "$ORIGINAL_DIR/scripts/dev" config 2>&1 || echo "BOOL_CONFIG_FAILED")
+    
+    if [[ "$bool_config_output" != "BOOL_CONFIG_FAILED" ]]; then
+        assert_contains "$bool_config_output" "Auto Host Networking: true" "Boolean network override works"
+        assert_contains "$bool_config_output" "Port Health Check: false" "Boolean health check override works"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Boolean network config override test failed"
     fi
     
     cd - > /dev/null
