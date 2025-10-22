@@ -14,7 +14,6 @@ LANGUAGES_DIR="$HOME/.dev-envs/languages"
 
 # Get script directory for sourcing libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LANGUAGES_DIR="$HOME/.dev-envs/languages"
 
 # Source library modules
 source "$SCRIPT_DIR/lib/utils.sh"
@@ -430,83 +429,8 @@ CONTAINER_NAME="${CUSTOM_NAME:-${CONTAINER_PREFIX}-ctn-${PROJECT_NAME}}"
 
 # --- Main Logic ---
 case $COMMAND in
-    run)
-        echo "🚀 Preparing isolated container for '$PROJECT_NAME'..."
-        ensure_vm_running
-        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
-        build_image "$platform_flag"
-        cleanup_existing_container
-        
-        # Build enhanced container options
-        volume_mounts=$(get_common_volume_mounts)
-        ssh_mounts=$(get_ssh_key_mounts)
-        port_forwards=$(build_port_forwards)
-        security_flags=$(get_security_flags)
-        resource_limits=$(get_resource_limits)
-        
-        echo "🔧 Enhanced developer experience:"
-        if [[ -n "$port_forwards" ]]; then
-            echo "   -> Port forwarding enabled for detected services"
-        fi
-        if [[ -n "$ssh_mounts" ]]; then
-            echo "   -> SSH keys mounted for git authentication"
-        fi
-        echo "   -> Git configuration mounted for consistent commits"
-        echo "   -> Security hardening enabled (non-root user, limited capabilities)"
-        if [[ -n "$resource_limits" ]]; then
-            echo "   -> Resource limits applied: $resource_limits"
-        fi
-        echo ""
-        echo "✅ Connecting to container. Your project folder is at '/workspace'."
-        
-        # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
-        orb -m "$VM_NAME" sudo docker run -it --rm \
-            $security_flags \
-            $volume_mounts \
-            $ssh_mounts \
-            $port_forwards \
-            $resource_limits \
-            --name "$CONTAINER_NAME" \
-            "$IMAGE_NAME"
-        ;;
-    shell)
-        echo "🐚 Opening interactive shell in '$PROJECT_NAME' container..."
-        ensure_vm_running
-        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
-        build_image "$platform_flag"
-        cleanup_existing_container
-        
-        # Build enhanced container options
-        volume_mounts=$(get_common_volume_mounts)
-        ssh_mounts=$(get_ssh_key_mounts)
-        port_forwards=$(build_port_forwards)
-        security_flags=$(get_security_flags)
-        resource_limits=$(get_resource_limits)
-        
-        echo "🔧 Enhanced developer experience:"
-        if [[ -n "$port_forwards" ]]; then
-            echo "   -> Port forwarding enabled for detected services"
-        fi
-        if [[ -n "$ssh_mounts" ]]; then
-            echo "   -> SSH keys mounted for git authentication"
-        fi
-        echo "   -> Git configuration mounted for consistent commits"
-        echo "   -> Security hardening enabled (non-root user, limited capabilities)"
-        if [[ -n "$resource_limits" ]]; then
-            echo "   -> Resource limits applied: $resource_limits"
-        fi
-        echo ""
-        echo "✅ Container ready. Your project folder is at '/workspace'."
-        
-        # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
-        orb -m "$VM_NAME" sudo docker run -it --rm \
-            $security_flags \
-            $volume_mounts \
-            $ssh_mounts \
-            $port_forwards \
-            $resource_limits \
-            --name "$CONTAINER_NAME" \
-            "$IMAGE_NAME" bash
+    run|shell)
+        prepare_and_run_container "$COMMAND"
         ;;
     build)
         echo "🔨 Building container image for '$PROJECT_NAME'..."

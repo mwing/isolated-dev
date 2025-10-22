@@ -67,29 +67,7 @@ function parse_yaml_config() {
                 memory_limit) MEMORY_LIMIT="$value" ;;
                 cpu_limit) CPU_LIMIT="$value" ;;
             esac
-        # Handle legacy key = value format for backward compatibility
-        elif [[ "$line" =~ ^[[:space:]]*([^=]+)=[[:space:]]*(.*)$ ]]; then
-            local key="${BASH_REMATCH[1]}"
-            local value="${BASH_REMATCH[2]}"
-            
-            # Clean up key and value
-            key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'"'"']//;s/["'"'"']$//')
-            
-            # Set configuration variable
-            case "$key" in
-                vm_name) VM_NAME="$value" ;;
-                default_template) DEFAULT_TEMPLATE="$value" ;;
-                auto_start_vm) AUTO_START_VM="$value" ;;
-                container_prefix) CONTAINER_PREFIX="$value" ;;
-                network_mode) NETWORK_MODE="$value" ;;
-                auto_host_networking) AUTO_HOST_NETWORKING="$value" ;;
-                port_range) PORT_RANGE="$value" ;;
-                enable_port_health_check) ENABLE_PORT_HEALTH_CHECK="$value" ;;
-                port_health_timeout) PORT_HEALTH_TIMEOUT="$value" ;;
-                memory_limit) MEMORY_LIMIT="$value" ;;
-                cpu_limit) CPU_LIMIT="$value" ;;
-            esac
+        # Only YAML format supported
         fi
     done < "$config_file"
 }
@@ -181,10 +159,7 @@ function validate_config() {
         if [[ "$line" =~ ^[[:space:]]*([^:]+):[[:space:]]*(.*)$ ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
-        # Handle legacy format
-        elif [[ "$line" =~ ^[[:space:]]*([^=]+)=[[:space:]]*(.*)$ ]]; then
-            key="${BASH_REMATCH[1]}"
-            value="${BASH_REMATCH[2]}"
+        # Invalid format
         else
             echo "❌ Error: Invalid syntax on line: $line"
             ((errors++))

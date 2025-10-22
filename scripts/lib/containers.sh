@@ -60,8 +60,12 @@ function detect_common_ports() {
         ports+=(8080 8000 9000)
     fi
     
-    # Remove duplicates and return
-    printf '%s\n' "${ports[@]}" | sort -nu | tr '\n' ' '
+    # Remove duplicates using associative array
+    declare -A unique_ports
+    for port in "${ports[@]}"; do
+        unique_ports["$port"]=1
+    done
+    echo "${!unique_ports[@]}"
 }
 
 function get_ssh_key_mounts() {
@@ -109,6 +113,57 @@ function get_resource_limits() {
     fi
     
     echo "$resource_flags"
+}
+
+function prepare_and_run_container() {
+    local command="$1"
+    local action_msg="🚀 Preparing isolated container"
+    local ready_msg="✅ Connecting to container"
+    local cmd_args=""
+    
+    if [[ "$command" == "shell" ]]; then
+        action_msg="🐚 Opening interactive shell"
+        ready_msg="✅ Container ready"
+        cmd_args="bash"
+    fi
+    
+    echo "$action_msg for '$PROJECT_NAME'..."
+    ensure_vm_running
+    platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
+    build_image "$platform_flag"
+    cleanup_existing_container
+    
+    # Build enhanced container options
+    volume_mounts=$(get_common_volume_mounts)
+    ssh_mounts=$(get_ssh_key_mounts)
+    port_forwards=$(build_port_forwards)
+    security_flags=$(get_security_flags)
+    resource_limits=$(get_resource_limits)
+    
+    echo "🔧 Enhanced developer experience:"
+    if [[ -n "$port_forwards" ]]; then
+        echo "   -> Port forwarding enabled for detected services"
+    fi
+    if [[ -n "$ssh_mounts" ]]; then
+        echo "   -> SSH keys mounted for git authentication"
+    fi
+    echo "   -> Git configuration mounted for consistent commits"
+    echo "   -> Security hardening enabled (non-root user, limited capabilities)"
+    if [[ -n "$resource_limits" ]]; then
+        echo "   -> Resource limits applied: $resource_limits"
+    fi
+    echo ""
+    echo "$ready_msg. Your project folder is at '/workspace'."
+    
+    # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
+    orb -m "$VM_NAME" sudo docker run -it --rm \
+        $security_flags \
+        $volume_mounts \
+        $ssh_mounts \
+        $port_forwards \
+        $resource_limits \
+        --name "$CONTAINER_NAME" \
+        "$IMAGE_NAME" $cmd_args
 }
 
 function build_port_forwards() {

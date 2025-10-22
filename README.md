@@ -303,7 +303,7 @@ chmod +x k8s-container
 
 ### Global Configuration (`~/.dev-envs/config.yaml`)
 ```yaml
-# YAML format (recommended)
+# YAML format only
 vm_name: dev-vm-docker-host
 default_template: python-3.13
 auto_start_vm: true
@@ -320,6 +320,8 @@ port_health_timeout: 5                  # Timeout for port health checks (second
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 ```
+
+> **Note**: Only YAML format is supported for configuration files. The legacy `key=value` format has been removed for better consistency and validation.
 
 ### Project Configuration (`.devenv.yaml`)
 ```bash
@@ -356,10 +358,11 @@ DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
 ```bash
 dev config validate              # Validate all config files
 # Checks for:
-# - Valid YAML syntax
+# - Valid YAML syntax (only format supported)
 # - Known configuration keys
-# - Correct value types (boolean, string)
+# - Correct value types (boolean, string, number)
 # - Valid characters in names
+# - Network configuration values
 ```
 
 ## VS Code Integration
@@ -548,9 +551,10 @@ dev --platform <TAB>         # Shows: linux/amd64, linux/arm64
 - **Git Integration**: SSH keys and configuration automatically mounted
 - **VS Code Support**: Generate devcontainer.json configurations
 - **Multi-Architecture**: ARM64 and x86_64 support with auto-detection
-- **Smart Templates**: Auto-updating versions from Docker Hub
+- **Smart Templates**: Auto-updating versions from Docker Hub with caching
 - **Project Scaffolding**: Language-specific starter files
 - **Automation Support**: `--yes` flag for CI/CD pipelines
+- **Performance Optimized**: Cached API calls, optimized port detection, unified project detection
 
 ## License
 
