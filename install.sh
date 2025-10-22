@@ -29,6 +29,7 @@ Options:
     -h, --help       Show this help message
     -f, --force      Force installation, overwriting existing files
     -q, --quiet      Quiet mode, minimal output
+    -y, --yes        Automatically answer 'yes' to all prompts (for automation)
     --version        Show version information
     --uninstall      Remove all installed files and directories
     --uninstall-all  Remove everything including VMs (DESTRUCTIVE)
@@ -42,6 +43,7 @@ FORCE=false
 QUIET=false
 UNINSTALL=false
 UNINSTALL_ALL=false
+AUTO_YES=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --uninstall-all)
             UNINSTALL_ALL=true
+            shift
+            ;;
+        -y|--yes)
+            AUTO_YES=true
             shift
             ;;
         *)
@@ -123,13 +129,19 @@ uninstall_with_vms() {
             if [[ "$vm_name" =~ ^dev-vm- ]]; then
                 log "   -> Found VM: $vm_name"
                 vms_found=true
-                echo -n "     Delete VM '$vm_name'? (y/N): "
-                read -r response
-                if [[ "$response" =~ ^[Yy]$ ]]; then
+                if [[ "$AUTO_YES" == "true" ]]; then
+                    log "     Auto-confirming VM deletion (--yes flag set)"
                     log "     -> Deleting VM: $vm_name"
                     orb delete "$vm_name" 2>/dev/null || log "     -> Warning: Failed to delete $vm_name"
                 else
-                    log "     -> Skipped: $vm_name"
+                    echo -n "     Delete VM '$vm_name'? (y/N): "
+                    read -r response
+                    if [[ "$response" =~ ^[Yy]$ ]]; then
+                        log "     -> Deleting VM: $vm_name"
+                        orb delete "$vm_name" 2>/dev/null || log "     -> Warning: Failed to delete $vm_name"
+                    else
+                        log "     -> Skipped: $vm_name"
+                    fi
                 fi
             fi
         done < <(orb list -q 2>/dev/null || echo "")
@@ -305,18 +317,27 @@ setup_path() {
         log "${YELLOW}⚠️  WARNING: Your PATH does not include $BIN_DIR.${NC}"
         
         if [[ "$QUIET" == false ]]; then
-            echo -e "${BLUE}Would you like to automatically add it to your PATH? (y/N):${NC} \c"
-            read -r response
-            if [[ "$response" =~ ^[Yy]$ ]]; then
+            if [[ "$AUTO_YES" == "true" ]]; then
+                log "Auto-adding to PATH (--yes flag set)"
                 echo "" >> "$shell_profile"
                 echo "# Added by isolated-dev installer" >> "$shell_profile"
                 echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_profile"
                 log "${GREEN}✅ Added $BIN_DIR to PATH in $shell_profile${NC}"
                 log "${YELLOW}Please restart your terminal or run: source $shell_profile${NC}"
             else
-                log "${YELLOW}Please manually add the following line to your $shell_profile:${NC}"
-                log '    export PATH="$HOME/.local/bin:$PATH"'
-                log "${YELLOW}Then restart your terminal for the changes to take effect.${NC}"
+                echo -e "${BLUE}Would you like to automatically add it to your PATH? (y/N):${NC} \c"
+                read -r response
+                if [[ "$response" =~ ^[Yy]$ ]]; then
+                    echo "" >> "$shell_profile"
+                    echo "# Added by isolated-dev installer" >> "$shell_profile"
+                    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$shell_profile"
+                    log "${GREEN}✅ Added $BIN_DIR to PATH in $shell_profile${NC}"
+                    log "${YELLOW}Please restart your terminal or run: source $shell_profile${NC}"
+                else
+                    log "${YELLOW}Please manually add the following line to your $shell_profile:${NC}"
+                    log '    export PATH="$HOME/.local/bin:$PATH"'
+                    log "${YELLOW}Then restart your terminal for the changes to take effect.${NC}"
+                fi
             fi
         else
             log "${YELLOW}Please add the following line to your $shell_profile:${NC}"

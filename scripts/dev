@@ -165,6 +165,22 @@ function copy_scaffolding_files() {
 function handle_env_command() {
     local env_command="$1"
     local env_name="$2"
+    shift 2  # Remove command and env name
+    
+    # Process additional flags
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --yes|-y)
+                AUTO_YES=true
+                shift
+                ;;
+            *)
+                echo "❌ Error: Unknown flag for 'env' command: $1"
+                exit 1
+                ;;
+        esac
+    done
+    
     local setup_dir="$HOME/.dev-envs/setups"
     
     case "$env_command" in
@@ -259,13 +275,19 @@ function handle_env_command() {
                     ;;
                 rm)
                     echo "🔥 Deleting environment '$env_name'..."
-                    read -p "Are you sure you want to permanently delete VM '$vm_name'? (y/N) " -n 1 -r
-                    echo
-                    if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    if [[ "$AUTO_YES" == "true" ]]; then
+                        echo "Auto-confirming deletion (--yes flag set)"
                         orb delete "$vm_name"
                         echo "✅ VM '$vm_name' deleted."
                     else
-                        echo "Deletion cancelled."
+                        read -p "Are you sure you want to permanently delete VM '$vm_name'? (y/N) " -n 1 -r
+                        echo
+                        if [[ $REPLY =~ ^[Yy]$ ]]; then
+                            orb delete "$vm_name"
+                            echo "✅ VM '$vm_name' deleted."
+                        else
+                            echo "Deletion cancelled."
+                        fi
                     fi
                     ;;
             esac
@@ -461,6 +483,7 @@ function usage() {
     echo "  -f, --file     Specify Dockerfile path (default: ./Dockerfile)"
     echo "  -t, --tag      Specify custom image tag"
     echo "  -n, --name     Specify custom container name"
+    echo "  -y, --yes      Automatically answer 'yes' to all prompts (for automation)"
     echo ""
     echo "Enhanced Developer Experience:"
     echo "  • Automatic port forwarding detection (Node.js 3000, Python 8000, etc.)"
@@ -473,6 +496,8 @@ function usage() {
     echo "  $(basename "$0") shell                        # Open interactive shell"
     echo "  $(basename "$0") new python                   # Create from Python template"
     echo "  $(basename "$0") new node-22 --init           # Create Node.js template with scaffolding"
+    echo "  $(basename "$0") new python --yes             # Create template, auto-overwrite existing files"
+    echo "  $(basename "$0") templates cleanup 30 --yes   # Remove old templates without prompting"
     echo "  $(basename "$0") env down docker-host         # Stop VM to save battery"
     echo "  $(basename "$0") list                         # Show available templates with versions"
     echo ""
@@ -865,12 +890,16 @@ function cleanup_unused_templates() {
     echo ""
     echo "⚠️  This will remove $removed_count old template version(s)."
     echo "   Latest templates for each language will be preserved."
-    read -p "Continue? (y/N) " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Cleanup cancelled."
-        return
+    if [[ "$AUTO_YES" == "true" ]]; then
+        echo "Auto-confirming cleanup (--yes flag set)"
+    else
+        read -p "Continue? (y/N) " -n 1 -r
+        echo
+        
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Cleanup cancelled."
+            return
+        fi
     fi
     
     # Actually remove them
@@ -1296,11 +1325,15 @@ function handle_config_command() {
         --init)
             if [[ -f "$PROJECT_CONFIG" ]]; then
                 echo "⚠️  Project config already exists: $PROJECT_CONFIG"
-                echo -n "Do you want to overwrite it? (y/N): "
-                read -r response
-                if [[ ! "$response" =~ ^[Yy]$ ]]; then
-                    echo "Operation cancelled."
-                    exit 0
+                if [[ "$AUTO_YES" == "true" ]]; then
+                    echo "Auto-confirming overwrite (--yes flag set)"
+                else
+                    echo -n "Do you want to overwrite it? (y/N): "
+                    read -r response
+                    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                        echo "Operation cancelled."
+                        exit 0
+                    fi
                 fi
             fi
             
@@ -1409,11 +1442,15 @@ function create_from_template() {
     
     if [[ -f "$target_file" ]]; then
         echo "⚠️  Warning: Dockerfile already exists in current directory."
-        echo -n "Do you want to overwrite it? (y/N): "
-        read -r response
-        if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            echo "Operation cancelled."
-            exit 0
+        if [[ "$AUTO_YES" == "true" ]]; then
+            echo "Auto-confirming overwrite (--yes flag set)"
+        else
+            echo -n "Do you want to overwrite it? (y/N): "
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                echo "Operation cancelled."
+                exit 0
+            fi
         fi
     fi
     
@@ -1447,6 +1484,7 @@ DOCKERFILE="Dockerfile"
 COMMAND="run"
 CUSTOM_TAG=""
 CUSTOM_NAME=""
+AUTO_YES=false
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
@@ -1472,7 +1510,22 @@ while [[ $# -gt 0 ]]; do
                     exit 0
                     ;;
                 cleanup)
-                    cleanup_unused_templates "$3"
+                    # Handle optional days parameter and --yes flag
+                    days="$3"
+                    shift 3  # Remove 'templates', 'cleanup', and days
+                    while [[ $# -gt 0 ]]; do
+                        case $1 in
+                            --yes|-y)
+                                AUTO_YES=true
+                                shift
+                                ;;
+                            *)
+                                echo "❌ Error: Unknown flag for 'templates cleanup': $1"
+                                exit 1
+                                ;;
+                        esac
+                    done
+                    cleanup_unused_templates "$days"
                     exit 0
                     ;;
                 stats)
@@ -1487,7 +1540,23 @@ while [[ $# -gt 0 ]]; do
             esac
             ;;
         config)
-            handle_config_command "$2"
+            shift 1  # Remove 'config'
+            # Parse config subcommand and flags
+            subcommand="$1"
+            shift 1
+            while [[ $# -gt 0 ]]; do
+                case $1 in
+                    --yes|-y)
+                        AUTO_YES=true
+                        shift
+                        ;;
+                    *)
+                        echo "❌ Error: Unknown flag for 'config' command: $1"
+                        exit 1
+                        ;;
+                esac
+            done
+            handle_config_command "$subcommand"
             ;;
         new)
             if [[ -z "$2" ]]; then
@@ -1495,12 +1564,29 @@ while [[ $# -gt 0 ]]; do
                 echo "Use 'dev list' to see available options."
                 exit 1
             fi
-            # Check for --init flag
+            # Parse flags for new command
             init_project=false
             language="$2"
-            if [[ "$3" == "--init" ]]; then
-                init_project=true
-            fi
+            shift 2  # Remove 'new' and language from args
+            
+            # Process remaining arguments for flags
+            while [[ $# -gt 0 ]]; do
+                case $1 in
+                    --init)
+                        init_project=true
+                        shift
+                        ;;
+                    --yes|-y)
+                        AUTO_YES=true
+                        shift
+                        ;;
+                    *)
+                        echo "❌ Error: Unknown flag for 'new' command: $1"
+                        exit 1
+                        ;;
+                esac
+            done
+            
             create_from_template "$language" "$init_project"
             ;;
         -f|--file)
@@ -1514,6 +1600,10 @@ while [[ $# -gt 0 ]]; do
         -n|--name)
             CUSTOM_NAME="$2"
             shift 2
+            ;;
+        -y|--yes)
+            AUTO_YES=true
+            shift
             ;;
         run|build|clean|shell)
             COMMAND="$1"
@@ -1539,7 +1629,9 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         env)
-            handle_env_command "$2" "$3"
+            # Pass all remaining arguments to handle_env_command
+            shift 1  # Remove 'env'
+            handle_env_command "$@"
             exit 0
             ;;
         *)
