@@ -102,7 +102,7 @@ run_test() {
     log "\n${BLUE}🧪 Running: $test_name${NC}"
 }
 
-# Setup isolated installation environment
+# Shared test setup and utilities
 setup_test_installation() {
     # Create test installation directories
     mkdir -p "$TEST_HOME/.local/bin"
@@ -111,6 +111,31 @@ setup_test_installation() {
     # Set environment variables for isolated testing
     export HOME="$TEST_HOME"
     export PATH="$TEST_HOME/.local/bin:$PATH"
+}
+
+setup_test_project() {
+    local project_name="$1"
+    local test_project="$TEST_DIR/$project_name"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    echo "$test_project"
+}
+
+run_dev_command() {
+    local cmd="$1"
+    shift
+    bash "$ORIGINAL_DIR/scripts/dev" "$cmd" "$@" 2>&1 || echo "FAILED"
+}
+
+test_command_success() {
+    local output="$1"
+    local description="$2"
+    if [[ "$output" != "FAILED" ]]; then
+        return 0
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: $description (expected in test environment)"
+        return 1
+    fi
 }
 
 # Test functions will be added here

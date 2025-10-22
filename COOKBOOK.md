@@ -486,7 +486,7 @@ dev --platform linux/amd64 shell -c "npm test"
 
 ### Fast Startup Configuration
 ```bash
-# Per project (recommended)
+# Per project (recommended) - YAML format only
 dev config --init --yes
 cat >> .devenv.yaml << EOF
 auto_start_vm: true
@@ -497,7 +497,7 @@ memory_limit: "512m"     # Limit memory for faster startup
 cpu_limit: "0.5"         # Limit CPU usage
 EOF
 
-# Or globally in ~/.dev-envs/config.yaml
+# Or globally in ~/.dev-envs/config.yaml (YAML format only)
 ```
 
 ### Development vs Production Builds
@@ -598,15 +598,17 @@ dev env new docker-host
 
 ### Configuration Problems
 ```bash
-# Validate configuration
+# Validate configuration (YAML format only)
 dev config validate
 
 # Reset to defaults
 mv ~/.dev-envs/config.yaml ~/.dev-envs/config.yaml.backup
-dev config  # Creates new default config
+dev config  # Creates new default YAML config
 
 # Check environment overrides
 DEV_VM_NAME=test-vm dev config
+
+# Note: Only YAML format supported (legacy key=value format removed)
 ```
 
 ### Performance Issues

@@ -95,40 +95,91 @@ function copy_scaffolding_files_from_plugin() {
     return 0
 }
 
+function get_cached_api_response() {
+    local cache_key="$1"
+    local cache_file="$HOME/.dev-envs/cache/$cache_key"
+    local cache_ttl=3600  # 1 hour
+    
+    if [[ -f "$cache_file" ]]; then
+        local cache_age=$(( $(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
+        if [[ $cache_age -lt $cache_ttl ]]; then
+            cat "$cache_file"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+function cache_api_response() {
+    local cache_key="$1"
+    local response="$2"
+    local cache_dir="$HOME/.dev-envs/cache"
+    mkdir -p "$cache_dir"
+    echo "$response" > "$cache_dir/$cache_key"
+}
+
 function get_latest_python_version() {
-    # Fetch latest stable Python version from Docker Hub API
+    local cached_version
+    if cached_version=$(get_cached_api_response "python_latest"); then
+        echo "$cached_version"
+        return
+    fi
+    
     local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/python/tags/?page_size=100" 2>/dev/null | \
         jq -r '.results[].name' 2>/dev/null | \
         grep -E '^3\.[0-9]+$' | \
         sort -V | tail -1 2>/dev/null)
-    echo "${latest:-3.14}"
+    latest="${latest:-3.14}"
+    cache_api_response "python_latest" "$latest"
+    echo "$latest"
 }
 
 function get_latest_node_version() {
-    # Fetch latest stable Node.js version from Docker Hub API
+    local cached_version
+    if cached_version=$(get_cached_api_response "node_latest"); then
+        echo "$cached_version"
+        return
+    fi
+    
     local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/node/tags/?page_size=100" 2>/dev/null | \
         jq -r '.results[].name' 2>/dev/null | \
         grep -E '^[0-9]+$' | \
         sort -n | tail -1 2>/dev/null)
-    echo "${latest:-22}"
+    latest="${latest:-22}"
+    cache_api_response "node_latest" "$latest"
+    echo "$latest"
 }
 
 function get_latest_golang_version() {
-    # Fetch latest stable Go version from Docker Hub API
+    local cached_version
+    if cached_version=$(get_cached_api_response "golang_latest"); then
+        echo "$cached_version"
+        return
+    fi
+    
     local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/golang/tags/?page_size=100" 2>/dev/null | \
         jq -r '.results[].name' 2>/dev/null | \
         grep -E '^1\.[0-9]+$' | \
         sort -V | tail -1 2>/dev/null)
-    echo "${latest:-1.23}"
+    latest="${latest:-1.23}"
+    cache_api_response "golang_latest" "$latest"
+    echo "$latest"
 }
 
 function get_latest_rust_version() {
-    # Fetch latest stable Rust version from Docker Hub API
+    local cached_version
+    if cached_version=$(get_cached_api_response "rust_latest"); then
+        echo "$cached_version"
+        return
+    fi
+    
     local latest=$(curl -s --max-time 10 "https://registry.hub.docker.com/v2/repositories/library/rust/tags/?page_size=100" 2>/dev/null | \
         jq -r '.results[].name' 2>/dev/null | \
         grep -E '^1\.[0-9]+$' | \
         sort -V | tail -1 2>/dev/null)
-    echo "${latest:-1.82}"
+    latest="${latest:-1.82}"
+    cache_api_response "rust_latest" "$latest"
+    echo "$latest"
 }
 
 function check_template_updates() {
