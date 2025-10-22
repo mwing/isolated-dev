@@ -182,12 +182,16 @@ confirm_uninstall() {
     fi
     
     echo ""
-    echo -n "Are you sure you want to proceed? (y/N): "
-    read -r response
-    
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        log "Uninstall cancelled."
-        exit 0
+    if [[ "$AUTO_YES" == "true" ]]; then
+        log "Auto-confirming uninstall (--yes flag set)"
+    else
+        echo -n "Are you sure you want to proceed? (y/N): "
+        read -r response
+        
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            log "Uninstall cancelled."
+            exit 0
+        fi
     fi
 }
 
@@ -255,6 +259,11 @@ rm -f "$BIN_DIR/devenv"
 
 cp "$SRC_DIR/scripts/dev" "$BIN_DIR/" || error_exit "Failed to copy dev"
 chmod +x "$BIN_DIR/dev" || error_exit "Failed to make dev executable"
+
+# Install lib directory
+log "   -> Installing lib directory to $BIN_DIR"
+mkdir -p "$BIN_DIR/lib" || error_exit "Failed to create lib directory"
+cp "$SRC_DIR/scripts/lib/"* "$BIN_DIR/lib/" || error_exit "Failed to copy lib files"
 
 # Install config
 log "   -> Installing config to $CONFIG_DIR"

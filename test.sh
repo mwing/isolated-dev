@@ -129,14 +129,12 @@ test_help_commands() {
     run_test "Help commands"
     
     # Test install.sh help
-    local install_help=$(./install.sh --help 2>&1 | head -1)
+    local install_help=$(bash install.sh --help 2>&1 | head -1)
     assert_contains "$install_help" "Isolated Development Environment Installer" "install.sh --help works"
     
-    # Test that dev help doesn't crash (requires installation)
-    if [[ -f "$HOME/.local/bin/dev" ]]; then
-        local dev_help=$(dev --help 2>&1 | head -1 | grep -o "Usage:" || echo "")
-        assert_contains "$dev_help" "Usage" "dev --help works"
-    fi
+    # Test that dev help doesn't crash
+    local dev_help=$(bash scripts/dev --help 2>&1 | head -1 | grep -o "Usage:" || echo "")
+    assert_contains "$dev_help" "Usage" "dev --help works"
 }
 
 test_skeleton_files() {
@@ -168,7 +166,7 @@ test_installation() {
     setup_test_installation
     
     # Test installation with --yes flag (using isolated HOME)
-    local install_output=$(./install.sh --force --yes --quiet 2>&1)
+    local install_output=$(bash install.sh --force --yes --quiet 2>&1)
     local install_exit_code=$?
     
     assert_equals "0" "$install_exit_code" "Installation completes successfully"
@@ -183,19 +181,22 @@ test_installation() {
 test_template_creation() {
     run_test "Template creation in test environment"
     
+    # Ensure test environment is set up
+    setup_test_installation
+    
     # Create test directory
     local test_project="$TEST_DIR/test-project"
     mkdir -p "$test_project"
     cd "$test_project"
     
     # Test that dev command exists in our test environment
-    if [[ ! -f "$TEST_HOME/.local/bin/dev" ]]; then
+    if [[ ! -f "$HOME/.local/bin/dev" ]]; then
         log "${YELLOW}⏭️  SKIP${NC}: dev not installed, skipping template tests"
         return
     fi
     
     # Test template creation with --yes flag (using our test installation)
-    local template_output=$("$TEST_HOME/.local/bin/dev" new python-3.13 --init --yes 2>&1 || echo "FAILED")
+    local template_output=$("$HOME/.local/bin/dev" new python-3.13 --init --yes 2>&1 || echo "FAILED")
     
     if [[ "$template_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/Dockerfile" "Dockerfile created from template"
@@ -215,18 +216,15 @@ test_template_creation() {
 test_config_creation() {
     run_test "Configuration creation"
     
+    # Ensure test environment is set up
+    setup_test_installation
+    
     local test_project="$TEST_DIR/test-config"
     mkdir -p "$test_project"
     cd "$test_project"
     
-    if [[ ! -f "$HOME/.local/bin/dev" ]]; then
-        log "${YELLOW}⏭️  SKIP${NC}: dev not installed, skipping config tests"
-        cd - > /dev/null
-        return
-    fi
-    
-    # Test project config creation
-    local config_output=$(dev config --init --yes 2>&1 || echo "FAILED")
+    # Test project config creation using the installed dev script
+    local config_output=$("$HOME/.local/bin/dev" config --init --yes 2>&1 || echo "FAILED")
     
     if [[ "$config_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/.devenv.yaml" "Project config file created"
@@ -245,13 +243,12 @@ test_flag_parsing() {
     run_test "Command line flag parsing"
     
     # Test install.sh flag parsing (just check help output includes --yes)
-    local install_help=$(./install.sh --help 2>&1)
+    local install_help=$(bash install.sh --help 2>&1)
     assert_contains "$install_help" "--yes" "install.sh --help mentions --yes flag"
     
-    if [[ -f "$HOME/.local/bin/dev" ]]; then
-        local dev_help=$(dev --help 2>&1)
-        assert_contains "$dev_help" "--yes" "dev --help mentions --yes flag"
-    fi
+    # Test dev flag parsing
+    local dev_help=$(bash scripts/dev --help 2>&1)
+    assert_contains "$dev_help" "--yes" "dev --help mentions --yes flag"
 }
 
 # Main test execution
