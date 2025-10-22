@@ -1,6 +1,6 @@
 name: bash
 display_name: Bash
-versions: ["latest"]
+versions: ["22.04", "20.04"]
 
 detection:
   files: ["*.sh", "script.sh", "main.sh"]

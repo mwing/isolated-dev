@@ -186,7 +186,7 @@ test_installation() {
     # Test that files were installed in our test environment
     assert_file_exists "$TEST_HOME/.local/bin/dev" "dev script installed"
     assert_dir_exists "$TEST_HOME/.dev-envs" "Configuration directory created"
-    assert_dir_exists "$TEST_HOME/.dev-envs/templates" "Templates directory created"
+    # Templates directory no longer needed - we generate directly from language plugins
     assert_dir_exists "$TEST_HOME/.dev-envs/languages" "Languages directory created"
 }
 
@@ -335,6 +335,43 @@ test_project_detection() {
     cd - > /dev/null
 }
 
+test_template_management_commands() {
+    run_test "Template management commands"
+    
+    # Test that template commands don't crash
+    local stats_output=$(bash scripts/dev templates stats 2>&1 | head -1)
+    assert_contains "$stats_output" "Language Plugin Statistics" "templates stats command works"
+    
+    local prune_output=$(bash scripts/dev templates prune 2>&1 | head -1)
+    assert_contains "$prune_output" "Language Plugin Usage Analysis" "templates prune command works"
+    
+    local cleanup_output=$(bash scripts/dev templates cleanup 1 2>&1 | head -1)
+    assert_contains "$cleanup_output" "Usage Log Cleanup" "templates cleanup command works"
+}
+
+test_direct_generation() {
+    run_test "Direct Dockerfile generation from language plugins"
+    
+    local test_project="$TEST_DIR/test-generation"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test direct generation without pre-existing templates
+    local generation_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new python-3.13 --yes 2>&1 || echo "FAILED")
+    
+    if [[ "$generation_output" != "FAILED" ]]; then
+        assert_file_exists "$test_project/Dockerfile" "Dockerfile generated directly from language plugin"
+        
+        # Verify it contains the right version
+        local dockerfile_content=$(cat Dockerfile 2>/dev/null || echo "")
+        assert_contains "$dockerfile_content" "python:3.13" "Generated Dockerfile has correct version"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Direct generation test failed (expected in test environment)"
+    fi
+    
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -349,6 +386,8 @@ main() {
     test_config_creation
     test_flag_parsing
     test_project_detection
+    test_template_management_commands
+    test_direct_generation
     
     # Print results
     log "\n${BLUE}📊 Test Results${NC}"

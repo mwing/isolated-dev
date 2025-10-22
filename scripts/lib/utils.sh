@@ -250,49 +250,52 @@ function show_command_help() {
 }
 
 function list_templates() {
-    echo "Available Dockerfile templates:"
-    if [[ -d "$TEMPLATES_DIR" ]]; then
+    echo "Available language templates:"
+    if [[ -d "$LANGUAGES_DIR" ]]; then
         local templates_found=false
         
         # Create a simple formatted list
         printf "  %-12s %s\\n" "Language" "Available Versions"
         printf "  %-12s %s\\n" "--------" "------------------"
         
-        # Process templates dynamically by discovering all languages
-        local all_languages=$(ls "$TEMPLATES_DIR"/Dockerfile-* 2>/dev/null | grep -v '\\.backup\\.' | sed 's/.*Dockerfile-//' | sed 's/-.*$//' | sort -u)
-        
-        for lang in $all_languages; do
-            local versions=""
-            local version_count=0
+        # Process language plugins
+        for lang_dir in "$LANGUAGES_DIR"/*; do
+            [[ ! -d "$lang_dir" ]] && continue
+            [[ "$(basename "$lang_dir")" == "README.md" ]] && continue
             
-            # Find all versions for this language
-            for template_path in "$TEMPLATES_DIR/Dockerfile-$lang"-*; do
-                if [[ -f "$template_path" ]] && [[ "$template_path" != *".backup."* ]]; then
-                    local template_name=$(basename "$template_path" | sed 's/Dockerfile-//')
-                    local version="${template_name#*-}"
-                    
-                    if [[ $version_count -eq 0 ]]; then
-                        versions="$version"
-                    else
-                        versions="$versions, $version"
-                    fi
-                    ((version_count++))
-                    found_templates=true
+            local lang_name=$(basename "$lang_dir")
+            local versions=""
+            
+            # Read versions from language.yaml
+            if [[ -f "$lang_dir/language.yaml" ]]; then
+                local versions_line=$(grep "versions:" "$lang_dir/language.yaml" | head -1)
+                if [[ "$versions_line" =~ versions:[[:space:]]*\[(.*)\] ]]; then
+                    local versions_str="${BASH_REMATCH[1]}"
+                    # Clean up the versions string
+                    versions=$(echo "$versions_str" | sed 's/"//g' | sed 's/,/, /g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
                     templates_found=true
                 fi
-            done
+            fi
             
-            # Display if we found templates for this language
-            if [[ $version_count -gt 0 ]]; then
-                printf "  %-12s %s\\n" "$lang" "$versions"
+            # Display language and versions
+            if [[ -n "$versions" ]]; then
+                printf "  %-12s %s\\n" "$lang_name" "$versions"
+            else
+                printf "  %-12s %s\\n" "$lang_name" "(no versions defined)"
             fi
         done
         
         if [[ "$templates_found" == false ]]; then
-            echo "  (No templates found - run installer first)"
+            echo "  (No language plugins found - run installer first)"
         fi
     else
-        echo "  (Templates directory not found - run installer first)"
+        echo "  (Languages directory not found - run installer first)"
     fi
+    
+    echo ""
+    echo "Usage:"
+    echo "  dev new <language>         # Use default/latest version"
+    echo "  dev new <language-version> # Use specific version"
+    echo "  dev new python-3.13 --init # Create with project scaffolding"
     exit 0
 }

@@ -8,7 +8,6 @@ VERSION="1.0.0"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="$HOME/.dev-envs/setups"
-TEMPLATES_DIR="$HOME/.dev-envs/templates"
 LANGUAGES_DIR="$HOME/.dev-envs/languages"
 
 # Colors for output
@@ -214,13 +213,13 @@ log "   -> Validating source files..."
 # Source files validation
 [[ -f "$SRC_DIR/scripts/dev" ]] || error_exit "Source file scripts/dev not found"
 [[ -f "$SRC_DIR/config/docker-host.yaml" ]] || error_exit "Source file config/docker-host.yaml not found"
-[[ -d "$SRC_DIR/templates" ]] || error_exit "Source directory templates not found"
+[[ -d "$SRC_DIR/languages" ]] || error_exit "Source directory languages not found"
 
 # Create destination directories if they don't exist
 log "   -> Creating destination directories..."
 mkdir -p "$BIN_DIR" || error_exit "Failed to create directory $BIN_DIR"
 mkdir -p "$CONFIG_DIR" || error_exit "Failed to create directory $CONFIG_DIR"
-mkdir -p "$TEMPLATES_DIR" || error_exit "Failed to create directory $TEMPLATES_DIR"
+
 mkdir -p "$LANGUAGES_DIR" || error_exit "Failed to create directory $LANGUAGES_DIR"
 
 # Cleanup old backup files (keep only the 3 most recent)
@@ -263,22 +262,14 @@ chmod +x "$BIN_DIR/dev" || error_exit "Failed to make dev executable"
 # Install lib directory
 log "   -> Installing lib directory to $BIN_DIR"
 mkdir -p "$BIN_DIR/lib" || error_exit "Failed to create lib directory"
-cp "$SRC_DIR/scripts/lib/"* "$BIN_DIR/lib/" || error_exit "Failed to copy lib files"
+cp "$SRC_DIR/scripts/lib/"*.sh "$BIN_DIR/lib/" || error_exit "Failed to copy lib files"
 
 # Install config
 log "   -> Installing config to $CONFIG_DIR"
 backup_existing "$CONFIG_DIR/docker-host.yaml"
 cp "$SRC_DIR/config/docker-host.yaml" "$CONFIG_DIR/docker-host.yaml" || error_exit "Failed to copy config file"
 
-# Install templates
-log "   -> Installing templates to $TEMPLATES_DIR"
-for template in "$SRC_DIR/templates"/*; do
-    if [[ -f "$template" ]]; then
-        template_name=$(basename "$template")
-        backup_existing "$TEMPLATES_DIR/$template_name"
-        cp "$template" "$TEMPLATES_DIR/$template_name" || error_exit "Failed to copy template $template_name"
-    fi
-done
+
 
 # Install language plugins
 log "   -> Installing language plugins to $LANGUAGES_DIR"
@@ -362,10 +353,10 @@ verify_installation() {
     log "   -> Verifying installation..."
     [[ -x "$BIN_DIR/dev" ]] || error_exit "dev is not executable"
     [[ -f "$CONFIG_DIR/docker-host.yaml" ]] || error_exit "Config file not found"
-    [[ -d "$TEMPLATES_DIR" ]] || error_exit "Templates directory not found"
-    local template_count=$(find "$TEMPLATES_DIR" -name "Dockerfile-*" | wc -l)
-    [[ $template_count -gt 0 ]] || error_exit "No Dockerfile templates found"
-    log "${GREEN}✅ All files installed successfully (including $template_count templates)${NC}"
+    [[ -d "$LANGUAGES_DIR" ]] || error_exit "Languages directory not found"
+    local language_count=$(find "$LANGUAGES_DIR" -name "language.yaml" | wc -l)
+    [[ $language_count -gt 0 ]] || error_exit "No language plugins found"
+    log "${GREEN}✅ All files installed successfully (including $language_count language plugins)${NC}"
 }
 
 # Main installation flow

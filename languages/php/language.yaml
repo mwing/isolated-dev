@@ -1,6 +1,6 @@
 name: php
 display_name: PHP
-versions: ["8.3"]
+versions: ["8.2", "8.3"]
 
 detection:
   files: ["composer.json", "index.php", "*.php"]
