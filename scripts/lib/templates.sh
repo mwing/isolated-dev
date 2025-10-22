@@ -269,6 +269,7 @@ function create_from_template() {
     local language="$1"
     local init_project="${2:-false}"
     local platform="${3:-}"
+    local generate_devcontainer="${4:-false}"
     local target_file="./Dockerfile"
     
     if [[ ! -d "$LANGUAGES_DIR" ]]; then
@@ -360,7 +361,23 @@ function create_from_template() {
         init_project_scaffolding "$base_lang"
     fi
     
+    # Generate devcontainer configuration if requested
+    if [[ "$generate_devcontainer" == "true" ]]; then
+        echo "🔧 Generating VS Code devcontainer configuration..."
+        if generate_devcontainer_config "$language" "$version" "$target_file"; then
+            echo "   ✅ VS Code devcontainer.json created"
+        else
+            echo "   ⚠️  Failed to generate devcontainer configuration"
+        fi
+    fi
+    
     echo "You can now run 'dev' to build and run your container."
+    if [[ "$generate_devcontainer" == "true" ]]; then
+        echo "Or open in VS Code and use 'Dev Containers: Reopen in Container'."
+    else
+        echo ""
+        echo "💡 Tip: Add VS Code devcontainer support with 'dev devcontainer' or use --devcontainer flag next time."
+    fi
     exit 0
 }
 
@@ -668,4 +685,175 @@ function cleanup_unused_templates() {
     echo ""
     echo "✅ Usage log cleanup complete! Removed $removed_entries old entries."
     echo "💡 Language plugins remain available (they're never removed)."
+}
+
+function generate_devcontainer_config() {
+    local language="$1"
+    local version="$2"
+    local dockerfile_path="${3:-./Dockerfile}"
+    
+    # Parse language and version
+    local base_lang="${language%%-*}"
+    local lang_version="${language#*-}"
+    if [[ "$base_lang" == "$lang_version" ]]; then
+        lang_version="$version"
+    fi
+    
+    # Get language configuration
+    local language_dir="$LANGUAGES_DIR/$base_lang"
+    if [[ ! -f "$language_dir/language.yaml" ]]; then
+        echo "❌ Error: Language configuration not found: $language_dir/language.yaml"
+        return 1
+    fi
+    
+    # Extract ports from language.yaml
+    local ports=()
+    local ports_line=$(grep "ports:" "$language_dir/language.yaml" | head -1)
+    if [[ "$ports_line" =~ ports:[[:space:]]*\[(.*)\] ]]; then
+        local ports_str="${BASH_REMATCH[1]}"
+        IFS=',' read -ra ports_array <<< "$ports_str"
+        for port in "${ports_array[@]}"; do
+            port=$(echo "$port" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+            [[ -n "$port" ]] && ports+=("$port")
+        done
+    fi
+    
+    # Get display name
+    local display_name=$(grep "display_name:" "$language_dir/language.yaml" | head -1 | sed 's/display_name:[[:space:]]*//' | sed 's/^"//;s/"$//')
+    [[ -z "$display_name" ]] && display_name="$base_lang"
+    
+    # Create .devcontainer directory
+    mkdir -p .devcontainer
+    
+    # Generate devcontainer.json
+    local config_file=".devcontainer/devcontainer.json"
+    
+    cat > "$config_file" << EOF
+{
+  "name": "$display_name Development Environment",
+  "dockerFile": "../$(basename "$dockerfile_path")",
+  "workspaceFolder": "/workspace",
+  "mounts": [
+    "source=\${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "source=\${localEnv:HOME}/.ssh,target=/home/dev/.ssh,type=bind,readonly",
+    "source=\${localEnv:HOME}/.gitconfig,target=/home/dev/.gitconfig,type=bind,readonly"
+  ],
+EOF
+    
+    # Add port forwarding if ports are defined
+    if [[ ${#ports[@]} -gt 0 ]]; then
+        echo '  "forwardPorts": [' >> "$config_file"
+        for i in "${!ports[@]}"; do
+            if [[ $i -eq $((${#ports[@]} - 1)) ]]; then
+                echo "    ${ports[i]}" >> "$config_file"
+            else
+                echo "    ${ports[i]}," >> "$config_file"
+            fi
+        done
+        echo '  ],' >> "$config_file"
+    fi
+    
+    # Add language-specific settings
+    case "$base_lang" in
+        python)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.pylint",
+        "ms-python.black-formatter"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black"
+      }
+    }
+  },
+EOF
+            ;;
+        node)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.vscode-typescript-next",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-eslint"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true,
+        "eslint.validate": ["javascript", "typescript"]
+      }
+    }
+  },
+EOF
+            ;;
+        golang)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ],
+      "settings": {
+        "go.toolsManagement.checkForUpdates": "local",
+        "go.useLanguageServer": true,
+        "go.gopath": "/go",
+        "go.goroot": "/usr/local/go"
+      }
+    }
+  },
+EOF
+            ;;
+        rust)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy"
+      }
+    }
+  },
+EOF
+            ;;
+        java)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "redhat.java",
+        "vscjava.vscode-java-debug",
+        "vscjava.vscode-maven"
+      ]
+    }
+  },
+EOF
+            ;;
+        php)
+            cat >> "$config_file" << 'EOF'
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "bmewburn.vscode-intelephense-client",
+        "xdebug.php-debug"
+      ]
+    }
+  },
+EOF
+            ;;
+    esac
+    
+    # Close the JSON
+    echo '  "remoteUser": "dev"' >> "$config_file"
+    echo '}' >> "$config_file"
+    
+    return 0
 }

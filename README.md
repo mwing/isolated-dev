@@ -1,91 +1,36 @@
------
-
 # Isolated Development Environment Tools for Mac using OrbStack
 
-A comprehensive toolkit for creating secure, isolated development environments using OrbStack VMs and Docker containers. This system protects your host machine by running all development work in sandboxed environments while maintaining seamless integration with your local development workflow.
+Secure, isolated development environments using OrbStack VMs and Docker containers. Run all development work in sandboxed environments while maintaining seamless integration with your local workflow.
 
-## 🚀 Features
+## Table of Contents
 
-### 🏗️ **Core Development Features**
-- **Multiple Language Support**: Pre-built templates for Python, Node.js, Go, Rust, Java, PHP, and Bash
-- **Security First**: All development work runs in isolated containers with non-root users
-- **Quick Setup**: One-command environment creation and project bootstrapping
-- **Smart Management**: Automatic VM lifecycle management and resource optimization
-- **Developer Tools**: Each template includes essential development tools (git, vim, curl, etc.)
+- [Use Cases](#use-cases)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Available Templates](#available-templates)
+- [Examples](#examples)
+- [Commands](#commands)
+- [Configuration](#configuration)
+- [VS Code Integration](#vs-code-integration)
+- [Multi-Architecture Support](#multi-architecture-support)
+- [Troubleshooting](#troubleshooting)
 
-### 🎯 **Enhanced Developer Experience**
-- **Automatic Port Forwarding**: Intelligent detection based on project type (Node.js 3000, Python 8000, etc.)
-- **SSH Key Integration**: Seamless git operations with automatic key mounting
-- **Git Configuration Sharing**: Consistent commits between host and container
-- **Smart Template Matching**: Intelligent version selection when exact versions aren't available
-- **Project Scaffolding**: Language-specific starter files with `--init` flag
+## Use Cases
 
-### ⚙️ **Advanced Management**
-- **Unified Command Structure**: Single `dev` command with integrated environment management
-- **Template Lifecycle Management**: Smart cleanup, usage tracking, and automatic updates
-- **Dynamic Version Detection**: Real-time template updates from Docker Hub APIs
-- **Comprehensive Configuration**: Global and project-local configuration files
-- **Template Statistics**: Usage analytics and cleanup recommendations
+- **Experimentation**: Try new languages without polluting your system
+- **Security**: Run untrusted code in isolated environments
+- **Team Consistency**: Standardize development environments across team members
+- **CI/CD Integration**: Test locally in production-like containers
 
-### 📖 **Usability Enhancements**
-- **Comprehensive Help System**: Command-specific help, troubleshooting guides, and contextual error messages
-- **Intelligent Naming**: Consistent, predictable naming conventions across all components
-- **Better Error Messages**: Clear diagnostics with actionable suggestions
-- **Cross-Platform Compatibility**: Works across different bash versions and macOS configurations
+## Prerequisites
 
-### 🏗️ **Multi-Architecture Support**
-- **Automatic Architecture Detection**: Auto-detects ARM64 vs x86_64 host architecture
-- **Cross-Platform Development**: `--platform` flag for building containers for different architectures
-- **Apple Silicon Native**: Full support for ARM64 containers on Apple Silicon Macs
-- **Intel Compatibility**: Seamless x86_64 support for Intel-based systems
-- **Architecture Information**: `dev arch` command shows platform details and usage
-
------
-
-## 🆕 What's New in v2.0
-
-### 🎯 **Unified Command Structure**
-- **Single `dev` command**: Environment management integrated as `dev env` subcommands
-- **Simplified workflow**: No more separate `devenv` command - everything unified under `dev`
-- **Consistent interface**: Coherent command structure with better help and error messages
-
-### 🧹 **Intelligent Template Management**
-- **Smart Cleanup**: `dev templates prune` removes old templates while protecting latest versions
-- **Usage Tracking**: System learns which templates you use for intelligent cleanup decisions  
-- **Template Statistics**: `dev templates stats` shows usage patterns and storage information
-- **Auto-Update System**: Latest versions automatically detected from Docker Hub APIs
-
-### ⚡ **Enhanced Reliability**
-- **Improved Stability**: Removed cache mounting to prevent VM conflicts and improve reliability
-- **Cross-Platform Compatibility**: Works across different bash versions and macOS configurations
-- **Better Error Handling**: Clear diagnostics with actionable suggestions for common issues
-
-### 📚 **Comprehensive Help System**
-- **Command-specific Help**: `dev help <command>` provides detailed guidance for each feature
-- **Troubleshooting Guide**: `dev troubleshoot` offers solutions for common problems
-- **Contextual Messages**: Better error messages with specific next steps
-
-### 🤖 **Automation & CI/CD Support**
-- **Non-interactive Mode**: `--yes`/`-y` flag eliminates all prompts for automation
-- **Script-friendly**: Perfect for CI/CD pipelines, deployment scripts, and automated workflows
-- **Smart Defaults**: Maintains safety while enabling full automation
-- **Consistent Behavior**: Reliable, predictable operation in headless environments
-
-### 🏗️ **Multi-Architecture Support**
-- **Automatic Detection**: Detects ARM64 vs x86_64 and uses appropriate base images
-- **Cross-Platform Builds**: `--platform` flag for targeting different architectures
-- **Apple Silicon Optimized**: Native ARM64 container support for M1/M2/M3 Macs
-- **Architecture Command**: `dev arch` shows platform information and usage examples
-
------
-
-## 📦 Installation
-
-### Prerequisites
 - [OrbStack](https://orbstack.dev/) installed and running
 - macOS with Terminal access
+- `jq` installed (`brew install jq`)
 
-### Quick Install
+## Installation
+
 ```bash
 # Clone the repository
 git clone https://github.com/mwing/isolated-dev.git
@@ -99,386 +44,154 @@ cd isolated-dev
 ```bash
 ./install.sh --help     # Show all options
 ./install.sh --force    # Force overwrite existing files
-./install.sh --quiet    # Minimal output
-./install.sh --yes      # Automatically answer 'yes' to all prompts (for automation)
+./install.sh --yes      # Skip prompts (for automation)
 ```
 
-### 🤖 **Automation Support**
-Both the installer and `dev` command support the `--yes` (or `-y`) flag for automation and CI/CD pipelines:
-
+### Uninstallation
 ```bash
-# Automated installation
-./install.sh --force --yes --quiet    # Silent install without prompts
-
-# Automated development workflows
-dev new python-3.13 --init --yes      # Create template, auto-overwrite existing files
-dev config --init --yes               # Create project config, auto-overwrite if exists
-dev templates cleanup 30 --yes        # Remove old templates without confirmation
-dev env rm old-env --yes              # Delete VM without confirmation
-
-# CI/CD Integration Examples
-./install.sh --yes                    # Auto-install in CI environment
-dev new node-22 --init --yes          # Setup project in pipeline
-dev build                             # Build container (no prompts needed)
+./install.sh --uninstall        # Remove files (VMs preserved)
+./install.sh --uninstall-all    # Remove everything including VMs
 ```
 
-**Automation Benefits:**
-- ✅ **No interactive prompts** - Perfect for scripts and CI/CD
-- ✅ **Consistent behavior** - Always answers "yes" to confirmations
-- ✅ **Error handling** - Still respects validation and error conditions
-- ✅ **Safe defaults** - Only affects confirmation prompts, not destructive operations
+## Quick Start
 
-The installer will:
-- Copy scripts to `~/.local/bin/`
-- Install configuration files to `~/.dev-envs/`
-- Set up Dockerfile templates for all supported languages
-- Optionally add `~/.local/bin` to your PATH
-
-### 🗑️ Uninstallation
-
-If you need to remove the isolated development environment:
-
-```bash
-# Remove files and directories only (VMs remain)
-./install.sh --uninstall
-
-# Complete removal including all VMs (DESTRUCTIVE)
-./install.sh --uninstall-all
-
-# Automated uninstall (no prompts)
-./install.sh --uninstall --yes       # Safe automated uninstall
-./install.sh --uninstall-all --yes   # Destructive automated uninstall
-```
-
-#### Uninstall Options:
-
-| Option | What Gets Removed | VMs | Data Loss Risk |
-|--------|------------------|-----|----------------|
-| `--uninstall` | ✅ Scripts<br>✅ Config files<br>✅ Templates | ❌ Preserved | 🟢 **Safe** - No project data lost |
-| `--uninstall-all` | ✅ Scripts<br>✅ Config files<br>✅ Templates<br>✅ All dev VMs | ✅ **Deleted** | 🔴 **DESTRUCTIVE** - All VM data lost |
-
-**⚠️ Important Notes:**
-- `--uninstall` is safe and preserves your VMs and project data
-- `--uninstall-all` will **permanently delete all development VMs** and their data
-- Your actual project files (on your Mac) are never affected
-- You can manually manage remaining VMs with `orb list` and `orb delete <vm-name>`
-
-**🔄 Re-installation:**
-After uninstalling, you can reinstall anytime by running `./install.sh` again.
-
------
-
-## 🏗️ One-Time Setup: Creating the Host VM
-
-Before working on projects, create the Docker host VM (only needed once):
-
+### 1. Create Docker Host VM (one-time setup)
 ```bash
 dev env new docker-host
 ```
 
-This creates a lightweight Linux VM running Docker. After setup, you'll be connected to it. Type `exit` to return to your Mac - the VM continues running in the background.
-
-### 🌐 Multiple Environment Support
-
-While most users only need the `docker-host` environment, the system supports multiple environments for advanced use cases:
-
-- **🔧 Tool specialization**: Different VMs with specialized tool sets (Kubernetes, databases, etc.)
-- **📊 Resource isolation**: Separate VMs for heavy vs. light workloads  
-- **🔒 Security levels**: Isolated environments with different network access policies
-- **👥 Team workflows**: Project-specific development environments
-- **🧪 Testing environments**: Different OS versions or configurations
-
-#### Creating Custom Environments
-
-1. **Create a cloud-init configuration file:**
-```bash
-# Example: Create a Kubernetes development environment
-cat > ~/.dev-envs/setups/k8s-dev.yaml << 'EOF'
-#cloud-config
-package_update: true
-packages:
-  - docker.io
-  - curl
-
-users:
-  - name: default
-    groups: [docker]
-    append: true
-
-runcmd:
-  # Install kubectl
-  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-  - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-  # Install kind
-  - curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
-  - chmod +x ./kind && mv ./kind /usr/local/bin/kind
-EOF
-```
-
-2. **Create and use the environment:**
-```bash
-# Create the custom environment
-dev env new k8s-dev
-
-# The VM will be named 'dev-vm-k8s-dev'
-# You can start/stop it like any other environment
-dev env down k8s-dev
-dev env up k8s-dev
-```
-
-3. **Use with dev:**
-```bash
-# Update dev to use the custom environment
-# Edit the VM_NAME in dev script or use environment variable
-VM_NAME="dev-vm-k8s-dev" dev
-```
-
-**💡 Pro Tips:**
-- Custom environments inherit the same naming pattern: `dev-vm-<environment-name>`
-- Cloud-init files support packages, users, files, and arbitrary commands
-- Each environment is completely isolated with its own resources
-- You can have multiple environments running simultaneously
-
------
-
-## 🛠️ Quick Start
-
-### Method 1: Use Templates (Recommended)
-Create a new project with a pre-configured environment:
-
-```bash
-# List available language templates with versions
-dev list
-
-# Create a new project (smart matching)
-mkdir my-python-project && cd my-python-project
-dev new python      # Multiple versions available - will prompt for selection
-
-# Or specify exact version
-dev new python-3.14 # Latest version (auto-detected from Docker Hub)
-
-# Start developing immediately
-dev
-```
-
-### Method 2: Existing Project
-For projects with existing Dockerfiles:
-
-```bash
-cd my-existing-project
-dev
-```
-
-### Method 3: Custom Dockerfile
-Create your own Dockerfile and use the development tools:
-
-```bash
-cd my-custom-project
-# Create your Dockerfile
-dev
-```
-
-### 📝 Custom Dockerfile Names
-
-If your project already has a `Dockerfile` (e.g., for production), you can use custom names for development:
-
-```bash
-# Create development Dockerfile with custom name
-dev new python              # Creates "Dockerfile" by default
-mv Dockerfile Dockerfile.dev   # Rename for development
-
-# Use the custom Dockerfile
-dev -f Dockerfile.dev
-
-# Other naming examples
-dev -f docker/Dockerfile.development
-dev -f .devcontainer/Dockerfile
-dev -f Dockerfile.local
-```
-
-**💡 Tip**: This keeps your production `Dockerfile` separate from development configurations, allowing different tool sets, debug symbols, or development-specific optimizations.
-
------
-
-## 📋 Available Templates
-
-The following language templates are available with `dev new <language>`:
-
-### 🎯 **Quick Reference**
-```bash
-# List all templates with versions
-dev list
-
-# Create with latest/default version (smart matching)
-dev new python    # Multiple versions available - will prompt
-dev new node      # Multiple versions available - will prompt
-
-# Create with specific version
-dev new python-3.13
-dev new node-22
-dev new golang-1.22
-
-# Create with project scaffolding (starter files)
-dev new python-3.14 --init    # Creates requirements.txt, main.py, .gitignore
-dev new node-25 --init        # Creates package.json, index.js, .gitignore
-dev new golang-1.25 --init    # Creates go.mod, main.go, .gitignore
-```
-
-### 📋 **Template Catalog**
-
-| Language | Available Versions | Latest Template | Includes |
-|----------|-------------------|----------------|-----------|
-| **Python** | 3.11, 3.12, 3.13, 3.14* | `python-3.14` | Python interpreter, pip, development tools |
-| **Node.js** | 20, 22, 25* | `node-25` | Node.js LTS, npm, development tools |
-| **Go** | 1.21, 1.22, 1.25* | `golang-1.25` | Go compiler, go tools, gopls, delve debugger |
-| **Rust** | 1.75, 1.90* | `rust-1.90` | Rust toolchain, cargo, clippy, rustfmt |
-| **Java** | 21 | `java-21` | OpenJDK 21 LTS, Maven 3.9.5, Gradle 8.4 |
-| **PHP** | 8.3 | `php-8.3` | PHP 8.3, Composer, common extensions |
-| **Bash** | latest | `bash-latest` | Shell scripting tools, shellcheck, utilities |
-
-*_Latest versions are automatically detected and updated from Docker Hub APIs_
-
-### 🔮 **Smart Template Matching & Dynamic Updates**
-- **Unversioned names** (e.g., `python`) automatically use the available version
-- **Multiple versions** will prompt you to specify which one you want
-- **Exact names** (e.g., `python-3.11`) work as expected
-- **Dynamic version detection** fetches latest versions from Docker Hub APIs
-- **Auto-updating templates** ensure you always have access to current versions
-- **Future versions** are automatically discovered and made available
-
-All templates include:
-- 🔧 **Essential tools**: git, vim, curl, wget, jq, tree, htop
-- 👤 **Non-root user**: Secure development environment
-- 🎨 **Color terminal**: Enhanced developer experience
-- 🏗️ **Build tools**: Language-specific development toolchain
-
-### 🚀 **Project Initialization**
-Add `--init` to any `dev new` command to create language-specific starter files:
-
-| Language | Scaffolding Includes |
-|----------|---------------------|
-| **Python** | `requirements.txt`, `main.py`, `.gitignore` |
-| **Node.js** | `package.json`, `index.js`, `.gitignore` |
-| **Go** | `go.mod`, `main.go`, `.gitignore` |
-| **Java** | `pom.xml`, `src/main/java/.../Main.java`, `.gitignore` |
-| **Rust** | `Cargo.toml`, `src/main.rs`, `.gitignore` |
-| **PHP** | `composer.json`, `index.php`, `src/`, `.gitignore` |
-| **Bash** | `script.sh`, `README.md`, `.gitignore` |
-
------
-
-## ✨ Enhanced Developer Experience
-
-The isolated development environment automatically enhances your workflow with intelligent features:
-
-### 🌐 **Automatic Port Forwarding**
-No need to manually configure ports - the system detects common development ports based on your project:
-
-| Framework Detection | Auto-forwarded Port | Trigger Files |
-|-------------------|-------------------|---------------|
-| **Node.js** | `3000` | `package.json` |
-| **Python Flask/Django** | `8000` | `requirements.txt`, `app.py` |
-| **Go** | `8080` | `go.mod`, `main.go` |
-| **Rust** | `8000` | `Cargo.toml` |
-| **Java Spring** | `8080` | `pom.xml`, `build.gradle` |
-| **PHP** | `8080` | `composer.json`, `index.php` |
-
-Just run your app inside the container - it's automatically accessible on your host!
-
-### 🔑 **Seamless Git Integration**
-Your SSH keys and git configuration are automatically mounted:
-- **SSH Keys**: `~/.ssh/` directory mounted for git operations
-- **Git Config**: Your `.gitconfig` shared for consistent commits  
-- **SSH Agent**: Forwarded for seamless authentication
-
-```bash
-# Inside container - works automatically with your existing setup
-git clone git@github.com:your-org/your-repo.git
-git commit -m "Made changes from container"
-git push origin main
-```
-
-
-
-### 🎯 **Smart Project Detection**
-The system intelligently configures itself based on project contents:
-- Detects language from files (package.json, requirements.txt, etc.)
-- Configures appropriate port forwarding for the detected framework
-- Sets up seamless git integration with SSH key forwarding
-
------
-
-## 💻 Development Workflow
-
-### 1. Create or Navigate to Project
+### 2. Create a Project
 ```bash
 # New project with template
 mkdir my-app && cd my-app
-dev new python-3.13 --init  # Creates Dockerfile + project scaffolding
+dev new python-3.13 --init
 
 # Existing project
 cd existing-project
+dev new python  # Creates Dockerfile
 ```
 
-### 2. Start Development Environment
+### 3. Start Development
 ```bash
 dev        # Build and run container
 # OR
-dev shell  # Open interactive bash shell
+dev shell  # Open interactive shell
 ```
 
-This automatically:
-- 🏗️ Builds Docker image from your Dockerfile
-- 🚀 Starts container with your project mounted at `/workspace`
-- 🔗 Connects you to an interactive shell inside the container
-- 🌐 **Auto port forwarding**: Detects and forwards common development ports
-- 🔑 **SSH key mounting**: Seamlessly access git repositories with your existing keys
-- ⚙️ **Git integration**: Shares your git configuration for consistent commits
+Your project is mounted at `/workspace` in the container with automatic:
+- Port forwarding based on project type
+- SSH key mounting for git operations
+- Git configuration sharing
 
-### 3. Develop Inside the Container
-All commands run in the secure sandbox:
+## Available Templates
+
+| Language | Versions | Usage |
+|----------|----------|-------|
+| **Python** | 3.11, 3.12, 3.13, 3.14 | `dev new python-3.13` |
+| **Node.js** | 20, 22, 25 | `dev new node-22` |
+| **Go** | 1.21, 1.22, 1.25 | `dev new golang-1.22` |
+| **Rust** | 1.75, 1.90 | `dev new rust-1.90` |
+| **Java** | 21 | `dev new java-21` |
+| **PHP** | 8.3 | `dev new php-8.3` |
+| **Bash** | latest | `dev new bash-latest` |
+
+### Template Options
 ```bash
-# Install dependencies
-pip install -r requirements.txt  # Python
-npm install                      # Node.js
-go mod download                  # Go
-cargo build                      # Rust
-
-# Run your application
-python app.py
-npm start
-go run main.go
-cargo run
+dev list                          # Show all available templates
+dev new python                    # Auto-select version (prompts if multiple)
+dev new python-3.13 --init        # Create with starter files
+dev new node-22 --devcontainer    # Include VS Code config
 ```
 
-### 4. Edit Code on Host
-- Use your favorite editor (VS Code, etc.) on your Mac
-- Changes are instantly reflected in the container
-- Full IDE features work with mounted directories
+## Examples
 
-### 5. Exit When Done
+### Python Web Development
 ```bash
-exit  # Leave container and return to host
+# Create a Flask project with VS Code support
+mkdir flask-api && cd flask-api
+dev new python-3.13 --init --devcontainer --yes
+
+# Add Flask to requirements.txt
+echo "flask" >> requirements.txt
+
+# Start development
+dev shell
+# Inside container:
+pip install -r requirements.txt
+python -c "from flask import Flask; app=Flask(__name__); app.run(host='0.0.0.0', port=8000)"
+# App accessible at http://localhost:8000
 ```
 
-## ⚙️ **Optional: Customize Your Setup**
-
-### Set Default Templates
-Avoid version prompts by setting preferred defaults:
+### Node.js API Development
 ```bash
-dev config --edit    # Opens global config
-# Set: default_template = "python-3.13"
+# Create Express API with scaffolding
+mkdir express-api && cd express-api
+dev new node-22 --init --yes
+
+# Start development
+dev
+# Inside container:
+npm install express
+node -e "require('express')().get('/', (req,res) => res.send('Hello')).listen(3000, '0.0.0.0')"
+# API accessible at http://localhost:3000
 ```
 
-### Per-Project Configuration
-Create project-specific settings:
+### Go Microservice
 ```bash
-cd my-special-project
-dev config --init    # Creates .devenv.yaml
-# Customize VM, templates, container names per project
+# Create Go service
+mkdir go-service && cd go-service
+dev new golang-1.22 --init --yes
+
+# Development with hot reload
+dev shell
+# Inside container:
+go mod init myservice
+go run main.go  # Auto-accessible on port 8080
 ```
 
------
+### Existing Project Integration
+```bash
+# Add containerized development to existing project
+cd my-existing-project
+dev new python  # Creates Dockerfile based on detected files
+dev devcontainer  # Add VS Code support
+dev  # Start developing in container
+```
+
+### Multi-Architecture Development
+```bash
+# Develop on Apple Silicon, deploy to Intel servers
+dev new rust-1.90 --init
+dev --platform linux/amd64 build  # Build for Intel deployment
+dev --platform linux/arm64 shell  # Develop natively on Apple Silicon
+```
+
+### Team Workflow
+```bash
+# Team lead sets up project template
+dev new node-22 --init --devcontainer --yes
+git add . && git commit -m "Add containerized dev environment"
+git push
+
+# Team members with isolated-dev installed:
+git clone <repo>
+cd <project>
+dev  # Everything just works
+
+# Team members without isolated-dev (using standard Docker):
+git clone <repo>
+cd <project>
+docker build -t myproject .
+docker run -it --rm -v "$(pwd):/workspace" -p 3000:3000 myproject
+```
+
+### CI/CD Integration
+```bash
+# Automated pipeline setup
+dev new python-3.13 --init --yes  # No prompts for automation
+dev build  # Build container for testing
+dev shell -c "python -m pytest"  # Run tests in container
+```
 
 ## 🎛️ Command Reference
 
@@ -499,7 +212,9 @@ dev --help                        # Show comprehensive help
 dev list                          # List available language templates
 dev new <language>                # Create Dockerfile from template
 dev new <language> --init         # Create template with project scaffolding
-dev new <language> --init --yes   # Create template, auto-overwrite existing files
+dev new <language> --devcontainer # Create template with VS Code devcontainer.json
+dev new <language> --init --devcontainer --yes  # Full setup with scaffolding and VS Code
+dev devcontainer [language]       # Generate VS Code devcontainer.json for existing project
 dev                               # Build and run container (default)
 dev shell                         # Open interactive bash shell in container
 dev build                         # Build image only
@@ -529,8 +244,6 @@ dev templates cleanup [days]      # Remove templates unused for X days (default:
 dev templates cleanup 30 --yes    # Remove old templates without prompting
 dev templates stats               # Show template statistics and usage information
 ```
-
-
 
 ### Advanced Options
 ```bash
@@ -570,352 +283,125 @@ chmod +x k8s-container
 ./k8s-container new golang
 ```
 
------
+## Configuration
 
-## 🏗️ Multi-Architecture Support
-
-The isolated development environment provides comprehensive multi-architecture support for modern development workflows:
-
-### 💻 **Automatic Architecture Detection**
-```bash
-# Check your current architecture
-dev arch
-
-# Output shows:
-# Host architecture: arm64 (or amd64)
-# Default platform: linux/arm64 (or linux/amd64)
-# Supported platforms and usage examples
-```
-
-### 🎯 **Platform-Specific Builds**
-```bash
-# Auto-detect (recommended - uses host architecture)
-dev build
-
-# Force ARM64 build (Apple Silicon, ARM servers)
-dev --platform linux/arm64
-
-# Force x86_64 build (Intel/AMD processors)
-dev --platform linux/amd64
-
-# Cross-platform development
-dev --platform linux/arm64 build    # Build ARM64 on any host
-dev --platform linux/amd64 shell    # Run x86_64 container
-```
-
-### 🍎 **Apple Silicon Optimization**
-On Apple Silicon Macs (M1/M2/M3), the system automatically:
-- **Detects ARM64 architecture** and uses native ARM64 base images
-- **Optimizes performance** by avoiding x86_64 emulation when possible
-- **Provides seamless experience** with all language templates
-- **Supports cross-compilation** when targeting x86_64 deployment
-
-### 🔄 **Cross-Platform Development**
-```bash
-# Develop on Apple Silicon, deploy to x86_64 servers
-dev --platform linux/amd64 build
-dev --platform linux/amd64 shell
-
-# Test ARM64 builds on Intel machines (with emulation)
-dev --platform linux/arm64 build
-dev --platform linux/arm64 shell
-
-# Architecture-aware template creation
-dev new python-3.13 --platform linux/arm64
-```
-
-### ⚙️ **How It Works**
-- **Architecture Detection**: Automatically detects host architecture using `uname -m`
-- **Smart Defaults**: Uses appropriate platform flags for Docker builds
-- **Base Image Selection**: All templates use official multi-architecture base images
-- **Performance Optimization**: Native builds avoid emulation overhead
-- **Cross-Platform Support**: Emulation available when targeting different architectures
-
-### 📊 **Performance Considerations**
-| Scenario | Performance | Use Case |
-|----------|-------------|----------|
-| **Native builds** (ARM64 on Apple Silicon) | 🚀 **Fastest** | Daily development |
-| **Native builds** (x86_64 on Intel) | 🚀 **Fastest** | Daily development |
-| **Cross-platform** (x86_64 on Apple Silicon) | 🐢 **Slower** | Testing deployment targets |
-| **Cross-platform** (ARM64 on Intel) | 🐢 **Slower** | Testing ARM deployments |
-
-**💡 Tip**: Use native builds for development and cross-platform builds only when testing deployment compatibility.
-
------
-
-## 🔧 Configuration
-
-### Configuration System
-The isolated development environment supports both global and project-local configuration with automatic template management:
-
-#### Global Configuration (`~/.dev-envs/config.yaml`)
+### Global Configuration (`~/.dev-envs/config.yaml`)
 ```yaml
-# Default VM name to use for containers
 vm_name = "dev-vm-docker-host"
-
-# Default template when language has multiple versions
-default_template = "python-3.14"
-
-# Automatically start VM if not running
+default_template = "python-3.13"
 auto_start_vm = "true"
-
-# Prefix for container and image names
 container_prefix = "dev"
 ```
 
-#### Project-Local Configuration (`.devenv.yaml`)
-Create in any project directory to override global settings:
+### Project Configuration (`.devenv.yaml`)
 ```bash
-dev config --init    # Creates .devenv.yaml in current directory
+dev config --init    # Creates project-specific config
 ```
 
 Example project config:
 ```yaml
-# Project-specific overrides
 vm_name = "dev-vm-my-project"
-default_template = "node-25"
+default_template = "node-22"
 container_prefix = "myproject"
 ```
 
-#### Template Management Configuration
-The system automatically tracks template usage and provides intelligent cleanup:
-- **Usage Tracking**: Logs when templates are used for smart cleanup decisions
-- **Smart Cleanup**: Protects latest versions while removing old, unused templates
-- **Automatic Updates**: Fetches latest versions from Docker Hub APIs
-- **Cross-Platform Compatibility**: Works across different bash versions and systems
+## VS Code Integration
 
-### Directory Structure
-After installation:
-```
-~/.dev-envs/
-├── config.yaml          # Global configuration file
-├── template_usage.log    # Template usage tracking for smart cleanup
-├── setups/               # VM configuration files
-│   └── docker-host.yaml
-└── templates/            # Dockerfile templates (auto-managed)
-    ├── Dockerfile-python-3.11
-    ├── Dockerfile-python-3.12
-    ├── Dockerfile-python-3.13
-    ├── Dockerfile-python-3.14    # Latest Python (auto-updated)
-    ├── Dockerfile-node-20
-    ├── Dockerfile-node-22
-    ├── Dockerfile-node-25         # Latest Node.js (auto-updated)
-    ├── Dockerfile-golang-1.21
-    ├── Dockerfile-golang-1.22
-    ├── Dockerfile-golang-1.25    # Latest Go (auto-updated)
-    ├── Dockerfile-rust-1.75
-    ├── Dockerfile-rust-1.90      # Latest Rust (auto-updated)
-    ├── Dockerfile-java-21
-    ├── Dockerfile-php-8.3
-    └── Dockerfile-bash-latest
-```
-
-**Template Management Features:**
-- **Auto-Discovery**: New versions are automatically detected from Docker Hub
-- **Smart Cleanup**: Old templates are intelligently pruned while preserving latest versions
-- **Usage Tracking**: System learns which templates you use to make better cleanup decisions
-- **Statistics**: View template usage patterns with `dev templates stats`
-
-### VM Management
-The Docker host VM runs automatically but you can manage it manually:
+Generate VS Code devcontainer configurations for seamless IDE development:
 
 ```bash
-# Check VM status
-dev env status docker-host
+# Auto-detect project type
+dev devcontainer
 
-# Connect to VM directly (advanced)
-orb -m dev-vm-docker-host
+# Specify language
+dev devcontainer python-3.13
 
-# VM lifecycle
-dev env down docker-host    # Stop when not needed
-dev env up docker-host      # Restart (or let dev do it)
+# Create new project with VS Code config
+dev new node-22 --init --devcontainer
 ```
 
------
+**Generated features:**
+- Language-specific extensions (Python, Node.js, Go, Rust, Java, PHP)
+- Automatic port forwarding
+- SSH key and git configuration mounting
+- Optimized development settings
 
-## 🎯 Use Cases
+**Usage in VS Code:**
+1. Open project folder
+2. Cmd+Shift+P → "Dev Containers: Reopen in Container"
+3. Full IDE features in isolated container
 
-### 🧪 **Experimentation**
-- Try new languages without polluting your system
-- Test different versions of dependencies
-- Prototype with unfamiliar toolchains
+## Multi-Architecture Support
 
-### 🔒 **Security**
-- Run untrusted code in isolated environments
-- Prevent dependency conflicts on host system
-- Sandbox potentially harmful operations
-
-### 👥 **Team Consistency**
-- Standardize development environments across team
-- Ensure reproducible builds and deployments
-- Onboard new developers quickly
-
-### 🚀 **CI/CD Integration**
-- Test locally in production-like containers
-- Build deployment-ready images during development
-- Validate Dockerfiles before deployment
-
------
-
-## 🔍 Troubleshooting
-
-### Quick Help
+### Architecture Detection
 ```bash
-dev troubleshoot                  # Show comprehensive troubleshooting guide
-dev help <command>                # Get help for specific commands
-dev --help                        # Show all available commands and options
+dev arch    # Show current architecture and platform info
+```
+
+### Platform-Specific Builds
+```bash
+dev --platform linux/arm64     # ARM64 (Apple Silicon)
+dev --platform linux/amd64     # x86_64 (Intel)
+```
+
+**Performance:**
+- Native builds (ARM64 on Apple Silicon, x86_64 on Intel): Fastest
+- Cross-platform builds: Slower due to emulation
+
+## Troubleshooting
+
+### Quick Diagnostics
+```bash
+dev troubleshoot                  # Comprehensive troubleshooting guide
+dev help <command>                # Command-specific help
 ```
 
 ### Common Issues
 
-**"No Dockerfile found"**
+**No Dockerfile found:**
 ```bash
-# Create one from template
-dev new python
-
-# Or use custom path
-dev -f path/to/Dockerfile
-
-# See all available templates
-dev list
+dev new python                    # Create from template
+dev list                          # See available templates
 ```
 
-**"Docker host VM not running"**
+**VM not running:**
 ```bash
-# Start it manually
-dev env up docker-host
-
-# Or let dev start it automatically
-dev
-
-# Check VM status
-dev env status docker-host
+dev env status docker-host        # Check status
+dev env up docker-host            # Start VM
 ```
 
-**"Port forwarding not working"**
-- Ensure your application binds to `0.0.0.0`, not `localhost`
-- Check if port is already in use on host
-- Verify framework-specific files exist (package.json, requirements.txt, etc.)
+**Port forwarding issues:**
+- Ensure app binds to `0.0.0.0`, not `localhost`
+- Check for port conflicts on host
+- Verify project files exist (package.json, requirements.txt, etc.)
 
-**"SSH keys not working in container"**
+**SSH keys not working:**
 ```bash
-# Check SSH agent is running
-ssh-add -l
-
-# Add keys to agent
-ssh-add ~/.ssh/id_rsa
-
-# Verify keys exist
-ls -la ~/.ssh/
+ssh-add -l                        # Check SSH agent
+ssh-add ~/.ssh/id_rsa             # Add keys to agent
 ```
 
-**"Templates not found or outdated"**
+**Architecture issues:**
 ```bash
-# Update templates from Docker Hub
-dev templates update
-
-# Check for available updates
-dev templates check
-
-# View current template statistics
-dev templates stats
-
-# Clean up old/unused templates
-dev templates prune
-
-# Reinstall to get latest templates
-./install.sh --force
+dev arch                          # Check current architecture
+dev --platform linux/arm64       # Force specific platform
+dev clean && dev build            # Rebuild with correct architecture
 ```
 
-**"Want to completely start over"**
-```bash
-# Clean uninstall and reinstall
-./install.sh --uninstall-all  # WARNING: Deletes all VMs
-./install.sh                  # Fresh installation
-```
+For more help: [https://github.com/mwing/isolated-dev](https://github.com/mwing/isolated-dev)
 
-**"Partial installation issues"**
-```bash
-# Force reinstall over existing files
-./install.sh --force
+## Features
 
-# Or clean uninstall first, then reinstall
-./install.sh --uninstall
-./install.sh
-```
+- **Multiple Languages**: Python, Node.js, Go, Rust, Java, PHP, Bash templates
+- **Security**: Non-root containers with isolated environments
+- **Auto Port Forwarding**: Detects common development ports
+- **Git Integration**: SSH keys and configuration automatically mounted
+- **VS Code Support**: Generate devcontainer.json configurations
+- **Multi-Architecture**: ARM64 and x86_64 support with auto-detection
+- **Smart Templates**: Auto-updating versions from Docker Hub
+- **Project Scaffolding**: Language-specific starter files
+- **Automation Support**: `--yes` flag for CI/CD pipelines
 
-**"Old VMs taking up space"**
-```bash
-# List all VMs
-orb list
+## License
 
-# Delete specific VM
-orb delete dev-vm-old-project
-
-# Or use uninstall-all for complete cleanup (DESTRUCTIVE)
-./install.sh --uninstall-all
-```
-
-**"Template directory getting cluttered"**
-```bash
-# View template usage statistics
-dev templates stats
-
-# Smart cleanup (keeps latest versions, removes old unused ones)
-dev templates prune
-
-# Remove templates unused for specific period
-dev templates cleanup 30    # Remove templates unused for 30+ days
-```
-
-**"Architecture or platform issues"**
-```bash
-# Check current architecture
-dev arch
-
-# Force specific platform if auto-detection fails
-dev --platform linux/arm64
-dev --platform linux/amd64
-
-# Slow builds on Apple Silicon (using x86_64 emulation)
-dev --platform linux/arm64    # Use native ARM64 instead
-
-# Container won't start (architecture mismatch)
-dev clean                     # Remove old images
-dev --platform linux/arm64   # Rebuild with correct architecture
-```
-
-### Getting Help
-```bash
-dev env list            # Environment management help
-dev --help              # Container development help
-dev help <command>      # Command-specific help (new, config, templates, env)
-dev troubleshoot        # Comprehensive troubleshooting guide
-./install.sh --help     # Installation and uninstall options
-```
-
-For more help, visit: [https://github.com/mwing/isolated-dev](https://github.com/mwing/isolated-dev)
-
------
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch: `git checkout -b feature-name`
-3. Add new templates to `/templates/` directory
-4. Update documentation
-5. Submit pull request
-
-### Adding New Language Templates
-Templates should follow the established pattern:
-- Use official base images
-- Install common development tools
-- Create non-root user
-- Set up proper working directory
-- Include language-specific toolchain
-
------
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file for details.
