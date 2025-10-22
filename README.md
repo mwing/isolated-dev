@@ -14,7 +14,9 @@ Secure, isolated development environments using OrbStack VMs and Docker containe
 - [Configuration](#configuration)
 - [VS Code Integration](#vs-code-integration)
 - [Multi-Architecture Support](#multi-architecture-support)
+- [Network Optimization](#network-optimization)
 - [Troubleshooting](#troubleshooting)
+- [📚 Development Cookbook](COOKBOOK.md) - Practical recipes and examples
 
 ## Use Cases
 
@@ -497,7 +499,11 @@ dev --platform linux/arm64       # Force specific platform
 dev clean && dev build            # Rebuild with correct architecture
 ```
 
-For more help: [https://github.com/mwing/isolated-dev](https://github.com/mwing/isolated-dev)
+## Additional Resources
+
+- [📚 Development Cookbook](COOKBOOK.md) - Practical recipes and examples for common scenarios
+- [GitHub Repository](https://github.com/mwing/isolated-dev) - Source code, issues, and contributions
+- [Language Plugin Guide](languages/README.md) - How to add new language support
 
 ## Auto-completion
 
