@@ -29,6 +29,7 @@ Options:
     -f, --force      Force installation, overwriting existing files
     -q, --quiet      Quiet mode, minimal output
     -y, --yes        Automatically answer 'yes' to all prompts (for automation)
+    --completion     Install bash completion (optional)
     --version        Show version information
     --uninstall      Remove all installed files and directories
     --uninstall-all  Remove everything including VMs (DESTRUCTIVE)
@@ -43,6 +44,7 @@ QUIET=false
 UNINSTALL=false
 UNINSTALL_ALL=false
 AUTO_YES=false
+INSTALL_COMPLETION=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -72,6 +74,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         -y|--yes)
             AUTO_YES=true
+            shift
+            ;;
+        --completion)
+            INSTALL_COMPLETION=true
             shift
             ;;
         *)
@@ -389,6 +395,13 @@ verify_installation() {
     log "${GREEN}✅ All files installed successfully (including $language_count language plugins)${NC}"
 }
 
+# Install shell completion if requested
+if [[ "$INSTALL_COMPLETION" == "true" && -f "$SRC_DIR/completions/install-completion.sh" ]]; then
+    local current_shell=$(basename "$SHELL")
+    log "   -> Installing $current_shell completion..."
+    bash "$SRC_DIR/completions/install-completion.sh" "$SRC_DIR"
+fi
+
 # Main installation flow
 verify_installation
 setup_path
@@ -404,4 +417,8 @@ if [[ "$QUIET" == false ]]; then
     log "  dev env new docker-host # Create Docker host VM (one-time setup)"
     log "  dev --help             # Show all available commands"
     log "  dev env list           # Show environment management help"
+    log ""
+    log "${BLUE}Optional:${NC}"
+    local current_shell=$(basename "$SHELL")
+    log "  ./install.sh --completion  # Install $current_shell completion for tab completion"
 fi
