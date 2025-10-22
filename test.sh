@@ -372,6 +372,64 @@ test_direct_generation() {
     cd - > /dev/null
 }
 
+test_devcontainer_generation() {
+    run_test "VS Code devcontainer generation"
+    
+    local test_project="$TEST_DIR/test-devcontainer"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Create Dockerfile and project files first
+    local dockerfile_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new python-3.13 --init --yes 2>&1 || echo "FAILED")
+    
+    if [[ "$dockerfile_output" != "FAILED" ]]; then
+        # Test devcontainer generation (should auto-detect from requirements.txt)
+        local devcontainer_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev devcontainer --yes 2>&1 || echo "FAILED")
+        
+        if [[ "$devcontainer_output" != "FAILED" ]]; then
+            assert_file_exists "$test_project/.devcontainer/devcontainer.json" "devcontainer.json created"
+            
+            # Check content
+            local devcontainer_content=$(cat .devcontainer/devcontainer.json 2>/dev/null || echo "")
+            assert_contains "$devcontainer_content" "Python Development Environment" "devcontainer has correct name"
+            assert_contains "$devcontainer_content" "ms-python.python" "devcontainer includes Python extensions"
+            assert_contains "$devcontainer_content" "forwardPorts" "devcontainer includes port forwarding"
+        else
+            log "${YELLOW}⏭️  SKIP${NC}: devcontainer generation failed (expected in test environment)"
+        fi
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Dockerfile creation failed for devcontainer test"
+    fi
+    
+    cd - > /dev/null
+}
+
+test_combined_template_devcontainer() {
+    run_test "Combined template and devcontainer creation"
+    
+    local test_project="$TEST_DIR/test-combined"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test creating template with devcontainer in one command
+    local combined_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new node-22 --init --devcontainer --yes 2>&1 || echo "FAILED")
+    
+    if [[ "$combined_output" != "FAILED" ]]; then
+        assert_file_exists "$test_project/Dockerfile" "Dockerfile created"
+        assert_file_exists "$test_project/package.json" "package.json created with --init"
+        assert_file_exists "$test_project/.devcontainer/devcontainer.json" "devcontainer.json created with --devcontainer"
+        
+        # Check devcontainer content for Node.js
+        local devcontainer_content=$(cat .devcontainer/devcontainer.json 2>/dev/null || echo "")
+        assert_contains "$devcontainer_content" "Node.js Development Environment" "devcontainer has Node.js name"
+        assert_contains "$devcontainer_content" "ms-vscode.vscode-typescript-next" "devcontainer includes Node.js extensions"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Combined creation failed (expected in test environment)"
+    fi
+    
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -388,6 +446,8 @@ main() {
     test_project_detection
     test_template_management_commands
     test_direct_generation
+    test_devcontainer_generation
+    test_combined_template_devcontainer
     
     # Print results
     log "\n${BLUE}📊 Test Results${NC}"

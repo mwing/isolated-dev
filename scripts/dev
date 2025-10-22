@@ -122,9 +122,50 @@ while [[ $# -gt 0 ]]; do
                     ;;
             esac
             ;;
+        devcontainer)
+            case "$2" in
+                --help|-h)
+                    show_command_help "devcontainer"
+                    exit 0
+                    ;;
+                *)
+                    shift 1  # Remove 'devcontainer'
+                    # Parse devcontainer subcommand and flags
+                    language=""
+                    dockerfile_path="./Dockerfile"
+                    while [[ $# -gt 0 ]]; do
+                        case $1 in
+                            --yes|-y)
+                                AUTO_YES=true
+                                shift
+                                ;;
+                            -f|--file)
+                                dockerfile_path="$2"
+                                shift 2
+                                ;;
+                            -*)
+                                echo "❌ Error: Unknown flag for 'devcontainer' command: $1"
+                                exit 1
+                                ;;
+                            *)
+                                if [[ -z "$language" ]]; then
+                                    language="$1"
+                                else
+                                    echo "❌ Error: Multiple language arguments provided: $language and $1"
+                                    exit 1
+                                fi
+                                shift
+                                ;;
+                        esac
+                    done
+                    handle_devcontainer_command "$language" "$dockerfile_path"
+                    ;;
+            esac
+            ;;
         new)
             # Parse flags first to handle cases like "dev new --yes"
             init_project=false
+            generate_devcontainer=false
             language=""
             shift 1  # Remove 'new'
             
@@ -137,6 +178,10 @@ while [[ $# -gt 0 ]]; do
                         ;;
                     --init)
                         init_project=true
+                        shift
+                        ;;
+                    --devcontainer)
+                        generate_devcontainer=true
                         shift
                         ;;
                     --yes|-y)
@@ -215,12 +260,12 @@ while [[ $# -gt 0 ]]; do
                     
                     if [[ "$AUTO_YES" == "true" ]]; then
                         echo "Auto-confirming suggestion (--yes flag set)"
-                        create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM"
+                        create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
                     else
                         echo -n "Use this template? (Y/n): "
                         read -r response
                         if [[ -z "$response" ]] || [[ "$response" =~ ^[Yy]$ ]]; then
-                            create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM"
+                            create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
                         else
                             echo "Template creation cancelled."
                             echo "Use 'dev list' to see available options or 'dev new <language>' to specify manually."
@@ -236,8 +281,12 @@ while [[ $# -gt 0 ]]; do
                 fi
             else
                 # Language specified manually
-                create_from_template "$language" "$init_project" "$TARGET_PLATFORM"
+                create_from_template "$language" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
             fi
+            ;;
+        devcontainer)
+            echo "❌ Error: devcontainer command should have been handled earlier"
+            exit 1
             ;;
         -f|--file)
             DOCKERFILE="$2"
@@ -314,7 +363,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, list, config, templates, env, help, troubleshoot, arch"
+            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, env, help, troubleshoot, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
