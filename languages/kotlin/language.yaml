@@ -1,0 +1,12 @@
+name: kotlin
+display_name: Kotlin
+versions: ["1.9", "2.0"]
+
+detection:
+  files: [build.gradle.kts, settings.gradle.kts, src/main/kotlin]
+
+ports: [8080, 8000]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [build.gradle.kts, src/main/kotlin/Main.kt, .gitignore]

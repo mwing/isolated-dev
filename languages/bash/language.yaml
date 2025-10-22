@@ -1,0 +1,12 @@
+name: bash
+display_name: Bash
+versions: ["latest"]
+
+detection:
+  files: ["*.sh", "script.sh", "main.sh"]
+
+ports: []
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [".gitignore", "main.sh"]

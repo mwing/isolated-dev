@@ -1,0 +1,12 @@
+name: java
+display_name: Java
+versions: ["21"]
+
+detection:
+  files: ["pom.xml", "build.gradle", "*.java"]
+
+ports: [8080]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [".gitignore", "pom.xml", "Main.java"]

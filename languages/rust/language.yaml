@@ -1,0 +1,12 @@
+name: rust
+display_name: Rust
+versions: ["1.75", "1.90"]
+
+detection:
+  files: ["Cargo.toml", "src/main.rs"]
+
+ports: [8000]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [".gitignore", "Cargo.toml", "src/main.rs"]

@@ -1,0 +1,22 @@
+FROM golang:{{VERSION}}
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    wget \
+    jq \
+    tree \
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy go mod files if they exist
+COPY go.mod go.sum* ./
+RUN if [ -f go.mod ]; then go mod download; fi
+
+# Keep container running
+CMD ["bash"]
