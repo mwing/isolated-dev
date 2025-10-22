@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -m appuser
