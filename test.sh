@@ -235,6 +235,12 @@ test_template_creation() {
 test_config_creation() {
     run_test "Configuration creation"
     
+    # Skip OrbStack-dependent tests in CI
+    if [[ "$CI" == "true" ]]; then
+        log "${YELLOW}⏭️  SKIP${NC}: Config creation requires OrbStack (CI environment)"
+        return
+    fi
+    
     # Ensure test environment is set up
     setup_test_installation
     
@@ -382,6 +388,12 @@ test_direct_generation() {
 test_devcontainer_generation() {
     run_test "VS Code devcontainer generation"
     
+    # Skip OrbStack-dependent tests in CI
+    if [[ "$CI" == "true" ]]; then
+        log "${YELLOW}⏭️  SKIP${NC}: Devcontainer generation requires OrbStack (CI environment)"
+        return
+    fi
+    
     local test_project="$TEST_DIR/test-devcontainer"
     mkdir -p "$test_project"
     cd "$test_project"
@@ -482,6 +494,12 @@ test_environment_overrides() {
 
 test_security_functionality() {
     run_test "Security functionality"
+    
+    # Skip OrbStack-dependent tests in CI
+    if [[ "$CI" == "true" ]]; then
+        log "${YELLOW}⏭️  SKIP${NC}: Security functionality requires OrbStack (CI environment)"
+        return
+    fi
     
     local test_project="$TEST_DIR/test-security"
     mkdir -p "$test_project"
