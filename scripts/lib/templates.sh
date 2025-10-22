@@ -8,6 +8,7 @@ function create_dockerfile_from_skeleton() {
     local language="$1"
     local version="$2"
     local output_file="$3"
+    local platform="$4"  # Optional platform override
     local skeleton_file="$DOCKERFILE_SKELETONS/$language.dockerfile"
     
     if [[ ! -f "$skeleton_file" ]]; then
@@ -15,8 +16,31 @@ function create_dockerfile_from_skeleton() {
         return 1
     fi
     
+    # Determine architecture-specific base image
+    local base_image_suffix=""
+    if [[ -n "$platform" ]]; then
+        case "$platform" in
+            linux/arm64|arm64)
+                # For ARM64, some images have specific variants
+                case "$language" in
+                    python|node|golang|rust)
+                        base_image_suffix=""  # Official images support multi-arch
+                        ;;
+                    *)
+                        base_image_suffix=""  # Default to official multi-arch
+                        ;;
+                esac
+                ;;
+            linux/amd64|amd64)
+                base_image_suffix=""  # Default AMD64
+                ;;
+        esac
+    fi
+    
     # Replace placeholders in skeleton with actual values
-    sed "s/{{VERSION}}/$version/g" "$skeleton_file" > "$output_file"
+    sed -e "s/{{VERSION}}/$version/g" \
+        -e "s/{{BASE_IMAGE_SUFFIX}}/$base_image_suffix/g" \
+        "$skeleton_file" > "$output_file"
     return 0
 }
 
@@ -236,6 +260,7 @@ function track_template_usage() {
 function create_from_template() {
     local language="$1"
     local init_project="${2:-false}"
+    local platform="${3:-}"
     local template_file=""
     local target_file="./Dockerfile"
     

@@ -123,8 +123,17 @@ function ensure_vm_running() {
 }
 
 function build_image() {
+    local platform_flag="$1"
+    local current_arch=$(detect_architecture)
     echo "   -> Building Docker image '$IMAGE_NAME'..."
-    orb -m "$VM_NAME" sudo docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+    echo "   -> Host architecture: $current_arch"
+    if [[ -n "$platform_flag" ]]; then
+        echo "   -> Target platform: ${platform_flag#--platform }"
+        orb -m "$VM_NAME" sudo docker build $platform_flag -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+    else
+        echo "   -> Target platform: auto-detected (linux/$current_arch)"
+        orb -m "$VM_NAME" sudo docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+    fi
 }
 
 function cleanup_existing_container() {

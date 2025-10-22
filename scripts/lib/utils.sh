@@ -4,67 +4,60 @@
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+function detect_architecture() {
+    local arch=$(uname -m)
+    case "$arch" in
+        x86_64)
+            echo "amd64"
+            ;;
+        arm64|aarch64)
+            echo "arm64"
+            ;;
+        *)
+            echo "$arch"
+            ;;
+    esac
+}
+
+function get_platform_flag() {
+    local target_platform="$1"
+    local current_arch=$(detect_architecture)
+    
+    if [[ -n "$target_platform" ]]; then
+        echo "--platform $target_platform"
+    elif [[ "$current_arch" == "arm64" ]]; then
+        echo "--platform linux/arm64"
+    else
+        echo "--platform linux/amd64"
+    fi
+}
+
 function usage() {
     echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
     echo ""
-    echo "A script to build and run isolated development containers using OrbStack VMs."
+    echo "Build and run isolated development containers using OrbStack VMs."
     echo ""
     echo "Commands:"
-    echo "  run              Build and run the container (default)"
-    echo "  shell            Open interactive bash shell in container"
-    echo "  build            Build the container image only"
-    echo "  clean            Remove existing container and image"
-    echo ""
-    echo "Environment Commands:"
-    echo "  env <command>    Manage OrbStack VMs (new, up, down, status, rm)"
-    echo "  env list         Show available environments and help"
-    echo ""
-    echo "Help Commands:"
-    echo "  help             Show this help message"
-    echo "  help <command>   Show help for specific command"
-    echo "  troubleshoot     Show troubleshooting guide"
-    echo ""
-    echo "Template Commands:"
-    echo "  new <language>       Create a Dockerfile from template"
-    echo "  new <language> --init Create Dockerfile and project scaffolding"
-    echo "  list                 List available language templates"
-    echo "  templates update     Update templates to latest versions"
-    echo "  templates check      Check for available template updates"
-    echo "  templates prune      Remove old/unused templates automatically"
-    echo "  templates cleanup    Remove templates unused for specified days"
-    echo "  templates stats      Show template statistics and usage information"
-    echo ""
-    echo "Configuration Commands:"
-    echo "  config               Show current configuration"
-    echo "  config --edit        Edit global configuration file"
-    echo "  config --init        Create project-local configuration"
+    echo "  run, shell, build, clean     Container operations"
+    echo "  new <lang> [--init]          Create Dockerfile from template"
+    echo "  list                         Show available templates"
+    echo "  env <cmd>                    Manage VMs (new, up, down, status, rm)"
+    echo "  config [--edit|--init]       Configuration management"
+    echo "  templates <cmd>              Template management (update, prune, stats)"
+    echo "  arch                         Architecture information"
+    echo "  help [cmd], troubleshoot     Help and diagnostics"
     echo ""
     echo "Options:"
-    echo "  -h, --help     Show this help message"
-    echo "  -f, --file     Specify Dockerfile path (default: ./Dockerfile)"
-    echo "  -t, --tag      Specify custom image tag"
-    echo "  -n, --name     Specify custom container name"
-    echo "  -y, --yes      Automatically answer 'yes' to all prompts (for automation)"
+    echo "  -f FILE        Dockerfile path    -t TAG         Custom image tag"
+    echo "  -n NAME        Container name     --platform     Target architecture"
+    echo "  -y, --yes      Skip prompts       -h, --help     Show help"
     echo ""
-    echo "Enhanced Developer Experience:"
-    echo "  • Automatic port forwarding detection (Node.js 3000, Python 8000, etc.)"
-    echo "  • SSH key mounting for seamless git operations"
-    echo "  • Git configuration sharing for consistent commits"
+    echo "Quick Start:"
+    echo "  $(basename "$0") env new docker-host    # One-time setup"
+    echo "  $(basename "$0") new python --init      # Create Python project"
+    echo "  $(basename "$0")                       # Build and run"
     echo ""
-    echo "Examples:"
-    echo "  $(basename "$0") env new docker-host           # One-time VM setup"
-    echo "  $(basename "$0")                              # Build and run with default Dockerfile"
-    echo "  $(basename "$0") shell                        # Open interactive shell"
-    echo "  $(basename "$0") new python                   # Create from Python template"
-    echo "  $(basename "$0") new node-22 --init           # Create Node.js template with scaffolding"
-    echo "  $(basename "$0") new python --yes             # Create template, auto-overwrite existing files"
-    echo "  $(basename "$0") templates cleanup 30 --yes   # Remove old templates without prompting"
-    echo "  $(basename "$0") env down docker-host         # Stop VM to save battery"
-    echo "  $(basename "$0") list                         # Show available templates with versions"
-    echo ""
-    echo "Requirements:"
-    echo "  - Dockerfile in current directory (or specified with -f)"
-    echo "  - OrbStack VM '$VM_NAME' available"
+    echo "Use '$(basename "$0") help <command>' for detailed help on specific commands."
     exit 0
 }
 
@@ -179,6 +172,20 @@ function show_command_help() {
             echo "  $(basename "$0") env status docker-host # Check if running"
             echo ""
             echo "Note: Most users only need the 'docker-host' environment."
+            ;;
+        arch)
+            echo "Usage: $(basename "$0") arch"
+            echo ""
+            echo "Show architecture and platform information for multi-architecture development."
+            echo ""
+            echo "This command displays:"
+            echo "  • Current host architecture (arm64/amd64)"
+            echo "  • Default Docker platform"
+            echo "  • Supported platforms and usage examples"
+            echo ""
+            echo "Examples:"
+            echo "  $(basename "$0") arch                    # Show architecture info"
+            echo "  $(basename "$0") --platform linux/arm64  # Use specific platform"
             ;;
         *)
             echo "No specific help available for command: $command"

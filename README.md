@@ -33,6 +33,13 @@ A comprehensive toolkit for creating secure, isolated development environments u
 - **Better Error Messages**: Clear diagnostics with actionable suggestions
 - **Cross-Platform Compatibility**: Works across different bash versions and macOS configurations
 
+### 🏗️ **Multi-Architecture Support**
+- **Automatic Architecture Detection**: Auto-detects ARM64 vs x86_64 host architecture
+- **Cross-Platform Development**: `--platform` flag for building containers for different architectures
+- **Apple Silicon Native**: Full support for ARM64 containers on Apple Silicon Macs
+- **Intel Compatibility**: Seamless x86_64 support for Intel-based systems
+- **Architecture Information**: `dev arch` command shows platform details and usage
+
 -----
 
 ## 🆕 What's New in v2.0
@@ -63,6 +70,12 @@ A comprehensive toolkit for creating secure, isolated development environments u
 - **Script-friendly**: Perfect for CI/CD pipelines, deployment scripts, and automated workflows
 - **Smart Defaults**: Maintains safety while enabling full automation
 - **Consistent Behavior**: Reliable, predictable operation in headless environments
+
+### 🏗️ **Multi-Architecture Support**
+- **Automatic Detection**: Detects ARM64 vs x86_64 and uses appropriate base images
+- **Cross-Platform Builds**: `--platform` flag for targeting different architectures
+- **Apple Silicon Optimized**: Native ARM64 container support for M1/M2/M3 Macs
+- **Architecture Command**: `dev arch` shows platform information and usage examples
 
 -----
 
@@ -492,7 +505,9 @@ dev shell                         # Open interactive bash shell in container
 dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
+dev --platform linux/arm64        # Build for specific architecture
 dev -y, --yes                     # Automatically answer 'yes' to all prompts
+dev arch                          # Show architecture and platform information
 dev help <command>                # Get help for specific command
 dev troubleshoot                  # Show troubleshooting guide
 ```
@@ -525,12 +540,17 @@ dev -t my-custom-tag -n my-container
 # Different Dockerfile locations
 dev -f docker/Dockerfile.production
 
+# Multi-architecture builds
+dev --platform linux/arm64         # Build for ARM64 (Apple Silicon)
+dev --platform linux/amd64         # Build for x86_64 (Intel)
+dev arch                           # Show current architecture info
+
 # Using custom environments (instead of default docker-host)
 VM_NAME="dev-vm-k8s-dev" dev
 VM_NAME="dev-vm-ml-gpu" dev build
 
 # Combining custom environment with other options
-VM_NAME="dev-vm-secure" dev -f Dockerfile.secure -t secure-app
+VM_NAME="dev-vm-secure" dev -f Dockerfile.secure -t secure-app --platform linux/arm64
 ```
 
 ### Environment Configuration
@@ -549,6 +569,77 @@ EOF
 chmod +x k8s-container
 ./k8s-container new golang
 ```
+
+-----
+
+## 🏗️ Multi-Architecture Support
+
+The isolated development environment provides comprehensive multi-architecture support for modern development workflows:
+
+### 💻 **Automatic Architecture Detection**
+```bash
+# Check your current architecture
+dev arch
+
+# Output shows:
+# Host architecture: arm64 (or amd64)
+# Default platform: linux/arm64 (or linux/amd64)
+# Supported platforms and usage examples
+```
+
+### 🎯 **Platform-Specific Builds**
+```bash
+# Auto-detect (recommended - uses host architecture)
+dev build
+
+# Force ARM64 build (Apple Silicon, ARM servers)
+dev --platform linux/arm64
+
+# Force x86_64 build (Intel/AMD processors)
+dev --platform linux/amd64
+
+# Cross-platform development
+dev --platform linux/arm64 build    # Build ARM64 on any host
+dev --platform linux/amd64 shell    # Run x86_64 container
+```
+
+### 🍎 **Apple Silicon Optimization**
+On Apple Silicon Macs (M1/M2/M3), the system automatically:
+- **Detects ARM64 architecture** and uses native ARM64 base images
+- **Optimizes performance** by avoiding x86_64 emulation when possible
+- **Provides seamless experience** with all language templates
+- **Supports cross-compilation** when targeting x86_64 deployment
+
+### 🔄 **Cross-Platform Development**
+```bash
+# Develop on Apple Silicon, deploy to x86_64 servers
+dev --platform linux/amd64 build
+dev --platform linux/amd64 shell
+
+# Test ARM64 builds on Intel machines (with emulation)
+dev --platform linux/arm64 build
+dev --platform linux/arm64 shell
+
+# Architecture-aware template creation
+dev new python-3.13 --platform linux/arm64
+```
+
+### ⚙️ **How It Works**
+- **Architecture Detection**: Automatically detects host architecture using `uname -m`
+- **Smart Defaults**: Uses appropriate platform flags for Docker builds
+- **Base Image Selection**: All templates use official multi-architecture base images
+- **Performance Optimization**: Native builds avoid emulation overhead
+- **Cross-Platform Support**: Emulation available when targeting different architectures
+
+### 📊 **Performance Considerations**
+| Scenario | Performance | Use Case |
+|----------|-------------|----------|
+| **Native builds** (ARM64 on Apple Silicon) | 🚀 **Fastest** | Daily development |
+| **Native builds** (x86_64 on Intel) | 🚀 **Fastest** | Daily development |
+| **Cross-platform** (x86_64 on Apple Silicon) | 🐢 **Slower** | Testing deployment targets |
+| **Cross-platform** (ARM64 on Intel) | 🐢 **Slower** | Testing ARM deployments |
+
+**💡 Tip**: Use native builds for development and cross-platform builds only when testing deployment compatibility.
 
 -----
 
@@ -775,6 +866,23 @@ dev templates prune
 
 # Remove templates unused for specific period
 dev templates cleanup 30    # Remove templates unused for 30+ days
+```
+
+**"Architecture or platform issues"**
+```bash
+# Check current architecture
+dev arch
+
+# Force specific platform if auto-detection fails
+dev --platform linux/arm64
+dev --platform linux/amd64
+
+# Slow builds on Apple Silicon (using x86_64 emulation)
+dev --platform linux/arm64    # Use native ARM64 instead
+
+# Container won't start (architecture mismatch)
+dev clean                     # Remove old images
+dev --platform linux/arm64   # Rebuild with correct architecture
 ```
 
 ### Getting Help
