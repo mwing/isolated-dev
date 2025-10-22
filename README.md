@@ -47,7 +47,7 @@
 - **Dependency testing** - Safely evaluate new packages and versions
 - **Legacy project maintenance** - Run old projects without installing outdated runtimes
 
-> **For complex setups:** Use VS Code Dev Containers, Docker Compose, or Podman for multi-service architectures, custom networking, or advanced orchestration needs.
+> **For complex setups:** Use VS Code Dev Containers, Docker Compose, or Podman for multi-service architectures, custom networking, or advanced orchestration needs. Or add a pull request that supports the features you need.
 
 ## Prerequisites
 
