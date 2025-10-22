@@ -47,6 +47,12 @@ cd isolated-dev
 ./install.sh --yes      # Skip prompts (for automation)
 ```
 
+The installer creates:
+- Scripts in `~/.local/bin/`
+- Global config with defaults (`~/.dev-envs/config.yaml`)
+- Language plugins for all supported languages
+- VM setup files
+
 ### Uninstallation
 ```bash
 ./install.sh --uninstall        # Remove files (VMs preserved)
@@ -233,6 +239,7 @@ dev config                        # Show current configuration
 dev config --edit                 # Edit global configuration
 dev config --init                 # Create project-local configuration
 dev config --init --yes           # Create project config, auto-overwrite if exists
+dev config validate               # Validate configuration files
 ```
 
 ### Template Management
@@ -287,10 +294,11 @@ chmod +x k8s-container
 
 ### Global Configuration (`~/.dev-envs/config.yaml`)
 ```yaml
-vm_name = "dev-vm-docker-host"
-default_template = "python-3.13"
-auto_start_vm = "true"
-container_prefix = "dev"
+# YAML format (recommended)
+vm_name: dev-vm-docker-host
+default_template: python-3.13
+auto_start_vm: true
+container_prefix: dev
 ```
 
 ### Project Configuration (`.devenv.yaml`)
@@ -300,9 +308,27 @@ dev config --init    # Creates project-specific config
 
 Example project config:
 ```yaml
-vm_name = "dev-vm-my-project"
-default_template = "node-22"
-container_prefix = "myproject"
+vm_name: dev-vm-my-project
+default_template: node-22
+container_prefix: myproject
+```
+
+### Environment Variable Overrides
+```bash
+# Override any config value with environment variables
+DEV_VM_NAME=custom-vm dev
+DEV_DEFAULT_TEMPLATE=python-3.14 dev new python
+DEV_CONTAINER_PREFIX=myapp dev build
+```
+
+### Configuration Validation
+```bash
+dev config validate              # Validate all config files
+# Checks for:
+# - Valid YAML syntax
+# - Known configuration keys
+# - Correct value types (boolean, string)
+# - Valid characters in names
 ```
 
 ## VS Code Integration
