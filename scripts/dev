@@ -442,6 +442,7 @@ case $COMMAND in
         ssh_mounts=$(get_ssh_key_mounts)
         port_forwards=$(build_port_forwards)
         security_flags=$(get_security_flags)
+        resource_limits=$(get_resource_limits)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
@@ -452,6 +453,9 @@ case $COMMAND in
         fi
         echo "   -> Git configuration mounted for consistent commits"
         echo "   -> Security hardening enabled (non-root user, limited capabilities)"
+        if [[ -n "$resource_limits" ]]; then
+            echo "   -> Resource limits applied: $resource_limits"
+        fi
         echo ""
         echo "✅ Connecting to container. Your project folder is at '/workspace'."
         
@@ -461,6 +465,7 @@ case $COMMAND in
             $volume_mounts \
             $ssh_mounts \
             $port_forwards \
+            $resource_limits \
             --name "$CONTAINER_NAME" \
             "$IMAGE_NAME"
         ;;
@@ -476,6 +481,7 @@ case $COMMAND in
         ssh_mounts=$(get_ssh_key_mounts)
         port_forwards=$(build_port_forwards)
         security_flags=$(get_security_flags)
+        resource_limits=$(get_resource_limits)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
@@ -486,6 +492,9 @@ case $COMMAND in
         fi
         echo "   -> Git configuration mounted for consistent commits"
         echo "   -> Security hardening enabled (non-root user, limited capabilities)"
+        if [[ -n "$resource_limits" ]]; then
+            echo "   -> Resource limits applied: $resource_limits"
+        fi
         echo ""
         echo "✅ Container ready. Your project folder is at '/workspace'."
         
@@ -495,6 +504,7 @@ case $COMMAND in
             $volume_mounts \
             $ssh_mounts \
             $port_forwards \
+            $resource_limits \
             --name "$CONTAINER_NAME" \
             "$IMAGE_NAME" bash
         ;;

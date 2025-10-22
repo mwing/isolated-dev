@@ -476,6 +476,8 @@ auto_host_networking: true
 port_range: "3000-9000"
 enable_port_health_check: false
 port_health_timeout: 10
+memory_limit: "512m"
+cpu_limit: "0.5"
 EOF
     
     local network_validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
@@ -546,6 +548,56 @@ test_environment_overrides() {
     else
         log "${YELLOW}⏭️  SKIP${NC}: Boolean network config override test failed"
     fi
+    
+    # Test resource limit configuration overrides
+    local resource_config_output=$(DEV_MEMORY_LIMIT="512m" DEV_CPU_LIMIT="0.5" bash "$ORIGINAL_DIR/scripts/dev" config 2>&1 || echo "RESOURCE_CONFIG_FAILED")
+    
+    if [[ "$resource_config_output" != "RESOURCE_CONFIG_FAILED" ]]; then
+        assert_contains "$resource_config_output" "Memory Limit: 512m" "Memory limit override works"
+        assert_contains "$resource_config_output" "CPU Limit: 0.5" "CPU limit override works"
+        assert_contains "$resource_config_output" "DEV_MEMORY_LIMIT" "Shows memory limit override in active list"
+        assert_contains "$resource_config_output" "DEV_CPU_LIMIT" "Shows CPU limit override in active list"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Resource config override test failed"
+    fi
+    
+    cd - > /dev/null
+}
+
+test_resource_limits_function() {
+    run_test "Resource limits function"
+    
+    local test_project="$TEST_DIR/test-resource-limits"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Source the containers library to test the function directly
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Test with no limits set
+    MEMORY_LIMIT=""
+    CPU_LIMIT=""
+    local no_limits=$(get_resource_limits)
+    assert_equals "" "$no_limits" "No resource limits when not configured"
+    
+    # Test with memory limit only
+    MEMORY_LIMIT="512m"
+    CPU_LIMIT=""
+    local memory_only=$(get_resource_limits)
+    assert_contains "$memory_only" "--memory=512m" "Memory limit applied when configured"
+    
+    # Test with CPU limit only
+    MEMORY_LIMIT=""
+    CPU_LIMIT="0.5"
+    local cpu_only=$(get_resource_limits)
+    assert_contains "$cpu_only" "--cpus=0.5" "CPU limit applied when configured"
+    
+    # Test with both limits
+    MEMORY_LIMIT="1g"
+    CPU_LIMIT="1.0"
+    local both_limits=$(get_resource_limits)
+    assert_contains "$both_limits" "--memory=1g" "Memory limit applied with both limits"
+    assert_contains "$both_limits" "--cpus=1.0" "CPU limit applied with both limits"
     
     cd - > /dev/null
 }
@@ -647,6 +699,7 @@ main() {
     test_combined_template_devcontainer
     test_config_validation
     test_environment_overrides
+    test_resource_limits_function
     test_security_functionality
     
     # Print results

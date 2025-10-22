@@ -315,6 +315,10 @@ auto_host_networking: false             # Auto-use host networking for single se
 port_range: "3000-9000"                 # Port range for auto-detection
 enable_port_health_check: true          # Check if ports are accessible
 port_health_timeout: 5                  # Timeout for port health checks (seconds)
+
+# Resource limits (applied at container runtime)
+memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
+cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 ```
 
 ### Project Configuration (`.devenv.yaml`)
@@ -342,6 +346,10 @@ DEV_AUTO_HOST_NETWORKING=true dev                   # Enable auto host networkin
 DEV_PORT_RANGE="8000-8999" dev                      # Custom port range
 DEV_ENABLE_PORT_HEALTH_CHECK=false dev              # Disable port health checks
 DEV_PORT_HEALTH_TIMEOUT=10 dev                      # Custom health check timeout
+
+# Resource limit overrides
+DEV_MEMORY_LIMIT="512m" dev                         # Limit container memory
+DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
 ```
 
 ### Configuration Validation

@@ -95,6 +95,22 @@ function get_common_volume_mounts() {
     echo "$volumes"
 }
 
+function get_resource_limits() {
+    local resource_flags=""
+    
+    # Add memory limit if configured
+    if [[ -n "$MEMORY_LIMIT" ]]; then
+        resource_flags="$resource_flags --memory=$MEMORY_LIMIT"
+    fi
+    
+    # Add CPU limit if configured
+    if [[ -n "$CPU_LIMIT" ]]; then
+        resource_flags="$resource_flags --cpus=$CPU_LIMIT"
+    fi
+    
+    echo "$resource_flags"
+}
+
 function build_port_forwards() {
     local ports=($(detect_common_ports))
     local port_args=""

@@ -493,6 +493,8 @@ auto_start_vm: true
 network_mode: host
 enable_port_health_check: false
 port_range: "8000-8010"  # Narrow range
+memory_limit: "512m"     # Limit memory for faster startup
+cpu_limit: "0.5"         # Limit CPU usage
 EOF
 
 # Or globally in ~/.dev-envs/config.yaml
@@ -521,9 +523,24 @@ dev -f Dockerfile.prod build
 
 ### Resource Optimization
 ```bash
-# Resource limits not yet supported - coming in future release
-# For now, use Docker's native resource controls if needed:
-# docker run --memory="512m" --cpus="0.5" ...
+# Configure resource limits per project (recommended)
+dev config --init --yes
+cat >> .devenv.yaml << EOF
+memory_limit: "512m"
+cpu_limit: "0.5"
+EOF
+
+# Or configure globally
+cat >> ~/.dev-envs/config.yaml << EOF
+memory_limit: "1g"
+cpu_limit: "1.0"
+EOF
+
+# Or override per session
+DEV_MEMORY_LIMIT="256m" DEV_CPU_LIMIT="0.25" dev
+
+# Resource limits are automatically applied when running containers
+dev shell  # Runs with configured limits
 ```
 
 ## Troubleshooting Recipes

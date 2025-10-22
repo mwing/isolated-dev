@@ -7,7 +7,7 @@
 # Configuration schema and defaults
 function get_config_type() {
     case "$1" in
-        vm_name|default_template|container_prefix|network_mode|port_range) echo "string" ;;
+        vm_name|default_template|container_prefix|network_mode|port_range|memory_limit|cpu_limit) echo "string" ;;
         auto_start_vm|auto_host_networking|enable_port_health_check) echo "boolean" ;;
         port_health_timeout) echo "number" ;;
         *) echo "unknown" ;;
@@ -25,6 +25,8 @@ function get_config_default() {
         port_range) echo "3000-9000" ;;
         enable_port_health_check) echo "true" ;;
         port_health_timeout) echo "5" ;;
+        memory_limit) echo "" ;;
+        cpu_limit) echo "" ;;
         *) echo "" ;;
     esac
 }
@@ -62,6 +64,8 @@ function parse_yaml_config() {
                 port_range) PORT_RANGE="$value" ;;
                 enable_port_health_check) ENABLE_PORT_HEALTH_CHECK="$value" ;;
                 port_health_timeout) PORT_HEALTH_TIMEOUT="$value" ;;
+                memory_limit) MEMORY_LIMIT="$value" ;;
+                cpu_limit) CPU_LIMIT="$value" ;;
             esac
         # Handle legacy key = value format for backward compatibility
         elif [[ "$line" =~ ^[[:space:]]*([^=]+)=[[:space:]]*(.*)$ ]]; then
@@ -83,6 +87,8 @@ function parse_yaml_config() {
                 port_range) PORT_RANGE="$value" ;;
                 enable_port_health_check) ENABLE_PORT_HEALTH_CHECK="$value" ;;
                 port_health_timeout) PORT_HEALTH_TIMEOUT="$value" ;;
+                memory_limit) MEMORY_LIMIT="$value" ;;
+                cpu_limit) CPU_LIMIT="$value" ;;
             esac
         fi
     done < "$config_file"
@@ -99,6 +105,8 @@ function apply_env_overrides() {
     [[ -n "${DEV_PORT_RANGE:-}" ]] && PORT_RANGE="$DEV_PORT_RANGE"
     [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && ENABLE_PORT_HEALTH_CHECK="$DEV_ENABLE_PORT_HEALTH_CHECK"
     [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && PORT_HEALTH_TIMEOUT="$DEV_PORT_HEALTH_TIMEOUT"
+    [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && MEMORY_LIMIT="$DEV_MEMORY_LIMIT"
+    [[ -n "${DEV_CPU_LIMIT:-}" ]] && CPU_LIMIT="$DEV_CPU_LIMIT"
 }
 
 function validate_config_value() {
@@ -216,6 +224,8 @@ function load_config() {
     PORT_RANGE=$(get_config_default "port_range")
     ENABLE_PORT_HEALTH_CHECK=$(get_config_default "enable_port_health_check")
     PORT_HEALTH_TIMEOUT=$(get_config_default "port_health_timeout")
+    MEMORY_LIMIT=$(get_config_default "memory_limit")
+    CPU_LIMIT=$(get_config_default "cpu_limit")
     
     # Load global config if it exists
     parse_yaml_config "$GLOBAL_CONFIG"
@@ -253,6 +263,10 @@ auto_host_networking: false             # Auto-use host networking for single se
 port_range: "3000-9000"                 # Port range for auto-detection
 enable_port_health_check: true          # Check if ports are accessible
 port_health_timeout: 5                  # Timeout for port health checks (seconds)
+
+# Resource limits (applied at container runtime)
+memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
+cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 EOF
         echo "📝 Created default config at $GLOBAL_CONFIG"
         echo "   Edit this file to customize your development environment defaults."
@@ -298,6 +312,8 @@ function handle_config_command() {
             [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE=$DEV_PORT_RANGE")
             [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK=$DEV_ENABLE_PORT_HEALTH_CHECK")
             [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT=$DEV_PORT_HEALTH_TIMEOUT")
+            [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT=$DEV_MEMORY_LIMIT")
+            [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT=$DEV_CPU_LIMIT")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then
                 echo ""
@@ -357,6 +373,10 @@ function handle_config_command() {
 # port_range: "3000-9000"           # Custom port range
 # enable_port_health_check: true    # Enable port health checks
 # port_health_timeout: 5            # Port check timeout (seconds)
+
+# Resource limits (optional)
+# memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
+# cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")
 EOF
             echo "✅ Created project config: $PROJECT_CONFIG"
             echo "   Edit this file to customize settings for this project."
@@ -383,6 +403,8 @@ EOF
             echo "  Port Range: $PORT_RANGE"
             echo "  Port Health Check: $ENABLE_PORT_HEALTH_CHECK"
             echo "  Port Health Timeout: ${PORT_HEALTH_TIMEOUT}s"
+            echo "  Memory Limit: ${MEMORY_LIMIT:-"(none)"}"
+            echo "  CPU Limit: ${CPU_LIMIT:-"(none)"}"
             
             # Show environment variable overrides if any
             local env_overrides=()
@@ -395,6 +417,8 @@ EOF
             [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE")
             [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK")
             [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT")
+            [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT")
+            [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then
                 echo ""
