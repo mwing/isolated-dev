@@ -1,15 +1,13 @@
-FROM openjdk:{{VERSION}}-jdk
+FROM openjdk:{{VERSION}}-jdk-slim
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     vim \
     curl \
-    wget \
-    jq \
-    tree \
-    htop \
-    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Maven
@@ -22,11 +20,15 @@ RUN curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apac
 ENV MAVEN_HOME=/opt/maven
 ENV PATH=$PATH:$MAVEN_HOME/bin
 
-# Set working directory
+# Set working directory and change ownership
 WORKDIR /workspace
+RUN chown -R appuser:appuser /workspace
+
+# Switch to non-root user
+USER appuser
 
 # Copy Maven files if they exist
-COPY pom.xml* ./
+COPY --chown=appuser:appuser pom.xml* ./
 RUN if [ -f pom.xml ]; then mvn dependency:go-offline; fi
 
 # Keep container running

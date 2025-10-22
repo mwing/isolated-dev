@@ -1,21 +1,23 @@
-FROM golang:{{VERSION}}
+FROM golang:{{VERSION}}-alpine
+
+# Create non-root user
+RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apk add --no-cache \
     git \
     vim \
-    curl \
-    wget \
-    jq \
-    tree \
-    htop \
-    && rm -rf /var/lib/apt/lists/*
+    curl
 
-# Set working directory
+# Set working directory and change ownership
 WORKDIR /workspace
+RUN chown -R appuser:appuser /workspace
+
+# Switch to non-root user
+USER appuser
 
 # Copy go mod files if they exist
-COPY go.mod go.sum* ./
+COPY --chown=appuser:appuser go.mod go.sum* ./
 RUN if [ -f go.mod ]; then go mod download; fi
 
 # Keep container running

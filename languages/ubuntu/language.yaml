@@ -1,0 +1,12 @@
+name: ubuntu
+display_name: Ubuntu
+versions: ["22.04", "20.04", "24.04"]
+
+detection:
+  files: ["*.sh", "script.sh", "main.sh", "Makefile"]
+
+ports: [8080]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [".gitignore", "main.sh"]

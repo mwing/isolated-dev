@@ -99,7 +99,7 @@ Your project is mounted at `/workspace` in the container with automatic:
 | **Rust** | 1.75, 1.90 | `dev new rust-1.90` |
 | **Java** | 21 | `dev new java-21` |
 | **PHP** | 8.3 | `dev new php-8.3` |
-| **Bash** | latest | `dev new bash-latest` |
+| **Ubuntu** | 22.04, 20.04, 24.04 | `dev new ubuntu-22.04` |
 
 ### Template Options
 ```bash
@@ -240,6 +240,12 @@ dev config --edit                 # Edit global configuration
 dev config --init                 # Create project-local configuration
 dev config --init --yes           # Create project config, auto-overwrite if exists
 dev config validate               # Validate configuration files
+```
+
+### Security Commands
+```bash
+dev security scan                 # Scan Dockerfile for security issues
+dev security validate             # Validate Dockerfile security best practices
 ```
 
 ### Template Management
@@ -418,8 +424,9 @@ For more help: [https://github.com/mwing/isolated-dev](https://github.com/mwing/
 
 ## Features
 
-- **Multiple Languages**: Python, Node.js, Go, Rust, Java, PHP, Bash templates
-- **Security**: Non-root containers with isolated environments
+- **Multiple Languages**: Python, Node.js, Go, Rust, Java, PHP, Ubuntu templates
+- **Security Hardening**: Non-root containers, capability dropping, resource limits, vulnerability scanning
+- **OrbStack Integration**: VM isolation, security enforcement, Docker engine integration
 - **Auto Port Forwarding**: Detects common development ports
 - **Git Integration**: SSH keys and configuration automatically mounted
 - **VS Code Support**: Generate devcontainer.json configurations
