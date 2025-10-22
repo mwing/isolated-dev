@@ -137,25 +137,37 @@ test_help_commands() {
     assert_contains "$dev_help" "Usage" "dev --help works"
 }
 
-test_skeleton_files() {
-    run_test "Skeleton files structure"
+test_language_plugins() {
+    run_test "Language plugin structure"
     
-    # Test that skeleton directories exist
-    assert_dir_exists "skeletons" "Skeletons directory exists"
-    assert_dir_exists "skeletons/dockerfiles" "Dockerfile skeletons directory exists"
-    assert_dir_exists "skeletons/scaffolding" "Scaffolding skeletons directory exists"
+    # Test that language plugins directory exists
+    assert_dir_exists "languages" "Languages directory exists"
     
-    # Test that key skeleton files exist
-    assert_file_exists "skeletons/dockerfiles/python.dockerfile" "Python Dockerfile skeleton exists"
-    assert_file_exists "skeletons/dockerfiles/node.dockerfile" "Node.js Dockerfile skeleton exists"
-    assert_file_exists "skeletons/scaffolding/python/requirements.txt" "Python requirements skeleton exists"
-    assert_file_exists "skeletons/scaffolding/node/package.json" "Node.js package.json skeleton exists"
+    # Test that key language plugins exist
+    assert_dir_exists "languages/python" "Python language plugin exists"
+    assert_dir_exists "languages/node" "Node.js language plugin exists"
+    assert_dir_exists "languages/golang" "Go language plugin exists"
+    assert_dir_exists "languages/rust" "Rust language plugin exists"
+    assert_dir_exists "languages/java" "Java language plugin exists"
+    assert_dir_exists "languages/php" "PHP language plugin exists"
+    assert_dir_exists "languages/bash" "Bash language plugin exists"
+    
+    # Test that each plugin has required files
+    assert_file_exists "languages/python/language.yaml" "Python language.yaml exists"
+    assert_file_exists "languages/python/Dockerfile.template" "Python Dockerfile.template exists"
+    assert_file_exists "languages/python/requirements.txt" "Python requirements.txt exists"
+    assert_file_exists "languages/python/main.py" "Python main.py exists"
+    assert_file_exists "languages/python/.gitignore" "Python .gitignore exists"
+    
+    assert_file_exists "languages/node/language.yaml" "Node.js language.yaml exists"
+    assert_file_exists "languages/node/Dockerfile.template" "Node.js Dockerfile.template exists"
+    assert_file_exists "languages/node/package.json" "Node.js package.json exists"
     
     # Test placeholder content
-    local python_dockerfile=$(cat skeletons/dockerfiles/python.dockerfile)
+    local python_dockerfile=$(cat languages/python/Dockerfile.template)
     assert_contains "$python_dockerfile" "{{VERSION}}" "Python Dockerfile contains version placeholder"
     
-    local package_json=$(cat skeletons/scaffolding/node/package.json)
+    local package_json=$(cat languages/node/package.json)
     assert_contains "$package_json" "{{PROJECT_NAME}}" "Node.js package.json contains project name placeholder"
 }
 
@@ -175,7 +187,7 @@ test_installation() {
     assert_file_exists "$TEST_HOME/.local/bin/dev" "dev script installed"
     assert_dir_exists "$TEST_HOME/.dev-envs" "Configuration directory created"
     assert_dir_exists "$TEST_HOME/.dev-envs/templates" "Templates directory created"
-    assert_dir_exists "$TEST_HOME/.dev-envs/skeletons" "Skeletons directory created"
+    assert_dir_exists "$TEST_HOME/.dev-envs/languages" "Languages directory created"
 }
 
 test_template_creation() {
@@ -331,7 +343,7 @@ main() {
     # Run tests
     test_syntax_validation
     test_help_commands  
-    test_skeleton_files
+    test_language_plugins
     test_installation
     test_template_creation
     test_config_creation

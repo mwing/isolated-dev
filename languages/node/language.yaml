@@ -1,0 +1,17 @@
+name: node
+display_name: Node.js
+versions: ["20", "22", "25"]
+
+detection:
+  files: [package.json]
+  version_files:
+    - file: .nvmrc
+      extract: "v?([0-9]+)"
+    - file: package.json
+      extract: '"node".*">=?\\s*([0-9]+)'
+
+ports: [3000, 8080, 5000, 4000]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [package.json, index.js, .gitignore]

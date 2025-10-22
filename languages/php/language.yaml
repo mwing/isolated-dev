@@ -1,0 +1,12 @@
+name: php
+display_name: PHP
+versions: ["8.3"]
+
+detection:
+  files: ["composer.json", "index.php", "*.php"]
+
+ports: [8080]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [".gitignore", "composer.json", "index.php"]

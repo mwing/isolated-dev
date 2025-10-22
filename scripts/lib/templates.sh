@@ -4,82 +4,90 @@
 # TEMPLATE OPERATIONS AND VERSION DETECTION
 # ==============================================================================
 
-function create_dockerfile_from_skeleton() {
+function create_dockerfile_from_language_plugin() {
     local language="$1"
     local version="$2"
     local output_file="$3"
     local platform="$4"  # Optional platform override
-    local skeleton_file="$DOCKERFILE_SKELETONS/$language.dockerfile"
+    local template_file="$LANGUAGES_DIR/$language/Dockerfile.template"
     
-    if [[ ! -f "$skeleton_file" ]]; then
-        echo "❌ Error: Skeleton file not found: $skeleton_file"
+    if [[ ! -f "$template_file" ]]; then
+        echo "❌ Error: Language template not found: $template_file"
         return 1
     fi
     
-    # Determine architecture-specific base image
-    local base_image_suffix=""
-    if [[ -n "$platform" ]]; then
-        case "$platform" in
-            linux/arm64|arm64)
-                # For ARM64, some images have specific variants
-                case "$language" in
-                    python|node|golang|rust)
-                        base_image_suffix=""  # Official images support multi-arch
-                        ;;
-                    *)
-                        base_image_suffix=""  # Default to official multi-arch
-                        ;;
-                esac
-                ;;
-            linux/amd64|amd64)
-                base_image_suffix=""  # Default AMD64
-                ;;
-        esac
-    fi
-    
-    # Replace placeholders in skeleton with actual values
+    # Replace placeholders in template with actual values
     sed -e "s/{{VERSION}}/$version/g" \
-        -e "s/{{BASE_IMAGE_SUFFIX}}/$base_image_suffix/g" \
-        "$skeleton_file" > "$output_file"
+        "$template_file" > "$output_file"
     return 0
 }
 
-function copy_scaffolding_files() {
+function copy_scaffolding_files_from_plugin() {
     local language="$1" 
     local project_name="$2"
     local go_version="$3"  # Optional, for Go language
-    local scaffolding_dir="$SCAFFOLDING_SKELETONS/$language"
+    local language_dir="$LANGUAGES_DIR/$language"
     
-    if [[ ! -d "$scaffolding_dir" ]]; then
-        echo "❌ Error: Scaffolding directory not found: $scaffolding_dir"
+    if [[ ! -d "$language_dir" ]]; then
+        echo "❌ Error: Language plugin directory not found: $language_dir"
         return 1
     fi
     
-    # Copy all files from scaffolding directory, replacing placeholders
-    for file in "$scaffolding_dir"/*; do
-        [[ ! -f "$file" ]] && continue
+    # Read language.yaml to get scaffolding files list
+    local scaffolding_files=()
+    if [[ -f "$language_dir/language.yaml" ]]; then
+        # Extract scaffolding files from YAML array format: scaffolding: [file1, file2, file3]
+        local scaffolding_line=$(grep "scaffolding:" "$language_dir/language.yaml" | head -1)
+        if [[ "$scaffolding_line" =~ scaffolding:[[:space:]]*\[(.*)\] ]]; then
+            local files_str="${BASH_REMATCH[1]}"
+            # Split by comma and clean up
+            IFS=',' read -ra files_array <<< "$files_str"
+            for file in "${files_array[@]}"; do
+                # Remove quotes and whitespace
+                file=$(echo "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+                [[ -n "$file" ]] && scaffolding_files+=("$file")
+            done
+        fi
+    fi
+    
+    # Copy scaffolding files, replacing placeholders
+    for file in "${scaffolding_files[@]}"; do
+        local source_file="$language_dir/$file"
+        [[ ! -f "$source_file" ]] && continue
         
-        local filename=$(basename "$file")
+        # Create directory structure if needed
+        local target_dir=$(dirname "$file")
+        [[ "$target_dir" != "." ]] && mkdir -p "$target_dir"
         
         # Replace placeholders in file content based on file type
-        case "$filename" in
+        case "$file" in
             "package.json")
-                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
                 ;;
             "go.mod")
-                sed -e "s/{{PROJECT_NAME}}/$project_name/g" -e "s/{{GO_VERSION}}/$go_version/g" "$file" > "$filename"
+                sed -e "s/{{PROJECT_NAME}}/$project_name/g" -e "s/{{GO_VERSION}}/$go_version/g" "$source_file" > "$file"
                 ;;
             "Cargo.toml")
-                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
                 ;;
             "pom.xml")
-                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
                 ;;
             "composer.json")
-                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
+                ;;
+            "Main.java")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
+                ;;
+            "src/main.rs")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
+                ;;
+            "main.sh")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
+                chmod +x "$file"
                 ;;
             *)
-                cp "$file" "$filename"
+                cp "$source_file" "$file"
                 ;;
         esac
     done
@@ -186,7 +194,7 @@ function update_templates() {
     # Python latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-python-$python_version" ]]; then
         echo "📦 Adding Python $python_version template..."
-        if create_dockerfile_from_skeleton "python" "$python_version" "$templates_dir/Dockerfile-python-$python_version"; then
+        if create_dockerfile_from_language_plugin "python" "$python_version" "$templates_dir/Dockerfile-python-$python_version"; then
             echo "   ✅ Python $python_version template created"
             ((created_count++))
         else
@@ -197,7 +205,7 @@ function update_templates() {
     # Node.js latest (if missing)  
     if [[ ! -f "$templates_dir/Dockerfile-node-$node_version" ]]; then
         echo "📦 Adding Node.js $node_version template..."
-        if create_dockerfile_from_skeleton "node" "$node_version" "$templates_dir/Dockerfile-node-$node_version"; then
+        if create_dockerfile_from_language_plugin "node" "$node_version" "$templates_dir/Dockerfile-node-$node_version"; then
             echo "   ✅ Node.js $node_version template created"
             ((created_count++))
         else
@@ -208,7 +216,7 @@ function update_templates() {
     # Golang latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-golang-$golang_version" ]]; then
         echo "📦 Adding Go $golang_version template..."
-        if create_dockerfile_from_skeleton "golang" "$golang_version" "$templates_dir/Dockerfile-golang-$golang_version"; then
+        if create_dockerfile_from_language_plugin "golang" "$golang_version" "$templates_dir/Dockerfile-golang-$golang_version"; then
             echo "   ✅ Go $golang_version template created"
             ((created_count++))
         else
@@ -219,7 +227,7 @@ function update_templates() {
     # Rust latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-rust-$rust_version" ]]; then
         echo "📦 Adding Rust $rust_version template..."
-        if create_dockerfile_from_skeleton "rust" "$rust_version" "$templates_dir/Dockerfile-rust-$rust_version"; then
+        if create_dockerfile_from_language_plugin "rust" "$rust_version" "$templates_dir/Dockerfile-rust-$rust_version"; then
             echo "   ✅ Rust $rust_version template created"
             ((created_count++))
         else
@@ -369,7 +377,7 @@ function init_project_scaffolding() {
             echo "   -> Creating Python project structure..."
             
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "python" "$project_name"; then
+            if copy_scaffolding_files_from_plugin "python" "$project_name"; then
                 echo "   -> Created: requirements.txt, main.py, .gitignore"
             else
                 echo "   -> ❌ Failed to create Python project structure"
@@ -380,7 +388,7 @@ function init_project_scaffolding() {
             echo "   -> Creating Node.js project structure..."
             
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "node" "$project_name"; then
+            if copy_scaffolding_files_from_plugin "node" "$project_name"; then
                 echo "   -> Created: package.json, index.js, .gitignore"
             else
                 echo "   -> ❌ Failed to create Node.js project structure"
@@ -393,7 +401,7 @@ function init_project_scaffolding() {
             local project_name=$(basename "$(pwd)")
             local go_version=$(get_latest_golang_version)
             
-            if copy_scaffolding_files "golang" "$project_name" "$go_version"; then
+            if copy_scaffolding_files_from_plugin "golang" "$project_name" "$go_version"; then
                 echo "   -> Created: go.mod, main.go, .gitignore"
             else
                 echo "   -> ❌ Failed to create Go project structure"
@@ -403,9 +411,7 @@ function init_project_scaffolding() {
         rust)
             echo "   -> Creating Rust project structure..."
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "rust" "$project_name"; then
-                mkdir -p src
-                cp "$SCAFFOLDING_SKELETONS/rust/main.rs" src/main.rs
+            if copy_scaffolding_files_from_plugin "rust" "$project_name"; then
                 echo "   -> Created: Cargo.toml, src/main.rs, .gitignore"
             else
                 echo "   -> ❌ Failed to create Rust project structure"
@@ -415,9 +421,7 @@ function init_project_scaffolding() {
         java)
             echo "   -> Creating Java project structure..."
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "java" "$project_name"; then
-                mkdir -p src/main/java/com/example
-                cp "$SCAFFOLDING_SKELETONS/java/Main.java" src/main/java/com/example/Main.java
+            if copy_scaffolding_files_from_plugin "java" "$project_name"; then
                 echo "   -> Created: pom.xml, src/main/java/com/example/Main.java, .gitignore"
             else
                 echo "   -> ❌ Failed to create Java project structure"
@@ -427,9 +431,7 @@ function init_project_scaffolding() {
         php)
             echo "   -> Creating PHP project structure..."
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "php" "$project_name"; then
-                mkdir -p src
-                cp "$SCAFFOLDING_SKELETONS/php/index.php" index.php
+            if copy_scaffolding_files_from_plugin "php" "$project_name"; then
                 echo "   -> Created: composer.json, index.php, src/, .gitignore"
             else
                 echo "   -> ❌ Failed to create PHP project structure"
@@ -439,9 +441,7 @@ function init_project_scaffolding() {
         bash)
             echo "   -> Creating Bash project structure..."
             local project_name=$(basename "$(pwd)")
-            if copy_scaffolding_files "bash" "$project_name"; then
-                cp "$SCAFFOLDING_SKELETONS/bash/main.sh" "$project_name.sh"
-                chmod +x "$project_name.sh"
+            if copy_scaffolding_files_from_plugin "bash" "$project_name"; then
                 echo "   -> Created: $project_name.sh, .gitignore"
             else
                 echo "   -> ❌ Failed to create Bash project structure"
@@ -451,11 +451,19 @@ function init_project_scaffolding() {
         *)
             echo "   -> No specific scaffolding available for $base_lang"
             echo "   -> Created basic .gitignore"
-            if [[ -f "$SCAFFOLDING_SKELETONS/basic/.gitignore" ]]; then
-                cp "$SCAFFOLDING_SKELETONS/basic/.gitignore" .gitignore
-            else
-                echo "   -> ❌ Basic .gitignore skeleton not found"
-            fi
+            # Create basic .gitignore
+            cat > .gitignore << 'EOF'
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+EOF
             ;;
     esac
 }

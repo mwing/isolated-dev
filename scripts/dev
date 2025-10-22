@@ -10,13 +10,12 @@ CONFIG_DIR="$HOME/.dev-envs"
 GLOBAL_CONFIG="$CONFIG_DIR/config.yaml"
 PROJECT_CONFIG=".devenv.yaml"
 
-# Template skeleton directories (installed by install.sh)
-SKELETONS_DIR="$CONFIG_DIR/skeletons"
-DOCKERFILE_SKELETONS="$SKELETONS_DIR/dockerfiles"
-SCAFFOLDING_SKELETONS="$SKELETONS_DIR/scaffolding"
+# Language plugins directory (installed by install.sh)
+LANGUAGES_DIR="$HOME/.dev-envs/languages"
 
 # Get script directory for sourcing libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LANGUAGES_DIR="$HOME/.dev-envs/languages"
 
 # Source library modules
 source "$SCRIPT_DIR/lib/utils.sh"
@@ -24,6 +23,7 @@ source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/lib/vm.sh"
 source "$SCRIPT_DIR/lib/containers.sh"
 source "$SCRIPT_DIR/lib/templates.sh"
+source "$SCRIPT_DIR/lib/languages.sh"
 
 # ==============================================================================
 # TEMPLATE CLEANUP FUNCTIONS (remaining functions not moved to templates.sh)
@@ -511,7 +511,12 @@ while [[ $# -gt 0 ]]; do
             
             # If no language specified, auto-detect
             if [[ -z "$language" ]]; then
-                detection_result=$(detect_project_type)
+                # Try new language system first, fallback to old system
+                if [[ -d "$LANGUAGES_DIR" ]]; then
+                    detection_result=$(detect_project_type_from_languages "$LANGUAGES_DIR")
+                else
+                    detection_result=$(detect_project_type)
+                fi
                 detected_lang=$(echo "$detection_result" | cut -d: -f1)
                 detected_version=$(echo "$detection_result" | cut -d: -f2)
                 confidence=$(echo "$detection_result" | cut -d: -f3)

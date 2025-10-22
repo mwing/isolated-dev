@@ -1,0 +1,25 @@
+FROM openjdk:17-jdk-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    vim \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Kotlin compiler
+RUN curl -s https://get.sdkman.io | bash && \
+    bash -c "source ~/.sdkman/bin/sdkman-init.sh && sdk install kotlin {{VERSION}}"
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy build files if they exist
+COPY build.gradle.kts* settings.gradle.kts* ./
+COPY gradle/ gradle/ 2>/dev/null || true
+COPY gradlew* ./ 2>/dev/null || true
+
+# Keep container running
+CMD ["bash"]

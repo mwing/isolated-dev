@@ -1,0 +1,33 @@
+FROM openjdk:{{VERSION}}-jdk
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    vim \
+    curl \
+    wget \
+    jq \
+    tree \
+    htop \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Maven
+RUN curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
+    | tar xzf - -C /opt \
+    && ln -s /opt/apache-maven-3.9.9 /opt/maven \
+    && ln -s /opt/maven/bin/mvn /usr/local/bin/mvn
+
+# Set environment variables
+ENV MAVEN_HOME=/opt/maven
+ENV PATH=$PATH:$MAVEN_HOME/bin
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy Maven files if they exist
+COPY pom.xml* ./
+RUN if [ -f pom.xml ]; then mvn dependency:go-offline; fi
+
+# Keep container running
+CMD ["bash"]

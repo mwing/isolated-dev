@@ -1,0 +1,17 @@
+name: python
+display_name: Python
+versions: ["3.11", "3.12", "3.13", "3.14"]
+
+detection:
+  files: [requirements.txt, pyproject.toml, setup.py, Pipfile]
+  version_files:
+    - file: .python-version
+      extract: "([0-9]+\\.[0-9]+)"
+    - file: pyproject.toml
+      extract: 'python_requires.*">=\\s*([0-9]+\\.[0-9]+)'
+
+ports: [8000, 5000]
+
+files:
+  dockerfile: Dockerfile.template
+  scaffolding: [requirements.txt, main.py, .gitignore]

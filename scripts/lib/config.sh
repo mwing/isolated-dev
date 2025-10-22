@@ -71,12 +71,23 @@ function load_config() {
 function create_default_config() {
     if [[ ! -f "$GLOBAL_CONFIG" ]]; then
         mkdir -p "$CONFIG_DIR"
-        if [[ -f "$SCAFFOLDING_SKELETONS/basic/global-config.yaml" ]]; then
-            cp "$SCAFFOLDING_SKELETONS/basic/global-config.yaml" "$GLOBAL_CONFIG"
-        else
-            echo "❌ Error: Global config skeleton not found"
-            return 1
-        fi
+        cat > "$GLOBAL_CONFIG" << 'EOF'
+# Global configuration for isolated development environment
+# This file sets defaults for all projects
+
+# Default VM name to use for containers
+vm_name = "dev-vm-docker-host"
+
+# Default template when language has multiple versions
+# Example: default_template = "python-3.13"
+default_template = ""
+
+# Automatically start VM if not running
+auto_start_vm = "true"
+
+# Prefix for container and image names
+container_prefix = "dev"
+EOF
         echo "📝 Created default config at $GLOBAL_CONFIG"
         echo "   Edit this file to customize your development environment defaults."
     fi
@@ -118,12 +129,19 @@ function handle_config_command() {
             fi
             
             local project_name=$(basename "$(pwd)")
-            if [[ -f "$SCAFFOLDING_SKELETONS/basic/project-config.yaml" ]]; then
-                sed "s/{{PROJECT_NAME}}/$project_name/g" "$SCAFFOLDING_SKELETONS/basic/project-config.yaml" > "$PROJECT_CONFIG"
-            else
-                echo "❌ Error: Project config skeleton not found"
-                exit 1
-            fi
+            cat > "$PROJECT_CONFIG" << EOF
+# Project-specific configuration for $project_name
+# This file overrides global settings for this project only
+
+# VM name for this project (optional)
+# vm_name = "dev-vm-$project_name"
+
+# Default template for this project (optional)
+# default_template = "python-3.13"
+
+# Container prefix for this project (optional)
+# container_prefix = "$project_name"
+EOF
             echo "✅ Created project config: $PROJECT_CONFIG"
             echo "   Edit this file to customize settings for this project."
             exit 0
