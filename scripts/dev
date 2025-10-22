@@ -4,8 +4,8 @@
 # CONFIGURATION
 # ==============================================================================
 
-DEFAULT_VM_NAME="dev-vm-docker-host"
-CONFIG_DIR="$HOME/.dev-envs"
+# shellcheck disable=SC2034  # Used in sourced files
+export CONFIG_DIR="$HOME/.dev-envs"
 GLOBAL_CONFIG="$CONFIG_DIR/config.yaml"
 PROJECT_CONFIG=".devenv.yaml"
 
@@ -232,7 +232,7 @@ while [[ $# -gt 0 ]]; do
                                 suggested_template="$detected_lang-$major_minor"
                             else
                                 # Fall back to latest available
-                                latest_template=$(ls "$TEMPLATES_DIR"/Dockerfile-"$detected_lang"-* 2>/dev/null | \
+                                latest_template=$(find "$TEMPLATES_DIR" -name "Dockerfile-$detected_lang-*" -type f 2>/dev/null | \
                                     sed "s/.*Dockerfile-$detected_lang-//" | \
                                     sort -V | tail -1)
                                 if [[ -n "$latest_template" ]]; then
@@ -242,7 +242,7 @@ while [[ $# -gt 0 ]]; do
                         fi
                     else
                         # Find the latest version available locally
-                        latest_template=$(ls "$TEMPLATES_DIR"/Dockerfile-"$detected_lang"-* 2>/dev/null | \
+                        latest_template=$(find "$TEMPLATES_DIR" -name "Dockerfile-$detected_lang-*" -type f 2>/dev/null | \
                             sed "s/.*Dockerfile-$detected_lang-//" | \
                             sort -V | tail -1)
                         if [[ -n "$latest_template" ]]; then
@@ -284,10 +284,7 @@ while [[ $# -gt 0 ]]; do
                 create_from_template "$language" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
             fi
             ;;
-        devcontainer)
-            echo "❌ Error: devcontainer command should have been handled earlier"
-            exit 1
-            ;;
+
         -f|--file)
             DOCKERFILE="$2"
             shift 2
@@ -417,6 +414,7 @@ case $COMMAND in
         echo ""
         echo "✅ Connecting to container. Your project folder is at '/workspace'."
         
+        # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
         orb -m "$VM_NAME" sudo docker run -it --rm \
             $volume_mounts \
             $ssh_mounts \
@@ -447,6 +445,7 @@ case $COMMAND in
         echo ""
         echo "✅ Container ready. Your project folder is at '/workspace'."
         
+        # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
         orb -m "$VM_NAME" sudo docker run -it --rm \
             $volume_mounts \
             $ssh_mounts \
