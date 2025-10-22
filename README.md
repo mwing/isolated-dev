@@ -516,6 +516,27 @@ dev clean && dev build            # Rebuild with correct architecture
 - [GitHub Repository](https://github.com/mwing/isolated-dev) - Source code, issues, and contributions
 - [Language Plugin Guide](languages/README.md) - How to add new language support
 
+## Contributing
+
+Contributions are welcome! To ensure code quality and functionality:
+
+### Running Tests
+```bash
+# Run the full test suite
+./test.sh
+
+# Run specific test categories
+./test.sh config    # Configuration tests
+./test.sh template  # Template tests
+./test.sh security  # Security tests
+```
+
+Tests validate core functionality, configuration handling, template generation, and security features. Please run tests before submitting pull requests.
+
+### Adding Language Support
+
+See the [Language Plugin Guide](languages/README.md) for information on adding new language templates and extending the plugin architecture.
+
 ## Auto-completion
 
 Optional bash/zsh completion for enhanced productivity:
