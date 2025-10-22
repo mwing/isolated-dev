@@ -1,0 +1,22 @@
+# Global configuration for isolated development environment
+# This file uses simple key=value format
+
+# Default VM name to use for containers
+vm_name = "dev-vm-docker-host"
+
+# Default template when language has multiple versions
+# Leave empty to always prompt
+default_template = ""
+
+# Automatically start VM if not running
+auto_start_vm = "true"
+
+# Prefix for container and image names
+container_prefix = "dev"
+
+# You can also define environment profiles:
+# [profile.database]
+# vm_name = "dev-vm-database"
+# 
+# [profile.kubernetes]  
+# vm_name = "dev-vm-k8s"

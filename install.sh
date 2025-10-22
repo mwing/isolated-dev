@@ -9,6 +9,7 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="$HOME/.dev-envs/setups"
 TEMPLATES_DIR="$HOME/.dev-envs/templates"
+SKELETONS_DIR="$HOME/.dev-envs/skeletons"
 
 # Colors for output
 RED='\033[0;31m'
@@ -204,6 +205,7 @@ log "   -> Creating destination directories..."
 mkdir -p "$BIN_DIR" || error_exit "Failed to create directory $BIN_DIR"
 mkdir -p "$CONFIG_DIR" || error_exit "Failed to create directory $CONFIG_DIR"
 mkdir -p "$TEMPLATES_DIR" || error_exit "Failed to create directory $TEMPLATES_DIR"
+mkdir -p "$SKELETONS_DIR" || error_exit "Failed to create directory $SKELETONS_DIR"
 
 # Cleanup old backup files (keep only the 3 most recent)
 cleanup_old_backups() {
@@ -256,6 +258,15 @@ for template in "$SRC_DIR/templates"/*; do
         cp "$template" "$TEMPLATES_DIR/$template_name" || error_exit "Failed to copy template $template_name"
     fi
 done
+
+# Install skeleton files for template generation
+log "   -> Installing skeleton files to $SKELETONS_DIR"
+if [[ -d "$SRC_DIR/skeletons" ]]; then
+    backup_existing "$SKELETONS_DIR"
+    cp -r "$SRC_DIR/skeletons"/* "$SKELETONS_DIR/" || error_exit "Failed to copy skeleton files"
+else
+    log "   -> Warning: No skeleton directory found, skipping skeleton installation"
+fi
 
 # Copy the cloud-init config file
 log "   -> Installing config to $CONFIG_DIR"

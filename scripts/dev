@@ -11,6 +11,12 @@ CONFIG_DIR="$HOME/.dev-envs"
 GLOBAL_CONFIG="$CONFIG_DIR/config.yaml"
 PROJECT_CONFIG=".devenv.yaml"
 
+# Template skeleton directories (installed by install.sh)
+# These contain template files with {{PLACEHOLDER}} variables that are 
+SKELETONS_DIR="$CONFIG_DIR/skeletons"
+DOCKERFILE_SKELETONS="$SKELETONS_DIR/dockerfiles"
+SCAFFOLDING_SKELETONS="$SKELETONS_DIR/scaffolding"
+
 # ==============================================================================
 # CONFIGURATION FUNCTIONS
 # ==============================================================================
@@ -82,33 +88,74 @@ function load_config() {
 function create_default_config() {
     if [[ ! -f "$GLOBAL_CONFIG" ]]; then
         mkdir -p "$CONFIG_DIR"
-        cat > "$GLOBAL_CONFIG" << 'EOF'
-# Global configuration for isolated development environment
-# This file uses simple key=value format
-
-# Default VM name to use for containers
-vm_name = "dev-vm-docker-host"
-
-# Default template when language has multiple versions
-# Leave empty to always prompt
-default_template = ""
-
-# Automatically start VM if not running
-auto_start_vm = "true"
-
-# Prefix for container and image names
-container_prefix = "dev"
-
-# You can also define environment profiles:
-# [profile.database]
-# vm_name = "dev-vm-database"
-# 
-# [profile.kubernetes]  
-# vm_name = "dev-vm-k8s"
-EOF
+        if [[ -f "$SCAFFOLDING_SKELETONS/basic/global-config.yaml" ]]; then
+            cp "$SCAFFOLDING_SKELETONS/basic/global-config.yaml" "$GLOBAL_CONFIG"
+        else
+            echo "❌ Error: Global config skeleton not found"
+            return 1
+        fi
         echo "📝 Created default config at $GLOBAL_CONFIG"
         echo "   Edit this file to customize your development environment defaults."
     fi
+}
+
+function create_dockerfile_from_skeleton() {
+    local language="$1"
+    local version="$2"
+    local output_file="$3"
+    local skeleton_file="$DOCKERFILE_SKELETONS/$language.dockerfile"
+    
+    if [[ ! -f "$skeleton_file" ]]; then
+        echo "❌ Error: Skeleton file not found: $skeleton_file"
+        return 1
+    fi
+    
+    # Replace placeholders in skeleton with actual values
+    sed "s/{{VERSION}}/$version/g" "$skeleton_file" > "$output_file"
+    return 0
+}
+
+function copy_scaffolding_files() {
+    local language="$1" 
+    local project_name="$2"
+    local go_version="$3"  # Optional, for Go language
+    local scaffolding_dir="$SCAFFOLDING_SKELETONS/$language"
+    
+    if [[ ! -d "$scaffolding_dir" ]]; then
+        echo "❌ Error: Scaffolding directory not found: $scaffolding_dir"
+        return 1
+    fi
+    
+    # Copy all files from scaffolding directory, replacing placeholders
+    for file in "$scaffolding_dir"/*; do
+        [[ ! -f "$file" ]] && continue
+        
+        local filename=$(basename "$file")
+        
+        # Replace placeholders in file content based on file type
+        case "$filename" in
+            "package.json")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                ;;
+            "go.mod")
+                sed -e "s/{{PROJECT_NAME}}/$project_name/g" -e "s/{{GO_VERSION}}/$go_version/g" "$file" > "$filename"
+                ;;
+            "Cargo.toml")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                ;;
+            "pom.xml")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                ;;
+            "composer.json")
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$file" > "$filename"
+                ;;
+            *)
+                cp "$file" "$filename"
+                ;;
+        esac
+    done
+    
+    return 0
 }
 
 # ==============================================================================
@@ -586,134 +633,45 @@ function update_templates() {
     # Python latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-python-$python_version" ]]; then
         echo "📦 Adding Python $python_version template..."
-        cat > "$templates_dir/Dockerfile-python-$python_version" << EOF
-FROM python:$python_version-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    vim \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /workspace
-
-# Install common Python development tools
-RUN pip install --no-cache-dir \
-    pip-tools \
-    black \
-    flake8 \
-    pytest \
-    ipython \
-    jupyter
-
-# Copy requirements if they exist
-COPY requirements*.txt* ./
-RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-# Keep container running
-CMD ["bash"]
-EOF
-        echo "   ✅ Python $python_version template created"
-        ((created_count++))
+        if create_dockerfile_from_skeleton "python" "$python_version" "$templates_dir/Dockerfile-python-$python_version"; then
+            echo "   ✅ Python $python_version template created"
+            ((created_count++))
+        else
+            echo "   ❌ Failed to create Python $python_version template"
+        fi
     fi
     
     # Node.js latest (if missing)  
     if [[ ! -f "$templates_dir/Dockerfile-node-$node_version" ]]; then
         echo "📦 Adding Node.js $node_version template..."
-        cat > "$templates_dir/Dockerfile-node-$node_version" << EOF
-FROM node:$node_version-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    vim \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /workspace
-
-# Install common development tools
-RUN npm install -g \
-    nodemon \
-    typescript \
-    @types/node \
-    eslint \
-    prettier
-
-# Copy package files if they exist
-COPY package*.json* ./
-RUN if [ -f package.json ]; then npm install; fi
-
-# Keep container running
-CMD ["bash"]
-EOF
-        echo "   ✅ Node.js $node_version template created"
-        ((created_count++))
+        if create_dockerfile_from_skeleton "node" "$node_version" "$templates_dir/Dockerfile-node-$node_version"; then
+            echo "   ✅ Node.js $node_version template created"
+            ((created_count++))
+        else
+            echo "   ❌ Failed to create Node.js $node_version template"
+        fi
     fi
     
     # Golang latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-golang-$golang_version" ]]; then
         echo "📦 Adding Go $golang_version template..."
-        cat > "$templates_dir/Dockerfile-golang-$golang_version" << EOF
-FROM golang:$golang_version-bullseye
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    vim \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /workspace
-
-# Install common Go tools
-RUN go install golang.org/x/tools/cmd/goimports@latest && \
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && \
-    go install github.com/air-verse/air@latest
-
-# Keep container running
-CMD ["bash"]
-EOF
-        echo "   ✅ Go $golang_version template created"
-        ((created_count++))
+        if create_dockerfile_from_skeleton "golang" "$golang_version" "$templates_dir/Dockerfile-golang-$golang_version"; then
+            echo "   ✅ Go $golang_version template created"
+            ((created_count++))
+        else
+            echo "   ❌ Failed to create Go $golang_version template"
+        fi
     fi
     
     # Rust latest (if missing)
     if [[ ! -f "$templates_dir/Dockerfile-rust-$rust_version" ]]; then
         echo "📦 Adding Rust $rust_version template..."
-        cat > "$templates_dir/Dockerfile-rust-$rust_version" << EOF
-FROM rust:$rust_version-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    pkg-config \
-    libssl-dev \
-    git \
-    vim \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
-WORKDIR /workspace
-
-# Install common Rust tools
-RUN cargo install cargo-watch cargo-edit
-
-# Copy Cargo files if they exist
-COPY Cargo*.toml* ./
-RUN if [ -f Cargo.toml ]; then cargo fetch; fi
-
-# Keep container running
-CMD ["bash"]
-EOF
-        echo "   ✅ Rust $rust_version template created"
-        ((created_count++))
+        if create_dockerfile_from_skeleton "rust" "$rust_version" "$templates_dir/Dockerfile-rust-$rust_version"; then
+            echo "   ✅ Rust $rust_version template created"
+            ((created_count++))
+        else
+            echo "   ❌ Failed to create Rust $rust_version template"
+        fi
     fi
     
     echo ""
@@ -1111,509 +1069,94 @@ function init_project_scaffolding() {
         python)
             echo "   -> Creating Python project structure..."
             
-            # Create requirements.txt
-            cat > requirements.txt << 'EOF'
-# Python dependencies
-# Add your project dependencies here
-# Example:
-# requests>=2.31.0
-# flask>=3.0.0
-EOF
-            
-            # Create main.py
-            cat > main.py << 'EOF'
-#!/usr/bin/env python3
-"""
-Main application entry point.
-"""
-
-def main():
-    """Main function."""
-    print("Hello from Python!")
-    print("Edit this file to start building your application.")
-
-if __name__ == "__main__":
-    main()
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual environments
-venv/
-env/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: requirements.txt, main.py, .gitignore"
+            local project_name=$(basename "$(pwd)")
+            if copy_scaffolding_files "python" "$project_name"; then
+                echo "   -> Created: requirements.txt, main.py, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Python project structure"
+            fi
             ;;
             
         node)
             echo "   -> Creating Node.js project structure..."
             
-            # Get project name from current directory
             local project_name=$(basename "$(pwd)")
-            
-            # Create package.json
-            cat > package.json << EOF
-{
-  "name": "$project_name",
-  "version": "1.0.0",
-  "description": "A Node.js project",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "node --watch index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "dependencies": {},
-  "devDependencies": {}
-}
-EOF
-            
-            # Create index.js
-            cat > index.js << 'EOF'
-/**
- * Main application entry point
- */
-
-console.log('Hello from Node.js!');
-console.log('Edit this file to start building your application.');
-
-// Example: Simple HTTP server
-// const http = require('http');
-// 
-// const server = http.createServer((req, res) => {
-//     res.writeHead(200, { 'Content-Type': 'text/plain' });
-//     res.end('Hello World!\n');
-// });
-// 
-// const PORT = process.env.PORT || 3000;
-// server.listen(PORT, () => {
-//     console.log(`Server running on port ${PORT}`);
-// });
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# Node.js
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Logs
-logs
-*.log
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: package.json, index.js, .gitignore"
+            if copy_scaffolding_files "node" "$project_name"; then
+                echo "   -> Created: package.json, index.js, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Node.js project structure"
+            fi
             ;;
             
         golang)
             echo "   -> Creating Go project structure..."
             
-            # Get project name from current directory
             local project_name=$(basename "$(pwd)")
-            
-            # Get latest Go version dynamically
             local go_version=$(get_latest_golang_version)
             
-            # Create go.mod
-            cat > go.mod << EOF
-module $project_name
-
-go $go_version
-
-require ()
-EOF
-            
-            # Create main.go
-            cat > main.go << 'EOF'
-package main
-
-import "fmt"
-
-func main() {
-    fmt.Println("Hello from Go!")
-    fmt.Println("Edit this file to start building your application.")
-}
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# Go
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-go.work
-
-# Vendor
-vendor/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: go.mod, main.go, .gitignore"
+            if copy_scaffolding_files "golang" "$project_name" "$go_version"; then
+                echo "   -> Created: go.mod, main.go, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Go project structure"
+            fi
             ;;
             
         rust)
             echo "   -> Creating Rust project structure..."
-            
-            # Get project name from current directory
             local project_name=$(basename "$(pwd)")
-            
-            # Create Cargo.toml
-            cat > Cargo.toml << EOF
-[package]
-name = "$project_name"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-EOF
-            
-            # Create src directory and main.rs
-            mkdir -p src
-            cat > src/main.rs << 'EOF'
-fn main() {
-    println!("Hello from Rust!");
-    println!("Edit this file to start building your application.");
-}
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# Rust
-/target/
-**/*.rs.bk
-Cargo.lock
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: Cargo.toml, src/main.rs, .gitignore"
+            if copy_scaffolding_files "rust" "$project_name"; then
+                mkdir -p src
+                cp "$SCAFFOLDING_SKELETONS/rust/main.rs" src/main.rs
+                echo "   -> Created: Cargo.toml, src/main.rs, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Rust project structure"
+            fi
             ;;
             
         java)
             echo "   -> Creating Java project structure..."
-            
-            # Get project name from current directory
             local project_name=$(basename "$(pwd)")
-            
-            # Create pom.xml for Maven
-            cat > pom.xml << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    
-    <groupId>com.example</groupId>
-    <artifactId>$project_name</artifactId>
-    <version>1.0.0</version>
-    <packaging>jar</packaging>
-    
-    <properties>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-    
-    <dependencies>
-        <!-- Add your dependencies here -->
-    </dependencies>
-    
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
-            </plugin>
-        </plugins>
-    </build>
-</project>
-EOF
-            
-            # Create src directory structure
-            mkdir -p src/main/java/com/example
-            cat > src/main/java/com/example/Main.java << 'EOF'
-package com.example;
-
-public class Main {
-    public static void main(String[] args) {
-        System.out.println("Hello from Java!");
-        System.out.println("Edit this file to start building your application.");
-    }
-}
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# Java
-*.class
-*.jar
-*.war
-*.ear
-*.nar
-hs_err_pid*
-
-# Maven
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
-
-# Gradle
-.gradle/
-build/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: pom.xml, src/main/java/com/example/Main.java, .gitignore"
+            if copy_scaffolding_files "java" "$project_name"; then
+                mkdir -p src/main/java/com/example
+                cp "$SCAFFOLDING_SKELETONS/java/Main.java" src/main/java/com/example/Main.java
+                echo "   -> Created: pom.xml, src/main/java/com/example/Main.java, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Java project structure"
+            fi
             ;;
             
         php)
             echo "   -> Creating PHP project structure..."
-            
-            # Create composer.json
             local project_name=$(basename "$(pwd)")
-            cat > composer.json << EOF
-{
-    "name": "example/$project_name",
-    "description": "A PHP project",
-    "type": "project",
-    "require": {
-        "php": "^8.3"
-    },
-    "require-dev": {},
-    "autoload": {
-        "psr-4": {
-            "App\\\\": "src/"
-        }
-    },
-    "config": {
-        "optimize-autoloader": true
-    }
-}
-EOF
-            
-            # Create index.php
-            cat > index.php << 'EOF'
-<?php
-
-require_once 'vendor/autoload.php';
-
-echo "Hello from PHP!" . PHP_EOL;
-echo "Edit this file to start building your application." . PHP_EOL;
-
-// Example: Simple web response
-// if (php_sapi_name() !== 'cli') {
-//     header('Content-Type: text/html; charset=utf-8');
-//     echo '<h1>Hello from PHP!</h1>';
-//     echo '<p>Edit this file to start building your web application.</p>';
-// }
-EOF
-            
-            # Create src directory
-            mkdir -p src
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# PHP
-/vendor/
-composer.lock
-*.log
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: composer.json, index.php, src/, .gitignore"
+            if copy_scaffolding_files "php" "$project_name"; then
+                mkdir -p src
+                cp "$SCAFFOLDING_SKELETONS/php/index.php" index.php
+                echo "   -> Created: composer.json, index.php, src/, .gitignore"
+            else
+                echo "   -> ❌ Failed to create PHP project structure"
+            fi
             ;;
             
         bash)
             echo "   -> Creating Bash project structure..."
-            
-            # Create main script
             local project_name=$(basename "$(pwd)")
-            cat > "$project_name.sh" << 'EOF'
-#!/bin/bash
-
-# Main script entry point
-set -e
-
-echo "Hello from Bash!"
-echo "Edit this file to start building your shell application."
-
-# Example function
-main() {
-    local arg="$1"
-    
-    if [[ -z "$arg" ]]; then
-        echo "Usage: $0 <argument>"
-        exit 1
-    fi
-    
-    echo "You provided: $arg"
-}
-
-# Uncomment to run main function with arguments
-# main "$@"
-EOF
-            
-            chmod +x "$project_name.sh"
-            
-            # Create README.md
-            cat > README.md << EOF
-# $project_name
-
-A Bash script project.
-
-## Usage
-
-\`\`\`bash
-./$project_name.sh
-\`\`\`
-
-## Development
-
-Edit \`$project_name.sh\` to start building your shell application.
-EOF
-            
-            # Create .gitignore
-            cat > .gitignore << 'EOF'
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
-            
-            echo "   -> Created: $project_name.sh, README.md, .gitignore"
+            if copy_scaffolding_files "bash" "$project_name"; then
+                cp "$SCAFFOLDING_SKELETONS/bash/main.sh" "$project_name.sh"
+                chmod +x "$project_name.sh"
+                echo "   -> Created: $project_name.sh, .gitignore"
+            else
+                echo "   -> ❌ Failed to create Bash project structure"
+            fi
             ;;
             
         *)
             echo "   -> No specific scaffolding available for $base_lang"
             echo "   -> Created basic .gitignore"
-            cat > .gitignore << 'EOF'
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-EOF
+            if [[ -f "$SCAFFOLDING_SKELETONS/basic/.gitignore" ]]; then
+                cp "$SCAFFOLDING_SKELETONS/basic/.gitignore" .gitignore
+            else
+                echo "   -> ❌ Basic .gitignore skeleton not found"
+            fi
             ;;
     esac
 }
@@ -1761,22 +1304,13 @@ function handle_config_command() {
                 fi
             fi
             
-            cat > "$PROJECT_CONFIG" << EOF
-# Project-specific configuration for $(basename "$(pwd)")
-# This file uses simple key=value format and overrides global settings
-
-# VM name for this project (uncomment to override global)
-# vm_name = "dev-vm-$(basename "$(pwd)")"
-
-# Default template for this project
-# default_template = "python-3.13"
-
-# Auto-start VM for this project
-# auto_start_vm = "true"
-
-# Container prefix for this project
-# container_prefix = "$(basename "$(pwd)")"
-EOF
+            local project_name=$(basename "$(pwd)")
+            if [[ -f "$SCAFFOLDING_SKELETONS/basic/project-config.yaml" ]]; then
+                sed "s/{{PROJECT_NAME}}/$project_name/g" "$SCAFFOLDING_SKELETONS/basic/project-config.yaml" > "$PROJECT_CONFIG"
+            else
+                echo "❌ Error: Project config skeleton not found"
+                exit 1
+            fi
             echo "✅ Created project config: $PROJECT_CONFIG"
             echo "   Edit this file to customize settings for this project."
             exit 0
@@ -2076,9 +1610,9 @@ case $COMMAND in
         cleanup_existing_container
         
         # Build enhanced container options
-        local volume_mounts=$(get_common_volume_mounts)
-        local ssh_mounts=$(get_ssh_key_mounts)
-        local port_forwards=$(build_port_forwards)
+        volume_mounts=$(get_common_volume_mounts)
+        ssh_mounts=$(get_ssh_key_mounts)
+        port_forwards=$(build_port_forwards)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
@@ -2105,9 +1639,9 @@ case $COMMAND in
         cleanup_existing_container
         
         # Build enhanced container options
-        local volume_mounts=$(get_common_volume_mounts)
-        local ssh_mounts=$(get_ssh_key_mounts)
-        local port_forwards=$(build_port_forwards)
+        volume_mounts=$(get_common_volume_mounts)
+        ssh_mounts=$(get_ssh_key_mounts)
+        port_forwards=$(build_port_forwards)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
