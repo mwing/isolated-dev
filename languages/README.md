@@ -20,7 +20,7 @@ Language plugins for the isolated development environment. Each language is self
 | **Rust** | 1.75, 1.90 | Cargo.toml | 8000 |
 | **Java** | 21 | pom.xml, build.gradle | 8080 |
 | **PHP** | 8.3 | composer.json, index.php | 8080 |
-| **Bash** | latest | *.sh files | - |
+| **Ubuntu** | 22.04, 20.04, 24.04 | *.sh files, Makefile | 8080 |
 | **Kotlin** | 1.9 | build.gradle.kts | 8080 |
 
 ## Quick Start

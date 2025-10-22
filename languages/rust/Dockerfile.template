@@ -1,27 +1,30 @@
 FROM rust:{{VERSION}}-slim
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
+
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libssl-dev \
     git \
     vim \
     curl \
-    wget \
-    jq \
-    tree \
-    htop \
     && rm -rf /var/lib/apt/lists/*
 
-# Install common Rust tools
+# Install common Rust tools as root
 RUN cargo install cargo-watch cargo-edit
 
-# Set working directory
+# Set working directory and change ownership
 WORKDIR /workspace
+RUN chown -R appuser:appuser /workspace
+
+# Switch to non-root user
+USER appuser
 
 # Copy Cargo files if they exist
-COPY Cargo*.toml* ./
+COPY --chown=appuser:appuser Cargo*.toml* ./
 RUN if [ -f Cargo.toml ]; then cargo fetch; fi
 
 # Keep container running

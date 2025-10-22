@@ -1,22 +1,25 @@
-FROM node:{{VERSION}}
+FROM node:{{VERSION}}-slim
+
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     vim \
     curl \
-    wget \
-    jq \
-    tree \
-    htop \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Set working directory and change ownership
 WORKDIR /workspace
+RUN chown -R appuser:appuser /workspace
+
+# Switch to non-root user
+USER appuser
 
 # Copy package files if they exist
-COPY package*.json ./
-RUN if [ -f package.json ]; then npm install; fi
+COPY --chown=appuser:appuser package*.json ./
+RUN if [ -f package.json ]; then npm ci --only=production; fi
 
 # Keep container running
 CMD ["bash"]

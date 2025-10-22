@@ -23,6 +23,7 @@ source "$SCRIPT_DIR/lib/vm.sh"
 source "$SCRIPT_DIR/lib/containers.sh"
 source "$SCRIPT_DIR/lib/templates.sh"
 source "$SCRIPT_DIR/lib/languages.sh"
+source "$SCRIPT_DIR/lib/security.sh"
 
 
 
@@ -352,6 +353,44 @@ while [[ $# -gt 0 ]]; do
                     ;;
             esac
             ;;
+        security)
+            case "$2" in
+                --help|-h)
+                    echo "Security commands:"
+                    echo "  dev security scan          Scan current Dockerfile for security issues"
+                    echo "  dev security validate      Validate Dockerfile security best practices"
+
+                    exit 0
+                    ;;
+                scan)
+                    if [[ -f "Dockerfile" ]]; then
+                        validate_dockerfile_security "Dockerfile"
+                        echo ""
+                        scan_image_vulnerabilities "test-image"
+                    else
+                        echo "❌ No Dockerfile found in current directory"
+                        exit 1
+                    fi
+                    exit 0
+                    ;;
+                validate)
+                    if [[ -f "Dockerfile" ]]; then
+                        validate_dockerfile_security "Dockerfile"
+                    else
+                        echo "❌ No Dockerfile found in current directory"
+                        exit 1
+                    fi
+                    exit 0
+                    ;;
+
+
+                *)
+                    echo "❌ Error: Unknown security subcommand '$2'"
+                    echo "Available: scan, validate, trivy"
+                    exit 1
+                    ;;
+            esac
+            ;;
         env)
             # Pass all remaining arguments to handle_env_command
             shift 1  # Remove 'env'
@@ -360,7 +399,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, env, help, troubleshoot, arch"
+            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
@@ -402,6 +441,7 @@ case $COMMAND in
         volume_mounts=$(get_common_volume_mounts)
         ssh_mounts=$(get_ssh_key_mounts)
         port_forwards=$(build_port_forwards)
+        security_flags=$(get_security_flags)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
@@ -411,11 +451,13 @@ case $COMMAND in
             echo "   -> SSH keys mounted for git authentication"
         fi
         echo "   -> Git configuration mounted for consistent commits"
+        echo "   -> Security hardening enabled (non-root user, limited capabilities)"
         echo ""
         echo "✅ Connecting to container. Your project folder is at '/workspace'."
         
         # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
         orb -m "$VM_NAME" sudo docker run -it --rm \
+            $security_flags \
             $volume_mounts \
             $ssh_mounts \
             $port_forwards \
@@ -433,6 +475,7 @@ case $COMMAND in
         volume_mounts=$(get_common_volume_mounts)
         ssh_mounts=$(get_ssh_key_mounts)
         port_forwards=$(build_port_forwards)
+        security_flags=$(get_security_flags)
         
         echo "🔧 Enhanced developer experience:"
         if [[ -n "$port_forwards" ]]; then
@@ -442,11 +485,13 @@ case $COMMAND in
             echo "   -> SSH keys mounted for git authentication"
         fi
         echo "   -> Git configuration mounted for consistent commits"
+        echo "   -> Security hardening enabled (non-root user, limited capabilities)"
         echo ""
         echo "✅ Container ready. Your project folder is at '/workspace'."
         
         # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
         orb -m "$VM_NAME" sudo docker run -it --rm \
+            $security_flags \
             $volume_mounts \
             $ssh_mounts \
             $port_forwards \

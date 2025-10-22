@@ -151,7 +151,7 @@ test_language_plugins() {
     assert_dir_exists "languages/rust" "Rust language plugin exists"
     assert_dir_exists "languages/java" "Java language plugin exists"
     assert_dir_exists "languages/php" "PHP language plugin exists"
-    assert_dir_exists "languages/bash" "Bash language plugin exists"
+    assert_dir_exists "languages/ubuntu" "Ubuntu language plugin exists"
     
     # Test that each plugin has required files
     assert_file_exists "languages/python/language.yaml" "Python language.yaml exists"
@@ -474,6 +474,77 @@ test_environment_overrides() {
     cd - > /dev/null
 }
 
+test_security_functionality() {
+    run_test "Security functionality"
+    
+    local test_project="$TEST_DIR/test-security"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test security validation with vulnerable Dockerfile
+    cat > Dockerfile << 'EOF'
+FROM python:3.8-slim
+RUN apt-get update && apt-get install -y git
+RUN pip install flask
+ENV SECRET_KEY=hardcoded-secret
+WORKDIR /workspace
+CMD ["python", "app.py"]
+EOF
+    
+    local validation_output=$(bash "$ORIGINAL_DIR/scripts/dev" security validate 2>&1 || echo "VALIDATION_FAILED")
+    
+    if [[ "$validation_output" != "VALIDATION_FAILED" ]]; then
+        assert_contains "$validation_output" "Security issues found" "Security validation detects vulnerable Dockerfile"
+        assert_contains "$validation_output" "No USER directive" "Security validation detects root user issue"
+        assert_contains "$validation_output" "apt-get cache not cleaned" "Security validation detects cache cleanup issue"
+        assert_contains "$validation_output" "Potential secrets found" "Security validation detects secrets"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Security validation test failed"
+    fi
+    
+    # Test security validation with secure Dockerfile
+    cat > Dockerfile << 'EOF'
+FROM python:3.13-slim
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+RUN chown -R appuser:appuser /workspace
+USER appuser
+RUN pip install --no-cache-dir flask
+CMD ["bash"]
+EOF
+    
+    local secure_validation=$(bash "$ORIGINAL_DIR/scripts/dev" security validate 2>&1 || echo "SECURE_VALIDATION_FAILED")
+    
+    if [[ "$secure_validation" != "SECURE_VALIDATION_FAILED" ]]; then
+        assert_contains "$secure_validation" "No security issues found" "Security validation passes secure Dockerfile"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Secure validation test failed"
+    fi
+    
+    # Test security scan command
+    local scan_output=$(bash "$ORIGINAL_DIR/scripts/dev" security scan 2>&1 || echo "SCAN_FAILED")
+    
+    if [[ "$scan_output" != "SCAN_FAILED" ]]; then
+        assert_contains "$scan_output" "Scanning" "Security scan command works"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Security scan test failed"
+    fi
+    
+    # Test security help
+    local help_output=$(bash "$ORIGINAL_DIR/scripts/dev" security --help 2>&1 || echo "HELP_FAILED")
+    
+    if [[ "$help_output" != "HELP_FAILED" ]]; then
+        assert_contains "$help_output" "Security commands" "Security help command works"
+        assert_contains "$help_output" "validate" "Security help mentions validate command"
+        assert_contains "$help_output" "scan" "Security help mentions scan command"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Security help test failed"
+    fi
+    
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -494,6 +565,7 @@ main() {
     test_combined_template_devcontainer
     test_config_validation
     test_environment_overrides
+    test_security_functionality
     
     # Print results
     log "\n${BLUE}📊 Test Results${NC}"

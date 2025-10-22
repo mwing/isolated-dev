@@ -67,9 +67,9 @@ function detect_common_ports() {
 function get_ssh_key_mounts() {
     local ssh_mounts=""
     
-    # Mount SSH keys if they exist
+    # Mount SSH keys if they exist (for non-root user)
     if [[ -d "$HOME/.ssh" ]]; then
-        ssh_mounts="-v $HOME/.ssh:/root/.ssh:ro"
+        ssh_mounts="-v $HOME/.ssh:/home/appuser/.ssh:ro"
     fi
     
     echo "$ssh_mounts"
@@ -78,16 +78,17 @@ function get_ssh_key_mounts() {
 function get_common_volume_mounts() {
     local volumes=""
     
-    # Always mount the current directory
+    # Always mount the current directory (read-write for development)
     volumes="-v $(pwd):/workspace"
     
-    # Mount git configuration if it exists
+    # Mount git configuration if it exists (read-only)
     if [[ -f "$HOME/.gitconfig" ]]; then
-        volumes="$volumes -v $HOME/.gitconfig:/tmp/.gitconfig:ro"
+        volumes="$volumes -v $HOME/.gitconfig:/home/appuser/.gitconfig:ro"
     fi
     
-    # Mount Docker socket for Docker-in-Docker development
+    # Mount Docker socket for Docker-in-Docker development (with warning)
     if [[ -S "/var/run/docker.sock" ]]; then
+        echo "⚠️  Warning: Mounting Docker socket reduces container isolation" >&2
         volumes="$volumes -v /var/run/docker.sock:/var/run/docker.sock"
     fi
     

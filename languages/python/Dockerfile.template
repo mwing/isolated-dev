@@ -1,7 +1,10 @@
 FROM python:{{VERSION}}-slim
 
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -m appuser
+
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
@@ -12,7 +15,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /workspace
 
 # Install common Python development tools
-RUN pip install --no-cache-dir \
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
     pip-tools \
     black \
     flake8 \
@@ -20,9 +24,15 @@ RUN pip install --no-cache-dir \
     ipython \
     jupyter
 
+# Change ownership of workspace
+RUN chown -R appuser:appuser /workspace
+
+# Switch to non-root user
+USER appuser
+
 # Copy requirements if they exist
-COPY requirements*.txt* ./
-RUN if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+COPY --chown=appuser:appuser requirements*.txt* ./
+RUN if [ -f requirements.txt ]; then pip install --user --no-cache-dir -r requirements.txt; fi
 
 # Keep container running
 CMD ["bash"]
