@@ -386,6 +386,7 @@ COMMAND="run"
 CUSTOM_TAG=""
 CUSTOM_NAME=""
 AUTO_YES=false
+TARGET_PLATFORM=""
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
@@ -398,6 +399,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         templates)
             case "$2" in
+                --help|-h)
+                    show_command_help "templates"
+                    exit 0
+                    ;;
                 update)
                     update_templates
                     exit 0
@@ -441,54 +446,70 @@ while [[ $# -gt 0 ]]; do
             esac
             ;;
         config)
-            shift 1  # Remove 'config'
-            # Parse config subcommand and flags
-            subcommand="$1"
-            shift 1
-            while [[ $# -gt 0 ]]; do
-                case $1 in
-                    --yes|-y)
-                        AUTO_YES=true
-                        shift
-                        ;;
-                    *)
-                        echo "❌ Error: Unknown flag for 'config' command: $1"
-                        exit 1
-                        ;;
-                esac
-            done
-            handle_config_command "$subcommand"
+            case "$2" in
+                --help|-h)
+                    show_command_help "config"
+                    exit 0
+                    ;;
+                *)
+                    shift 1  # Remove 'config'
+                    # Parse config subcommand and flags
+                    subcommand="$1"
+                    shift 1
+                    while [[ $# -gt 0 ]]; do
+                        case $1 in
+                            --yes|-y)
+                                AUTO_YES=true
+                                shift
+                                ;;
+                            *)
+                                echo "❌ Error: Unknown flag for 'config' command: $1"
+                                exit 1
+                                ;;
+                        esac
+                    done
+                    handle_config_command "$subcommand"
+                    ;;
+            esac
             ;;
         new)
-            if [[ -z "$2" ]]; then
-                echo "❌ Error: new requires a language argument"
-                echo "Use 'dev list' to see available options."
-                exit 1
-            fi
-            # Parse flags for new command
-            init_project=false
-            language="$2"
-            shift 2  # Remove 'new' and language from args
-            
-            # Process remaining arguments for flags
-            while [[ $# -gt 0 ]]; do
-                case $1 in
-                    --init)
-                        init_project=true
-                        shift
-                        ;;
-                    --yes|-y)
-                        AUTO_YES=true
-                        shift
-                        ;;
-                    *)
-                        echo "❌ Error: Unknown flag for 'new' command: $1"
-                        exit 1
-                        ;;
-                esac
-            done
-            
-            create_from_template "$language" "$init_project"
+            case "$2" in
+                --help|-h)
+                    show_command_help "new"
+                    exit 0
+                    ;;
+                "")
+                    echo "❌ Error: new requires a language argument"
+                    echo "Use 'dev list' to see available options."
+                    exit 1
+                    ;;
+                *)
+                    # Parse flags for new command
+                    init_project=false
+                    language="$2"
+                    shift 2  # Remove 'new' and language from args
+                    
+                    # Process remaining arguments for flags
+                    while [[ $# -gt 0 ]]; do
+                        case $1 in
+                            --init)
+                                init_project=true
+                                shift
+                                ;;
+                            --yes|-y)
+                                AUTO_YES=true
+                                shift
+                                ;;
+                            *)
+                                echo "❌ Error: Unknown flag for 'new' command: $1"
+                                exit 1
+                                ;;
+                        esac
+                    done
+                    
+                    create_from_template "$language" "$init_project" "$TARGET_PLATFORM"
+                    ;;
+            esac
             ;;
         -f|--file)
             DOCKERFILE="$2"
@@ -506,6 +527,10 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --platform)
+            TARGET_PLATFORM="$2"
+            shift 2
+            ;;
         run|build|clean|shell)
             COMMAND="$1"
             shift
@@ -521,6 +546,7 @@ while [[ $# -gt 0 ]]; do
                 echo "  $(basename "$0") help config        # Configuration help"
                 echo "  $(basename "$0") help templates     # Template management help"
                 echo "  $(basename "$0") help env           # Environment management help"
+                echo "  $(basename "$0") arch               # Architecture and platform info"
                 echo "  $(basename "$0") troubleshoot       # Troubleshooting guide"
             fi
             exit 0
@@ -528,6 +554,29 @@ while [[ $# -gt 0 ]]; do
         troubleshoot)
             show_command_help "troubleshoot"
             exit 0
+            ;;
+        arch|architecture)
+            case "$2" in
+                --help|-h)
+                    show_command_help "arch"
+                    exit 0
+                    ;;
+                *)
+                    echo "💻 Architecture Information:"
+                    echo "   Host architecture: $(detect_architecture)"
+                    echo "   Default platform: linux/$(detect_architecture)"
+                    echo ""
+                    echo "Supported platforms:"
+                    echo "   linux/amd64    - Intel/AMD 64-bit (x86_64)"
+                    echo "   linux/arm64    - ARM 64-bit (Apple Silicon, ARM servers)"
+                    echo ""
+                    echo "Usage:"
+                    echo "   $(basename "$0") --platform linux/arm64    # Force ARM64 build"
+                    echo "   $(basename "$0") --platform linux/amd64    # Force AMD64 build"
+                    echo "   $(basename "$0")                          # Auto-detect (recommended)"
+                    exit 0
+                    ;;
+            esac
             ;;
         env)
             # Pass all remaining arguments to handle_env_command
@@ -537,7 +586,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, list, config, templates, env, help, troubleshoot"
+            echo "Available commands: run, shell, build, clean, new, list, config, templates, env, help, troubleshoot, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
@@ -571,7 +620,8 @@ case $COMMAND in
     run)
         echo "🚀 Preparing isolated container for '$PROJECT_NAME'..."
         ensure_vm_running
-        build_image
+        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
+        build_image "$platform_flag"
         cleanup_existing_container
         
         # Build enhanced container options
@@ -600,7 +650,8 @@ case $COMMAND in
     shell)
         echo "🐚 Opening interactive shell in '$PROJECT_NAME' container..."
         ensure_vm_running
-        build_image
+        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
+        build_image "$platform_flag"
         cleanup_existing_container
         
         # Build enhanced container options
@@ -629,7 +680,8 @@ case $COMMAND in
     build)
         echo "🔨 Building container image for '$PROJECT_NAME'..."
         ensure_vm_running
-        build_image
+        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
+        build_image "$platform_flag"
         echo "✅ Image '$IMAGE_NAME' built successfully."
         ;;
         
