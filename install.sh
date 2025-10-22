@@ -390,14 +390,14 @@ verify_installation() {
     [[ -x "$BIN_DIR/dev" ]] || error_exit "dev is not executable"
     [[ -f "$CONFIG_DIR/docker-host.yaml" ]] || error_exit "Config file not found"
     [[ -d "$LANGUAGES_DIR" ]] || error_exit "Languages directory not found"
-    local language_count=$(find "$LANGUAGES_DIR" -name "language.yaml" | wc -l)
+    language_count=$(find "$LANGUAGES_DIR" -name "language.yaml" | wc -l)
     [[ $language_count -gt 0 ]] || error_exit "No language plugins found"
     log "${GREEN}✅ All files installed successfully (including $language_count language plugins)${NC}"
 }
 
 # Install shell completion if requested
 if [[ "$INSTALL_COMPLETION" == "true" && -f "$SRC_DIR/completions/install-completion.sh" ]]; then
-    local current_shell=$(basename "$SHELL")
+    current_shell=$(basename "$SHELL")
     log "   -> Installing $current_shell completion..."
     bash "$SRC_DIR/completions/install-completion.sh" "$SRC_DIR"
 fi
@@ -419,6 +419,6 @@ if [[ "$QUIET" == false ]]; then
     log "  dev env list           # Show environment management help"
     log ""
     log "${BLUE}Optional:${NC}"
-    local current_shell=$(basename "$SHELL")
+    current_shell=$(basename "$SHELL")
     log "  ./install.sh --completion  # Install $current_shell completion for tab completion"
 fi

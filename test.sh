@@ -496,11 +496,13 @@ port_range: "not-a-range"
 port_health_timeout: not_a_number
 EOF
     
-    local invalid_validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    # Test network configuration validation with invalid values - capture exit code properly
+    bash "$ORIGINAL_DIR/scripts/dev" config validate >/dev/null 2>&1
     local invalid_exit_code=$?
+    local invalid_validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
     
     if [[ $invalid_exit_code -ne 0 ]]; then
-        assert_contains "$invalid_validation" "must be 'bridge', 'host', 'none'" "Network mode validation catches invalid values"
+        assert_contains "$invalid_validation" "must be 'bridge', 'host', 'none', or a custom network name" "Network mode validation catches invalid values"
         assert_contains "$invalid_validation" "must be in format 'start-end'" "Port range validation catches invalid format"
         assert_contains "$invalid_validation" "must be a positive number" "Timeout validation catches non-numeric values"
     else
