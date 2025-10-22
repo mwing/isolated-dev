@@ -1,6 +1,6 @@
 name: java
 display_name: Java
-versions: ["21"]
+versions: ["17", "21"]
 
 detection:
   files: ["pom.xml", "build.gradle", "*.java"]
