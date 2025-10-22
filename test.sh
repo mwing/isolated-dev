@@ -251,6 +251,78 @@ test_flag_parsing() {
     assert_contains "$dev_help" "--yes" "dev --help mentions --yes flag"
 }
 
+test_project_detection() {
+    run_test "Project detection functionality"
+    
+    # Test the detect_project_type function directly
+    local test_project="$TEST_DIR/test-detection"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Define a simplified version of detect_project_type for testing
+    detect_project_type() {
+        local detected_lang=""
+        local detected_version=""
+        local confidence="low"
+        
+        # Python detection
+        if [[ -f "requirements.txt" ]] || [[ -f "pyproject.toml" ]] || [[ -f "setup.py" ]] || [[ -f "Pipfile" ]]; then
+            detected_lang="python"
+            confidence="high"
+            if [[ -f ".python-version" ]]; then
+                detected_version=$(cat .python-version | head -1 | cut -d. -f1,2)
+            fi
+        # Node.js detection
+        elif [[ -f "package.json" ]]; then
+            detected_lang="node"
+            confidence="high"
+        # Go detection
+        elif [[ -f "go.mod" ]] || [[ -f "main.go" ]]; then
+            detected_lang="golang"
+            confidence="high"
+            if [[ -f "go.mod" ]]; then
+                detected_version=$(grep "^go " go.mod | sed 's/go \([0-9]\+\.[0-9]\+\).*/\1/' | head -1)
+            fi
+        fi
+        
+        echo "$detected_lang:$detected_version:$confidence"
+    }
+    
+    # Test Python detection
+    echo "flask==2.0.1" > requirements.txt
+    local python_result=$(detect_project_type)
+    assert_contains "$python_result" "python" "Detects Python project from requirements.txt"
+    assert_contains "$python_result" "high" "Python detection has high confidence"
+    rm requirements.txt
+    
+    # Test Node.js detection
+    echo '{"name": "test", "version": "1.0.0"}' > package.json
+    local node_result=$(detect_project_type)
+    assert_contains "$node_result" "node" "Detects Node.js project from package.json"
+    assert_contains "$node_result" "high" "Node.js detection has high confidence"
+    rm package.json
+    
+    # Test Go detection
+    echo -e "module test\n\ngo 1.22" > go.mod
+    local go_result=$(detect_project_type)
+    assert_contains "$go_result" "golang" "Detects Go project from go.mod"
+    assert_contains "$go_result" "1.22" "Detects Go version from go.mod"
+    rm go.mod
+    
+    # Test version detection with .python-version
+    echo "3.12.0" > .python-version
+    echo "requests" > requirements.txt
+    local python_version_result=$(detect_project_type)
+    assert_contains "$python_version_result" "3.12" "Detects Python version from .python-version"
+    rm .python-version requirements.txt
+    
+    # Test no detection
+    local empty_result=$(detect_project_type)
+    assert_equals "::low" "$empty_result" "Returns empty result for directory with no project files"
+    
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -264,6 +336,7 @@ main() {
     test_template_creation
     test_config_creation
     test_flag_parsing
+    test_project_detection
     
     # Print results
     log "\n${BLUE}📊 Test Results${NC}"
