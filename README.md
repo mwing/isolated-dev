@@ -58,6 +58,12 @@ A comprehensive toolkit for creating secure, isolated development environments u
 - **Troubleshooting Guide**: `dev troubleshoot` offers solutions for common problems
 - **Contextual Messages**: Better error messages with specific next steps
 
+### 🤖 **Automation & CI/CD Support**
+- **Non-interactive Mode**: `--yes`/`-y` flag eliminates all prompts for automation
+- **Script-friendly**: Perfect for CI/CD pipelines, deployment scripts, and automated workflows
+- **Smart Defaults**: Maintains safety while enabling full automation
+- **Consistent Behavior**: Reliable, predictable operation in headless environments
+
 -----
 
 ## 📦 Installation
@@ -81,7 +87,33 @@ cd isolated-dev
 ./install.sh --help     # Show all options
 ./install.sh --force    # Force overwrite existing files
 ./install.sh --quiet    # Minimal output
+./install.sh --yes      # Automatically answer 'yes' to all prompts (for automation)
 ```
+
+### 🤖 **Automation Support**
+Both the installer and `dev` command support the `--yes` (or `-y`) flag for automation and CI/CD pipelines:
+
+```bash
+# Automated installation
+./install.sh --force --yes --quiet    # Silent install without prompts
+
+# Automated development workflows
+dev new python-3.13 --init --yes      # Create template, auto-overwrite existing files
+dev config --init --yes               # Create project config, auto-overwrite if exists
+dev templates cleanup 30 --yes        # Remove old templates without confirmation
+dev env rm old-env --yes              # Delete VM without confirmation
+
+# CI/CD Integration Examples
+./install.sh --yes                    # Auto-install in CI environment
+dev new node-22 --init --yes          # Setup project in pipeline
+dev build                             # Build container (no prompts needed)
+```
+
+**Automation Benefits:**
+- ✅ **No interactive prompts** - Perfect for scripts and CI/CD
+- ✅ **Consistent behavior** - Always answers "yes" to confirmations
+- ✅ **Error handling** - Still respects validation and error conditions
+- ✅ **Safe defaults** - Only affects confirmation prompts, not destructive operations
 
 The installer will:
 - Copy scripts to `~/.local/bin/`
@@ -99,6 +131,10 @@ If you need to remove the isolated development environment:
 
 # Complete removal including all VMs (DESTRUCTIVE)
 ./install.sh --uninstall-all
+
+# Automated uninstall (no prompts)
+./install.sh --uninstall --yes       # Safe automated uninstall
+./install.sh --uninstall-all --yes   # Destructive automated uninstall
 ```
 
 #### Uninstall Options:
@@ -441,6 +477,7 @@ dev env up docker-host            # Start the VM
 dev env down docker-host          # Stop the VM (save battery)
 dev env status docker-host        # Check VM status
 dev env rm docker-host            # Permanently delete VM
+dev env rm docker-host --yes      # Delete VM without confirmation
 ```
 
 ### Container Development (`dev`)
@@ -449,11 +486,13 @@ dev --help                        # Show comprehensive help
 dev list                          # List available language templates
 dev new <language>                # Create Dockerfile from template
 dev new <language> --init         # Create template with project scaffolding
+dev new <language> --init --yes   # Create template, auto-overwrite existing files
 dev                               # Build and run container (default)
 dev shell                         # Open interactive bash shell in container
 dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
+dev -y, --yes                     # Automatically answer 'yes' to all prompts
 dev help <command>                # Get help for specific command
 dev troubleshoot                  # Show troubleshooting guide
 ```
@@ -463,6 +502,7 @@ dev troubleshoot                  # Show troubleshooting guide
 dev config                        # Show current configuration
 dev config --edit                 # Edit global configuration
 dev config --init                 # Create project-local configuration
+dev config --init --yes           # Create project config, auto-overwrite if exists
 ```
 
 ### Template Management
@@ -471,6 +511,7 @@ dev templates update              # Update all templates to latest versions
 dev templates check               # Check for available template updates
 dev templates prune               # Smart cleanup of old/unused templates
 dev templates cleanup [days]      # Remove templates unused for X days (default: 60)
+dev templates cleanup 30 --yes    # Remove old templates without prompting
 dev templates stats               # Show template statistics and usage information
 ```
 
