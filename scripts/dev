@@ -1753,11 +1753,6 @@ case $COMMAND in
             --name "$CONTAINER_NAME" \
             "$IMAGE_NAME" bash
         ;;
-    build)
-        echo "🔨 Building image for '$PROJECT_NAME'..."
-        build_image
-        echo "✅ Image built successfully"
-        ;;
         
     build)
         echo "🔨 Building container image for '$PROJECT_NAME'..."
