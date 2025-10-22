@@ -194,6 +194,12 @@ test_installation() {
 test_template_creation() {
     run_test "Template creation in test environment"
     
+    # Skip OrbStack-dependent tests in CI
+    if [[ "$CI" == "true" ]]; then
+        log "${YELLOW}⏭️  SKIP${NC}: Template creation requires OrbStack (CI environment)"
+        return
+    fi
+    
     # Ensure test environment is set up
     setup_test_installation
     

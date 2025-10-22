@@ -1,0 +1,31 @@
+name: Test Suite
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+    
+    - name: Run syntax and basic tests
+      run: |
+        # Run syntax validation and tests that don't require OrbStack
+        bash -n install.sh
+        bash -n scripts/dev
+        find scripts/lib -name "*.sh" -exec bash -n {} \;
+        
+        # Run limited test suite (syntax, help, structure tests only)
+        # Skip OrbStack-dependent tests in CI
+        export CI=true
+        bash test.sh
