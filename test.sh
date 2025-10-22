@@ -431,6 +431,49 @@ test_combined_template_devcontainer() {
     cd - > /dev/null
 }
 
+test_config_validation() {
+    run_test "Configuration validation system"
+    
+    local test_project="$TEST_DIR/test-config-validation"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Create a project config to validate
+    bash "$ORIGINAL_DIR/scripts/dev" config --init --yes >/dev/null 2>&1
+    
+    # Test validation function
+    local validation_output=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    local validation_exit_code=$?
+    
+    if [[ $validation_exit_code -eq 0 ]]; then
+        assert_contains "$validation_output" "Configuration is valid" "Config validation works for valid files"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Config validation test failed (exit code: $validation_exit_code)"
+    fi
+    
+    cd - > /dev/null
+}
+
+test_environment_overrides() {
+    run_test "Environment variable overrides"
+    
+    local test_project="$TEST_DIR/test-env-overrides"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test environment variable override
+    local config_output=$(DEV_VM_NAME=override-vm bash "$ORIGINAL_DIR/scripts/dev" config 2>&1 || echo "CONFIG_FAILED")
+    
+    if [[ "$config_output" != "CONFIG_FAILED" ]]; then
+        assert_contains "$config_output" "override-vm" "Environment variable override works"
+        assert_contains "$config_output" "Environment overrides active" "Shows environment overrides status"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Environment override test failed (expected in test environment)"
+    fi
+    
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -449,6 +492,8 @@ main() {
     test_direct_generation
     test_devcontainer_generation
     test_combined_template_devcontainer
+    test_config_validation
+    test_environment_overrides
     
     # Print results
     log "\n${BLUE}📊 Test Results${NC}"

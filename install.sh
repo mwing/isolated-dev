@@ -279,6 +279,36 @@ else
     log "   -> Warning: No languages directory found, skipping language plugins"
 fi
 
+# Create global configuration file with defaults
+log "   -> Creating global configuration file..."
+GLOBAL_CONFIG="$HOME/.dev-envs/config.yaml"
+if [[ ! -f "$GLOBAL_CONFIG" ]] || [[ "$FORCE" == "true" ]]; then
+    if [[ -f "$GLOBAL_CONFIG" ]]; then
+        backup_existing "$GLOBAL_CONFIG"
+    fi
+    
+    cat > "$GLOBAL_CONFIG" << 'EOF'
+# Global configuration for isolated development environment
+# This file sets defaults for all projects
+
+# Default VM name to use for containers
+vm_name: dev-vm-docker-host
+
+# Default template when language has multiple versions
+# Example: default_template: python-3.13
+default_template: ""
+
+# Automatically start VM if not running
+auto_start_vm: true
+
+# Prefix for container and image names
+container_prefix: dev
+EOF
+    log "   -> Created global config: $GLOBAL_CONFIG"
+else
+    log "   -> Global config already exists: $GLOBAL_CONFIG"
+fi
+
 # Copy the cloud-init config file
 log "   -> Installing config to $CONFIG_DIR"
 backup_existing "$CONFIG_DIR/docker-host.yaml"

@@ -142,7 +142,7 @@ function show_command_help() {
             echo "  $(basename "$0") new rust --init --devcontainer  # Rust with VS Code config"
             ;;
         config)
-            echo "Usage: $(basename "$0") config [--edit|--init]"
+            echo "Usage: $(basename "$0") config [--edit|--init|validate]"
             echo ""
             echo "Manage configuration files."
             echo ""
@@ -150,15 +150,21 @@ function show_command_help() {
             echo "  (no options)   Show current configuration"
             echo "  --edit         Edit global configuration in editor"
             echo "  --init         Create project-local configuration file"
+            echo "  validate       Validate configuration files and show errors"
             echo ""
             echo "Configuration Files:"
-            echo "  Global:        ~/.dev-envs/config.yaml"
-            echo "  Project-local: ./.devenv.yaml"
+            echo "  Global:        ~/.dev-envs/config.yaml (YAML format)"
+            echo "  Project-local: ./.devenv.yaml (YAML format)"
+            echo ""
+            echo "Environment Variables (override config):"
+            echo "  DEV_VM_NAME, DEV_DEFAULT_TEMPLATE, DEV_AUTO_START_VM, DEV_CONTAINER_PREFIX"
             echo ""
             echo "Examples:"
             echo "  $(basename "$0") config               # Show current config"
             echo "  $(basename "$0") config --edit        # Edit global config"
             echo "  $(basename "$0") config --init        # Create local config"
+            echo "  $(basename "$0") config validate      # Validate config files"
+            echo "  DEV_VM_NAME=test-vm $(basename "$0")  # Override VM name"
             ;;
         templates)
             echo "Usage: $(basename "$0") templates <action>"
