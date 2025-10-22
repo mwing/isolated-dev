@@ -32,6 +32,59 @@ function get_platform_flag() {
     fi
 }
 
+function detect_project_type() {
+    local detected_lang=""
+    local detected_version=""
+    local confidence="low"
+    
+    # Python detection
+    if [[ -f "requirements.txt" ]] || [[ -f "pyproject.toml" ]] || [[ -f "setup.py" ]] || [[ -f "Pipfile" ]]; then
+        detected_lang="python"
+        confidence="high"
+        # Try to detect Python version from files
+        if [[ -f "pyproject.toml" ]] && grep -q "python_requires" pyproject.toml; then
+            detected_version=$(grep "python_requires" pyproject.toml | sed 's/.*>=\s*"\([0-9]\+\.[0-9]\+\).*/\1/' | head -1)
+        elif [[ -f ".python-version" ]]; then
+            detected_version=$(cat .python-version | head -1 | sed 's/\([0-9]\+\.[0-9]\+\).*/\1/')
+        fi
+    # Node.js detection
+    elif [[ -f "package.json" ]]; then
+        detected_lang="node"
+        confidence="high"
+        # Try to detect Node version
+        if [[ -f ".nvmrc" ]]; then
+            detected_version=$(cat .nvmrc | head -1 | sed 's/v\?\([0-9]\+\).*/\1/')
+        elif [[ -f "package.json" ]] && grep -q ""engines"" package.json; then
+            detected_version=$(grep -A2 ""engines"" package.json | grep ""node"" | sed 's/.*">=\?\s*\([0-9]\+\).*/\1/' | head -1)
+        fi
+    # Go detection
+    elif [[ -f "go.mod" ]] || [[ -f "main.go" ]]; then
+        detected_lang="golang"
+        confidence="high"
+        if [[ -f "go.mod" ]]; then
+            detected_version=$(grep "^go " go.mod | sed 's/go \([0-9]\+\.[0-9]\+\).*/\1/' | head -1)
+        fi
+    # Rust detection
+    elif [[ -f "Cargo.toml" ]]; then
+        detected_lang="rust"
+        confidence="high"
+    # Java detection
+    elif [[ -f "pom.xml" ]] || [[ -f "build.gradle" ]] || [[ -f "build.gradle.kts" ]]; then
+        detected_lang="java"
+        confidence="high"
+    # PHP detection
+    elif [[ -f "composer.json" ]] || [[ -f "index.php" ]]; then
+        detected_lang="php"
+        confidence="high"
+    # Shell script detection
+    elif ls *.sh >/dev/null 2>&1; then
+        detected_lang="bash"
+        confidence="medium"
+    fi
+    
+    echo "$detected_lang:$detected_version:$confidence"
+}
+
 function usage() {
     echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
     echo ""
@@ -65,18 +118,20 @@ function show_command_help() {
     local command="$1"
     case "$command" in
         new)
-            echo "Usage: $(basename "$0") new <language> [--init]"
+            echo "Usage: $(basename "$0") new [<language>] [--init]"
             echo ""
             echo "Create a Dockerfile from a language template."
             echo ""
             echo "Arguments:"
             echo "  <language>     Language template (python, node, golang, rust, java, php, bash)"
             echo "                 Optionally specify version: python-3.12, node-22, etc."
+            echo "                 If omitted, auto-detects project type from current directory"
             echo ""
             echo "Options:"
             echo "  --init         Also create project scaffolding for the language"
             echo ""
             echo "Examples:"
+            echo "  $(basename "$0") new                   # Auto-detect project type"
             echo "  $(basename "$0") new python           # Latest Python template"
             echo "  $(basename "$0") new python-3.11      # Specific Python version"
             echo "  $(basename "$0") new node --init       # Node.js with package.json"

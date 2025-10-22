@@ -473,43 +473,116 @@ while [[ $# -gt 0 ]]; do
             esac
             ;;
         new)
-            case "$2" in
-                --help|-h)
-                    show_command_help "new"
-                    exit 0
-                    ;;
-                "")
-                    echo "❌ Error: new requires a language argument"
-                    echo "Use 'dev list' to see available options."
+            # Parse flags first to handle cases like "dev new --yes"
+            init_project=false
+            language=""
+            shift 1  # Remove 'new'
+            
+            # Process all arguments
+            while [[ $# -gt 0 ]]; do
+                case $1 in
+                    --help|-h)
+                        show_command_help "new"
+                        exit 0
+                        ;;
+                    --init)
+                        init_project=true
+                        shift
+                        ;;
+                    --yes|-y)
+                        AUTO_YES=true
+                        shift
+                        ;;
+                    -*)
+                        echo "❌ Error: Unknown flag for 'new' command: $1"
+                        exit 1
+                        ;;
+                    *)
+                        if [[ -z "$language" ]]; then
+                            language="$1"
+                        else
+                            echo "❌ Error: Multiple language arguments provided: $language and $1"
+                            exit 1
+                        fi
+                        shift
+                        ;;
+                esac
+            done
+            
+            # If no language specified, auto-detect
+            if [[ -z "$language" ]]; then
+                detection_result=$(detect_project_type)
+                detected_lang=$(echo "$detection_result" | cut -d: -f1)
+                detected_version=$(echo "$detection_result" | cut -d: -f2)
+                confidence=$(echo "$detection_result" | cut -d: -f3)
+                
+                if [[ -n "$detected_lang" ]]; then
+                    current_arch=$(detect_architecture)
+                    suggested_template="$detected_lang"
+                    
+                    # Add version if detected and available, otherwise find best match
+                    if [[ -n "$detected_version" ]]; then
+                        # Try exact match first
+                        if [[ -f "$TEMPLATES_DIR/Dockerfile-$detected_lang-$detected_version" ]]; then
+                            suggested_template="$detected_lang-$detected_version"
+                        else
+                            # Try major.minor match (e.g., 3.12.0 -> 3.12)
+                            major_minor=$(echo "$detected_version" | cut -d. -f1,2)
+                            if [[ -f "$TEMPLATES_DIR/Dockerfile-$detected_lang-$major_minor" ]]; then
+                                suggested_template="$detected_lang-$major_minor"
+                            else
+                                # Fall back to latest available
+                                latest_template=$(ls "$TEMPLATES_DIR"/Dockerfile-"$detected_lang"-* 2>/dev/null | \
+                                    sed "s/.*Dockerfile-$detected_lang-//" | \
+                                    sort -V | tail -1)
+                                if [[ -n "$latest_template" ]]; then
+                                    suggested_template="$detected_lang-$latest_template"
+                                fi
+                            fi
+                        fi
+                    else
+                        # Find the latest version available locally
+                        latest_template=$(ls "$TEMPLATES_DIR"/Dockerfile-"$detected_lang"-* 2>/dev/null | \
+                            sed "s/.*Dockerfile-$detected_lang-//" | \
+                            sort -V | tail -1)
+                        if [[ -n "$latest_template" ]]; then
+                            suggested_template="$detected_lang-$latest_template"
+                        fi
+                    fi
+                    
+                    echo "🔍 Project Detection Results:"
+                    echo "   Language: $detected_lang"
+                    [[ -n "$detected_version" ]] && echo "   Version: $detected_version"
+                    echo "   Architecture: $current_arch"
+                    echo "   Confidence: $confidence"
+                    echo ""
+                    echo "💡 Suggested template: $suggested_template"
+                    
+                    if [[ "$AUTO_YES" == "true" ]]; then
+                        echo "Auto-confirming suggestion (--yes flag set)"
+                        create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM"
+                    else
+                        echo -n "Use this template? (Y/n): "
+                        read -r response
+                        if [[ -z "$response" ]] || [[ "$response" =~ ^[Yy]$ ]]; then
+                            create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM"
+                        else
+                            echo "Template creation cancelled."
+                            echo "Use 'dev list' to see available options or 'dev new <language>' to specify manually."
+                            exit 0
+                        fi
+                    fi
+                else
+                    echo "🔍 No project files detected in current directory."
+                    echo "Use 'dev new <language>' to create a template manually."
+                    echo "Available languages: python, node, golang, rust, java, php, bash"
+                    echo "Example: dev new python-3.13 --init"
                     exit 1
-                    ;;
-                *)
-                    # Parse flags for new command
-                    init_project=false
-                    language="$2"
-                    shift 2  # Remove 'new' and language from args
-                    
-                    # Process remaining arguments for flags
-                    while [[ $# -gt 0 ]]; do
-                        case $1 in
-                            --init)
-                                init_project=true
-                                shift
-                                ;;
-                            --yes|-y)
-                                AUTO_YES=true
-                                shift
-                                ;;
-                            *)
-                                echo "❌ Error: Unknown flag for 'new' command: $1"
-                                exit 1
-                                ;;
-                        esac
-                    done
-                    
-                    create_from_template "$language" "$init_project" "$TARGET_PLATFORM"
-                    ;;
-            esac
+                fi
+            else
+                # Language specified manually
+                create_from_template "$language" "$init_project" "$TARGET_PLATFORM"
+            fi
             ;;
         -f|--file)
             DOCKERFILE="$2"
