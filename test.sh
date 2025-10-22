@@ -11,6 +11,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Test variables
+ORIGINAL_DIR="$(pwd)"
 TEST_DIR="$(mktemp -d)"
 TEST_HOME="$(mktemp -d)"  # Isolated home directory for testing
 TOTAL_TESTS=0
@@ -357,7 +358,7 @@ test_direct_generation() {
     cd "$test_project"
     
     # Test direct generation without pre-existing templates
-    local generation_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new python-3.13 --yes 2>&1 || echo "FAILED")
+    local generation_output=$(bash "$ORIGINAL_DIR/scripts/dev" new python-3.13 --yes 2>&1 || echo "FAILED")
     
     if [[ "$generation_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/Dockerfile" "Dockerfile generated directly from language plugin"
@@ -380,11 +381,11 @@ test_devcontainer_generation() {
     cd "$test_project"
     
     # Create Dockerfile and project files first
-    local dockerfile_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new python-3.13 --init --yes 2>&1 || echo "FAILED")
+    local dockerfile_output=$(bash "$ORIGINAL_DIR/scripts/dev" new python-3.13 --init --yes 2>&1 || echo "FAILED")
     
     if [[ "$dockerfile_output" != "FAILED" ]]; then
         # Test devcontainer generation (should auto-detect from requirements.txt)
-        local devcontainer_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev devcontainer --yes 2>&1 || echo "FAILED")
+        local devcontainer_output=$(bash "$ORIGINAL_DIR/scripts/dev" devcontainer --yes 2>&1 || echo "FAILED")
         
         if [[ "$devcontainer_output" != "FAILED" ]]; then
             assert_file_exists "$test_project/.devcontainer/devcontainer.json" "devcontainer.json created"
@@ -412,7 +413,7 @@ test_combined_template_devcontainer() {
     cd "$test_project"
     
     # Test creating template with devcontainer in one command
-    local combined_output=$(bash /Users/miso.lith/Projects/isolated-dev/scripts/dev new node-22 --init --devcontainer --yes 2>&1 || echo "FAILED")
+    local combined_output=$(bash "$ORIGINAL_DIR/scripts/dev" new node-22 --init --devcontainer --yes 2>&1 || echo "FAILED")
     
     if [[ "$combined_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/Dockerfile" "Dockerfile created"

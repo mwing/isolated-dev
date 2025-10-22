@@ -9,7 +9,7 @@ packages:
 # Now, configure users. This is the robust way to handle permissions.
 users:
   # The 'default' user is a special name that refers to the main user
-  # created by the system (in this case, your user, 'miso_lith').
+  # created by the system (in this case, your user).
   - name: default
     # Add the 'docker' group to this user's existing groups.
     groups: [docker]
