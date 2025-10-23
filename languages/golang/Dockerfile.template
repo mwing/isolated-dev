@@ -5,6 +5,7 @@ RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
 
 # Install system dependencies
 RUN apk add --no-cache \
+    bash \
     git \
     vim \
     curl
@@ -21,4 +22,4 @@ COPY --chown=appuser:appuser go.mod go.sum* ./
 RUN if [ -f go.mod ]; then go mod download; fi
 
 # Keep container running
-CMD ["bash"]
+CMD ["/bin/bash"]

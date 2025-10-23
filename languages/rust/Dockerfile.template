@@ -13,9 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install common Rust tools as root
-RUN cargo install cargo-watch cargo-edit
-
 # Set working directory and change ownership
 WORKDIR /workspace
 RUN chown -R appuser:appuser /workspace
@@ -25,7 +22,7 @@ USER appuser
 
 # Copy Cargo files if they exist
 COPY --chown=appuser:appuser Cargo*.toml* ./
-RUN if [ -f Cargo.toml ]; then cargo fetch; fi
+RUN if [ -f Cargo.toml ] && [ -f src/main.rs -o -f src/lib.rs ]; then cargo fetch; fi
 
 # Keep container running
 CMD ["bash"]

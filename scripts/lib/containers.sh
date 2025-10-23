@@ -199,12 +199,22 @@ function build_image() {
     local current_arch=$(detect_architecture)
     echo "   -> Building Docker image '$IMAGE_NAME'..."
     echo "   -> Host architecture: $current_arch"
+    
+    local build_result
     if [[ -n "$platform_flag" ]]; then
         echo "   -> Target platform: ${platform_flag#--platform }"
         orb -m "$VM_NAME" sudo docker build $platform_flag -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+        build_result=$?
     else
         echo "   -> Target platform: auto-detected (linux/$current_arch)"
         orb -m "$VM_NAME" sudo docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" .
+        build_result=$?
+    fi
+    
+    if [[ $build_result -ne 0 ]]; then
+        echo "❌ Error: Docker build failed"
+        echo "   Check your Dockerfile and requirements files"
+        exit 1
     fi
 }
 
