@@ -10,8 +10,8 @@ function get_security_flags() {
     # Drop all capabilities and add only what's needed
     security_flags="--cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=SETGID --cap-add=SETUID"
     
-    # Run with non-root user when possible
-    security_flags="$security_flags --user 1000:1000"
+    # User is set in Dockerfile with USER directive
+    # Don't override with --user flag to avoid UID/name conflicts
     
     # Set security options (OrbStack supports these)
     security_flags="$security_flags --security-opt=no-new-privileges:true"
@@ -20,8 +20,8 @@ function get_security_flags() {
     # Limit resources (OrbStack enforces these)
     security_flags="$security_flags --memory=2g --cpus=2"
     
-    # Read-only root filesystem where possible
-    security_flags="$security_flags --read-only --tmpfs /tmp"
+    # Allow writable filesystem for development containers
+    # Read-only mode disabled for development flexibility
     
     echo "$security_flags"
 }
