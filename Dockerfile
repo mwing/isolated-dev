@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser -m appuser
+# Create non-root user with explicit UID 1000
+RUN groupadd -g 1000 appuser && useradd -u 1000 -g appuser -m -s /bin/bash appuser
 
 # Install system dependencies and shell tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
