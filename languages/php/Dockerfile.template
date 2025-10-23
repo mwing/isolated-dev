@@ -5,6 +5,7 @@ RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
 
 # Install system dependencies and PHP extensions
 RUN apk add --no-cache \
+    bash \
     git \
     vim \
     curl \
@@ -30,4 +31,4 @@ COPY --chown=appuser:appuser composer*.json* ./
 RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader; fi
 
 # Keep container running
-CMD ["bash"]
+CMD ["/bin/bash"]
