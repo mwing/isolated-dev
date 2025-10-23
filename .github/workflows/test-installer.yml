@@ -1,0 +1,52 @@
+name: Test Installer
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/build-installer.sh'
+      - 'install.sh'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
+      - name: Test build script
+        run: |
+          chmod +x scripts/build-installer.sh
+          ./scripts/build-installer.sh "v0.0.0-test"
+          
+      - name: Verify build outputs
+        run: |
+          ls -la dist/
+          
+          # Check if installer exists and is executable
+          [[ -x dist/install.sh ]] || { echo "❌ Installer not executable"; exit 1; }
+          
+          # Check if tarball exists
+          [[ -f dist/isolated-dev-0.0.0-test.tar.gz ]] || { echo "❌ Tarball missing"; exit 1; }
+          
+          # Check installer help
+          dist/install.sh --help | grep -q "Isolated Development Environment Tools Installer" || {
+            echo "❌ Installer help not working"
+            exit 1
+          }
+          
+          echo "✅ All build tests passed!"
+          
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-installer
+          path: dist/
+          retention-days: 7

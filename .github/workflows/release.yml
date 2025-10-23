@@ -1,0 +1,107 @@
+name: Build and Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-installer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+          
+      - name: Extract version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_clean=${VERSION#v}" >> $GITHUB_OUTPUT
+          
+      - name: Build self-contained installer
+        run: |
+          chmod +x scripts/build-installer.sh
+          ./scripts/build-installer.sh "${{ steps.version.outputs.version }}"
+          
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          
+      - name: Create release notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          ## Installation
+          
+          ### One-line installation (recommended):
+          ```bash
+          curl -fsSL https://github.com/mwing/isolated-dev/releases/download/${{ steps.version.outputs.version }}/install.sh | bash
+          ```
+          
+          ### With options:
+          ```bash
+          curl -fsSL https://github.com/mwing/isolated-dev/releases/download/${{ steps.version.outputs.version }}/install.sh | bash -s -- --yes --completion
+          ```
+          
+          ### Manual installation:
+          ```bash
+          wget https://github.com/mwing/isolated-dev/releases/download/${{ steps.version.outputs.version }}/isolated-dev-${{ steps.version.outputs.version_clean }}.tar.gz
+          tar xzf isolated-dev-${{ steps.version.outputs.version_clean }}.tar.gz
+          cd isolated-dev-${{ steps.version.outputs.version_clean }}
+          ./install.sh
+          ```
+          
+          ## Verification
+          ```bash
+          # Verify checksums
+          curl -fsSL https://github.com/mwing/isolated-dev/releases/download/${{ steps.version.outputs.version }}/checksums.txt
+          ```
+          
+          ## What's New
+          - Secure, isolated development environments
+          - Mac-native performance with OrbStack
+          - Zero Docker image management
+          - Automatic port forwarding and SSH key mounting
+          EOF
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/install.sh
+            dist/isolated-dev-${{ steps.version.outputs.version_clean }}.tar.gz
+            dist/checksums.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Update installation instructions
+        run: |
+          echo "✅ Release ${{ steps.version.outputs.version }} created successfully!"
+          echo ""
+          echo "📦 Installation command:"
+          echo "curl -fsSL https://github.com/mwing/isolated-dev/releases/download/${{ steps.version.outputs.version }}/install.sh | bash"
