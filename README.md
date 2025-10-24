@@ -254,6 +254,9 @@ dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
 dev --platform linux/arm64        # Build for specific architecture
+dev -e VAR_NAME                   # Pass environment variable from host
+dev -e VAR=value                  # Pass environment variable with value
+dev --env-file .env               # Load environment variables from file
 dev -y, --yes                     # Automatically answer 'yes' to all prompts
 dev arch                          # Show architecture and platform information
 dev help <command>                # Get help for specific command
@@ -434,6 +437,24 @@ dev shell
 # Inside container, variables are available
 echo $AWS_PROFILE  # outputs: dev
 echo $SNYK_TOKEN   # outputs: abc123
+```
+
+**Command-line environment variables:**
+```bash
+# Pass specific variables from host environment
+dev --env GITLAB_TOKEN shell
+dev -e DATABASE_URL -e API_KEY shell
+
+# Pass variables with explicit values
+dev --env NODE_ENV=production shell
+dev -e DEBUG=true -e PORT=8080 shell
+
+# Load variables from .env file
+dev --env-file .env shell
+dev --env-file .env.production shell
+
+# Combine multiple methods
+dev -e GITLAB_TOKEN --env-file .env shell
 ```
 
 **Project-specific variables:**
