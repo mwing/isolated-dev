@@ -98,7 +98,8 @@ function copy_scaffolding_files_from_plugin() {
 function get_cached_api_response() {
     local cache_key="$1"
     local cache_file="$HOME/.dev-envs/cache/$cache_key"
-    local cache_ttl=86400  # 1 day
+    local cache_ttl="${DEV_CACHE_TTL:-$(get_config_value "cache_ttl")}"
+    cache_ttl="${cache_ttl:-86400}"  # Default 1 day
     
     if [[ -f "$cache_file" ]]; then
         local cache_age=$(( $(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
@@ -116,6 +117,36 @@ function cache_api_response() {
     local cache_dir="$HOME/.dev-envs/cache"
     mkdir -p "$cache_dir"
     echo "$response" > "$cache_dir/$cache_key"
+    
+    # Check cache size and suggest cleanup if needed
+    check_cache_size_and_suggest_cleanup
+}
+
+function check_cache_size_and_suggest_cleanup() {
+    local cache_dir="$HOME/.dev-envs/cache"
+    local max_size="${DEV_CACHE_MAX_SIZE:-$(get_config_value "cache_max_size")}"
+    max_size="${max_size:-100}"  # Default 100MB
+    
+    if [[ ! -d "$cache_dir" ]]; then
+        return
+    fi
+    
+    # Get cache size in MB
+    local cache_size_kb=$(du -sk "$cache_dir" 2>/dev/null | cut -f1)
+    local cache_size_mb=$((cache_size_kb / 1024))
+    
+    if [[ $cache_size_mb -gt $max_size ]]; then
+        echo "⚠️  Cache size ($cache_size_mb MB) exceeds limit ($max_size MB)"
+        echo "   Suggestion: Run 'dev templates cleanup' to free up space"
+    fi
+}
+
+function clear_cache() {
+    local cache_dir="$HOME/.dev-envs/cache"
+    if [[ -d "$cache_dir" ]]; then
+        rm -rf "$cache_dir"/*
+        echo "🧹 Cache cleared"
+    fi
 }
 
 function get_latest_python_version() {

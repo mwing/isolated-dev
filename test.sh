@@ -946,7 +946,7 @@ WORKDIR /workspace
 CMD ["python", "app.py"]
 EOF
     
-    local validation_output=$(bash "$ORIGINAL_DIR/scripts/dev" security validate 2>&1 || echo "VALIDATION_FAILED")
+    local validation_output=$(bash "$ORIGINAL_DIR/scripts/dev" security check 2>&1 || echo "VALIDATION_FAILED")
     
     if [[ "$validation_output" != "VALIDATION_FAILED" ]]; then
         assert_contains "$validation_output" "Security issues found" "Security validation detects vulnerable Dockerfile"
@@ -969,7 +969,7 @@ RUN pip install --no-cache-dir flask
 CMD ["bash"]
 EOF
     
-    local secure_validation=$(bash "$ORIGINAL_DIR/scripts/dev" security validate 2>&1 || echo "SECURE_VALIDATION_FAILED")
+    local secure_validation=$(bash "$ORIGINAL_DIR/scripts/dev" security check 2>&1 || echo "SECURE_VALIDATION_FAILED")
     
     if [[ "$secure_validation" != "SECURE_VALIDATION_FAILED" ]]; then
         assert_contains "$secure_validation" "No security issues found" "Security validation passes secure Dockerfile"
@@ -977,13 +977,13 @@ EOF
         log "${YELLOW}⏭️  SKIP${NC}: Secure validation test failed"
     fi
     
-    # Test security scan command
-    local scan_output=$(bash "$ORIGINAL_DIR/scripts/dev" security scan 2>&1 || echo "SCAN_FAILED")
+    # Test security check command
+    local check_output=$(bash "$ORIGINAL_DIR/scripts/dev" security check 2>&1 || echo "CHECK_FAILED")
     
-    if [[ "$scan_output" != "SCAN_FAILED" ]]; then
-        assert_contains "$scan_output" "Scanning" "Security scan command works"
+    if [[ "$check_output" != "CHECK_FAILED" ]]; then
+        assert_contains "$check_output" "Security Check" "Security check command works"
     else
-        log "${YELLOW}⏭️  SKIP${NC}: Security scan test failed"
+        log "${YELLOW}⏭️  SKIP${NC}: Security check test failed"
     fi
     
     # Test security help
@@ -991,8 +991,7 @@ EOF
     
     if [[ "$help_output" != "HELP_FAILED" ]]; then
         assert_contains "$help_output" "Security commands" "Security help command works"
-        assert_contains "$help_output" "validate" "Security help mentions validate command"
-        assert_contains "$help_output" "scan" "Security help mentions scan command"
+        assert_contains "$help_output" "check" "Security help mentions check command"
     else
         log "${YELLOW}⏭️  SKIP${NC}: Security help test failed"
     fi

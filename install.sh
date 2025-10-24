@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Script version
 VERSION="1.0.0"

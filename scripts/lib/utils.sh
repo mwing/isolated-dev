@@ -40,6 +40,71 @@ function detect_project_type() {
     fi
 }
 
+function check_disk_space() {
+    local min_free_gb="${DEV_MIN_DISK_SPACE:-$(get_config_value "min_disk_space")}"
+    min_free_gb="${min_free_gb:-5}"  # Default 5GB minimum
+    
+    # Get available disk space in GB
+    local available_gb
+    if command -v df >/dev/null 2>&1; then
+        # macOS and Linux compatible
+        available_gb=$(df -BG . 2>/dev/null | awk 'NR==2 {gsub(/G/, "", $4); print $4}' || echo "0")
+    else
+        available_gb="0"
+    fi
+    
+    if [[ $available_gb -lt $min_free_gb ]]; then
+        echo "⚠️  Warning: Low disk space ($available_gb GB available, minimum $min_free_gb GB recommended)"
+        echo "   Consider cleaning up Docker images: docker system prune -a"
+        return 1
+    fi
+    
+    return 0
+}
+
+function show_disk_usage() {
+    echo "🐳 Development Environment Disk Usage:"
+    echo ""
+    
+    # Show Docker space usage if available
+    if command -v docker >/dev/null 2>&1; then
+        echo "📦 Docker space usage:"
+        if docker system df 2>/dev/null; then
+            echo ""
+            echo "💡 To free up Docker space: docker system prune -a"
+        else
+            echo "   Docker not running"
+        fi
+    else
+        echo "📦 Docker not installed"
+    fi
+    
+    # Show cache usage
+    local cache_dir="$HOME/.dev-envs/cache"
+    if [[ -d "$cache_dir" ]]; then
+        echo ""
+        echo "🗂️  Template cache usage:"
+        local cache_size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1)
+        echo "   $cache_size in $cache_dir"
+        
+        local file_count=$(find "$cache_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+        if [[ $file_count -gt 0 ]]; then
+            echo "   $file_count cached files"
+            echo "💡 To clear cache: dev templates cleanup"
+        fi
+    else
+        echo ""
+        echo "🗂️  No template cache found"
+    fi
+    
+    # Show OrbStack usage if available
+    if command -v orb >/dev/null 2>&1; then
+        echo ""
+        echo "🌐 OrbStack VMs:"
+        orb list 2>/dev/null || echo "   No VMs found"
+    fi
+}
+
 function usage() {
     echo "Usage: $(basename "$0") [OPTIONS] [COMMAND]"
     echo ""
@@ -54,6 +119,7 @@ function usage() {
     echo "  config [--edit|--init]       Configuration management"
     echo "  templates <cmd>              Template management (update, prune, stats)"
     echo "  arch                         Architecture information"
+    echo "  disk                         Show disk usage information"
     echo "  help [cmd], troubleshoot     Help and diagnostics"
     echo ""
     echo "Options:"

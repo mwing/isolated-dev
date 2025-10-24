@@ -4,6 +4,36 @@
 # SECURITY FUNCTIONS
 # ==============================================================================
 
+function validate_container_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+        echo "❌ Error: Invalid container name '$name'. Must start with alphanumeric and contain only letters, numbers, underscores, periods, and hyphens."
+        return 1
+    fi
+    if [[ ${#name} -gt 63 ]]; then
+        echo "❌ Error: Container name too long (max 63 characters): '$name'"
+        return 1
+    fi
+}
+
+function validate_tag_name() {
+    local tag="$1"
+    if [[ ! "$tag" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$ ]]; then
+        echo "❌ Error: Invalid tag '$tag'. Must start with alphanumeric/underscore and contain only valid Docker tag characters."
+        return 1
+    fi
+    if [[ ${#tag} -gt 128 ]]; then
+        echo "❌ Error: Tag name too long (max 128 characters): '$tag'"
+        return 1
+    fi
+}
+
+function sanitize_env_var() {
+    local var="$1"
+    # Remove any characters that could be used for injection
+    echo "$var" | sed 's/[`$(){};&|<>]//g'
+}
+
 function get_security_flags() {
     local security_flags=""
     
@@ -17,8 +47,17 @@ function get_security_flags() {
     security_flags="$security_flags --security-opt=no-new-privileges:true"
     security_flags="$security_flags --security-opt=apparmor:unconfined"  # OrbStack default
     
-    # Limit resources (OrbStack enforces these)
-    security_flags="$security_flags --memory=2g --cpus=2"
+    # Limit resources (configurable via config or environment)
+    local memory_limit="${DEV_MEMORY_LIMIT:-$(get_config_value "memory_limit")}"
+    local cpu_limit="${DEV_CPU_LIMIT:-$(get_config_value "cpu_limit")}"
+    
+    # Apply resource limits if configured
+    if [[ -n "$memory_limit" ]]; then
+        security_flags="$security_flags --memory=$memory_limit"
+    fi
+    if [[ -n "$cpu_limit" ]]; then
+        security_flags="$security_flags --cpus=$cpu_limit"
+    fi
     
     # Allow writable filesystem for development containers
     # Read-only mode disabled for development flexibility
@@ -62,6 +101,24 @@ function validate_dockerfile_security() {
         issues+=("Potential secrets found in Dockerfile")
     fi
     
+    # Validate container names and tags in current environment
+    echo ""
+    echo "🔍 Validating current container configuration:"
+    
+    # Check custom container name if set
+    if [[ -n "${CUSTOM_NAME:-}" ]]; then
+        if validate_container_name "$CUSTOM_NAME"; then
+            echo "✅ Container name '$CUSTOM_NAME' is valid"
+        fi
+    fi
+    
+    # Check custom tag if set
+    if [[ -n "${CUSTOM_TAG:-}" ]]; then
+        if validate_tag_name "$CUSTOM_TAG"; then
+            echo "✅ Image tag '$CUSTOM_TAG' is valid"
+        fi
+    fi
+    
     # Report findings
     if [[ ${#issues[@]} -eq 0 ]]; then
         echo "✅ No security issues found"
@@ -73,6 +130,48 @@ function validate_dockerfile_security() {
         done
         return 1
     fi
+}
+
+function security_check() {
+    local dockerfile="${1:-Dockerfile}"
+    local image_name="${2:-}"
+    
+    echo "🔒 Comprehensive Security Check"
+    echo "================================"
+    
+    # 1. Dockerfile validation
+    echo ""
+    echo "📋 Dockerfile Security Validation:"
+    validate_dockerfile_security "$dockerfile"
+    local dockerfile_result=$?
+    
+    # 2. Image vulnerability scan (if image name provided or can be determined)
+    if [[ -n "$image_name" ]] || [[ -f "$dockerfile" ]]; then
+        echo ""
+        echo "🔍 Image Vulnerability Scan:"
+        if [[ -z "$image_name" ]]; then
+            # Try to determine image name from current context
+            image_name="${CUSTOM_TAG:-${CONTAINER_PREFIX:-dev}-img-$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')}"
+        fi
+        scan_image_vulnerabilities "$image_name"
+    fi
+    
+    # 3. Overall security summary
+    echo ""
+    echo "📊 Security Summary:"
+    if [[ $dockerfile_result -eq 0 ]]; then
+        echo "✅ Dockerfile security: PASS"
+    else
+        echo "⚠️  Dockerfile security: ISSUES FOUND"
+    fi
+    
+    echo "💡 Security recommendations:"
+    echo "   • Use official base images when possible"
+    echo "   • Keep images updated regularly"
+    echo "   • Run containers as non-root users"
+    echo "   • Use multi-stage builds to reduce attack surface"
+    
+    return $dockerfile_result
 }
 
 function scan_image_vulnerabilities() {
