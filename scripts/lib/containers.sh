@@ -197,6 +197,34 @@ function check_port_available() {
 function get_env_forwards() {
     local env_args=""
     
+    # Process custom env vars from --env flags
+    if [[ ${#CUSTOM_ENV_VARS[@]} -gt 0 ]]; then
+        for env_spec in "${CUSTOM_ENV_VARS[@]}"; do
+            # Handle both VAR=value and VAR formats
+            if [[ "$env_spec" == *"="* ]]; then
+                # Direct value: VAR=value
+                env_args="$env_args -e $env_spec"
+            else
+                # Variable name only: VAR (get value from environment)
+                if [[ -n "${!env_spec:-}" ]]; then
+                    local value="${!env_spec}"
+                    env_args="$env_args -e $env_spec='$value'"
+                fi
+            fi
+        done
+    fi
+    
+    # Process custom env files from --env-file flags
+    if [[ ${#CUSTOM_ENV_FILES[@]} -gt 0 ]]; then
+        for env_file in "${CUSTOM_ENV_FILES[@]}"; do
+            if [[ -f "$env_file" ]]; then
+                env_args="$env_args --env-file $env_file"
+            else
+                echo "⚠️  Warning: Environment file not found: $env_file" >&2
+            fi
+        done
+    fi
+    
     # Get patterns from config
     local patterns=$(get_config_array "pass_env_vars.patterns")
     local explicit=$(get_config_array "pass_env_vars.explicit")

@@ -38,6 +38,7 @@ CUSTOM_NAME=""
 AUTO_YES=false
 TARGET_PLATFORM=""
 CUSTOM_ENV_VARS=()
+CUSTOM_ENV_FILES=()
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
@@ -304,6 +305,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --platform)
             TARGET_PLATFORM="$2"
+            shift 2
+            ;;
+        -e|--env)
+            CUSTOM_ENV_VARS+=("$2")
+            shift 2
+            ;;
+        --env-file)
+            CUSTOM_ENV_FILES+=("$2")
             shift 2
             ;;
         run|build|clean|shell)
