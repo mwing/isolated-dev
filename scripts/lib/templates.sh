@@ -98,7 +98,7 @@ function copy_scaffolding_files_from_plugin() {
 function get_cached_api_response() {
     local cache_key="$1"
     local cache_file="$HOME/.dev-envs/cache/$cache_key"
-    local cache_ttl=3600  # 1 hour
+    local cache_ttl=86400  # 1 day
     
     if [[ -f "$cache_file" ]]; then
         local cache_age=$(( $(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo 0) ))
