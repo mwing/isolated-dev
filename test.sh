@@ -629,6 +629,84 @@ test_resource_limits_function() {
     cd - > /dev/null
 }
 
+test_env_parsing() {
+    run_test "Environment variable parsing"
+    
+    local test_project="$TEST_DIR/test-env-parsing"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Source the containers library to test the function directly
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Test with no custom env vars
+    CUSTOM_ENV_VARS=()
+    CUSTOM_ENV_FILES=()
+    local no_env=$(get_env_forwards)
+    # Should be empty or only contain config-based vars
+    assert_equals "" "$no_env" "No env vars when none specified"
+    
+    # Test with single env var (name only)
+    export TEST_VAR="test_value"
+    CUSTOM_ENV_VARS=("TEST_VAR")
+    CUSTOM_ENV_FILES=()
+    local single_env=$(get_env_forwards)
+    assert_contains "$single_env" "-e TEST_VAR='test_value'" "Single env var passed correctly"
+    
+    # Test with env var containing special characters (like GitLab token)
+    export GITLAB_TOKEN="glpat-abc123.456.xyz789"
+    CUSTOM_ENV_VARS=("GITLAB_TOKEN")
+    CUSTOM_ENV_FILES=()
+    local token_env=$(get_env_forwards)
+    assert_contains "$token_env" "-e GITLAB_TOKEN='glpat-abc123.456.xyz789'" "Token with special chars passed correctly"
+    
+    # Test with env var with explicit value
+    CUSTOM_ENV_VARS=("NODE_ENV=production")
+    CUSTOM_ENV_FILES=()
+    local explicit_env=$(get_env_forwards)
+    assert_contains "$explicit_env" "-e NODE_ENV=production" "Explicit value passed correctly"
+    
+    # Test with multiple env vars
+    export VAR1="value1"
+    export VAR2="value2"
+    CUSTOM_ENV_VARS=("VAR1" "VAR2")
+    CUSTOM_ENV_FILES=()
+    local multi_env=$(get_env_forwards)
+    assert_contains "$multi_env" "-e VAR1='value1'" "First var in multiple passed correctly"
+    assert_contains "$multi_env" "-e VAR2='value2'" "Second var in multiple passed correctly"
+    
+    # Test with env file
+    cat > test.env << 'EOF'
+TEST_FILE_VAR=file_value
+ANOTHER_VAR=another_value
+EOF
+    CUSTOM_ENV_VARS=()
+    CUSTOM_ENV_FILES=("test.env")
+    local file_env=$(get_env_forwards)
+    assert_contains "$file_env" "--env-file test.env" "Env file passed correctly"
+    
+    # Test with non-existent env file (should warn)
+    CUSTOM_ENV_VARS=()
+    CUSTOM_ENV_FILES=("nonexistent.env")
+    local missing_file_env=$(get_env_forwards 2>&1)
+    assert_contains "$missing_file_env" "Warning: Environment file not found" "Warning shown for missing env file"
+    
+    # Test with combination of vars and files
+    export COMBO_VAR="combo_value"
+    CUSTOM_ENV_VARS=("COMBO_VAR")
+    CUSTOM_ENV_FILES=("test.env")
+    local combo_env=$(get_env_forwards)
+    assert_contains "$combo_env" "-e COMBO_VAR='combo_value'" "Var passed in combination"
+    assert_contains "$combo_env" "--env-file test.env" "File passed in combination"
+    
+    # Clean up
+    rm -f test.env
+    unset TEST_VAR GITLAB_TOKEN VAR1 VAR2 COMBO_VAR
+    
+    cd - > /dev/null
+}
+
 test_security_functionality() {
     run_test "Security functionality"
     
@@ -727,6 +805,7 @@ main() {
     test_config_validation
     test_environment_overrides
     test_resource_limits_function
+    test_env_parsing
     test_security_functionality
     
     # Print results
