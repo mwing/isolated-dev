@@ -37,6 +37,7 @@ CUSTOM_TAG=""
 CUSTOM_NAME=""
 AUTO_YES=false
 TARGET_PLATFORM=""
+CUSTOM_ENV_VARS=()
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do

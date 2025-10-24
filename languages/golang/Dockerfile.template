@@ -8,7 +8,12 @@ RUN apk add --no-cache \
     bash \
     git \
     vim \
-    curl
+    curl \
+    less
+
+# Optional: Uncomment to enable sudo for development tasks
+# RUN apk add --no-cache sudo && \
+#     echo 'appuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Set working directory and change ownership
 WORKDIR /workspace

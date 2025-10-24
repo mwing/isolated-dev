@@ -343,6 +343,18 @@ port_health_timeout: 5                  # Timeout for port health checks (second
 # Resource limits (applied at container runtime)
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
+
+# Environment variables to pass to containers
+pass_env_vars:
+  # Patterns to match (supports wildcards with *)
+  patterns:
+    - AWS_*
+    - SNYK_*
+    - GITHUB_*
+    - NODE_ENV
+    - DEBUG
+  # Explicit variable names (no wildcards)
+  explicit: []
 ```
 
 > **Note**: Only YAML format is supported for configuration files. The legacy `key=value` format has been removed for better consistency and validation.
@@ -387,6 +399,55 @@ dev config validate              # Validate all config files
 # - Correct value types (boolean, string, number)
 # - Valid characters in names
 # - Network configuration values
+```
+
+### Environment Variable Passing
+
+Automatically pass environment variables to containers based on configuration:
+
+```yaml
+# In ~/.dev-envs/config.yaml or .devenv.yaml
+pass_env_vars:
+  # Patterns to match (supports wildcards with *)
+  patterns:
+    - AWS_*          # Passes AWS_PROFILE, AWS_REGION, etc.
+    - SNYK_*         # Passes SNYK_TOKEN, SNYK_ORG, etc.
+    - GITHUB_*       # Passes GITHUB_TOKEN, etc.
+    - NODE_ENV       # Exact match
+    - DEBUG          # Exact match
+  # Explicit variable names (no wildcards)
+  explicit:
+    - CUSTOM_VAR
+    - API_KEY
+```
+
+**Usage:**
+```bash
+# Set environment variables on your host
+export AWS_PROFILE=dev
+export SNYK_TOKEN=abc123
+export GITHUB_TOKEN=xyz789
+
+# Run container - variables automatically passed
+dev shell
+
+# Inside container, variables are available
+echo $AWS_PROFILE  # outputs: dev
+echo $SNYK_TOKEN   # outputs: abc123
+```
+
+**Project-specific variables:**
+```bash
+# Create project config
+dev config --init
+
+# Edit .devenv.yaml to add project-specific variables
+pass_env_vars:
+  patterns:
+    - DATABASE_*
+    - API_*
+  explicit:
+    - CUSTOM_APP_VAR
 ```
 
 ## VS Code Integration

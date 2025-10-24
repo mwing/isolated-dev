@@ -4,6 +4,33 @@
 # CONFIGURATION FUNCTIONS
 # ==============================================================================
 
+function get_config_array() {
+    local key="$1"
+    local config_file=""
+    
+    # Check project config first
+    if [[ -f "$PROJECT_CONFIG" ]]; then
+        config_file="$PROJECT_CONFIG"
+    elif [[ -f "$GLOBAL_CONFIG" ]]; then
+        config_file="$GLOBAL_CONFIG"
+    else
+        return
+    fi
+    
+    # Extract array values from YAML using awk
+    # Parse pass_env_vars.patterns or pass_env_vars.explicit
+    local section_key="${key%%.*}"
+    local array_key="${key##*.}"
+    
+    awk -v section="$section_key" -v array="$array_key" '
+        /^[a-zA-Z_]/ { in_section=0 }
+        $0 ~ "^" section ":" { in_section=1; next }
+        in_section && $0 ~ "^  " array ":" { in_array=1; next }
+        in_array && /^    - / { sub(/^    - /, ""); print; next }
+        in_array && /^  [a-z]/ { exit }
+    ' "$config_file"
+}
+
 # Configuration schema and defaults
 function get_config_type() {
     case "$1" in
