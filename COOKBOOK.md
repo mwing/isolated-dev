@@ -8,7 +8,7 @@ Practical examples and recipes for common development scenarios using isolated d
 - [Language-Specific Examples](#language-specific-examples)
 - [Network Configuration](#network-configuration)
 - [Team Workflows](#team-workflows)
-- [CI/CD Integration](#cicd-integration)
+- [Local Testing & Deployment](#local-testing--deployment)
 - [Performance Optimization](#performance-optimization)
 - [Troubleshooting Recipes](#troubleshooting-recipes)
 
@@ -434,52 +434,24 @@ dev  # Everything just works!
 # No need to install language runtimes, databases, etc.
 ```
 
-## CI/CD Integration
+## Local Testing & Deployment
 
-### GitHub Actions
-```yaml
-# .github/workflows/test.yml
-name: Test in Container
-on: [push, pull_request]
+### Multi-Architecture Builds
+```bash
+# Build for different architectures (requires OrbStack)
+dev --platform linux/arm64 build   # ARM64 (Apple Silicon)
+dev --platform linux/amd64 build   # x86_64 (Intel servers)
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install isolated-dev
-        run: |
-          git clone https://github.com/mwing/isolated-dev.git
-          cd isolated-dev
-          ./install.sh --yes
-          
-      - name: Setup VM
-        run: dev env new docker-host
-        
-      - name: Run tests
-        run: |
-          dev new python-3.13 --yes
-          dev shell -c "pip install -r requirements.txt && python -m pytest"
+# Test on specific architecture
+dev --platform linux/amd64 shell -c "npm test"
 ```
 
-### Automated Deployment Testing
+### Deployment Testing
 ```bash
 # Test deployment builds locally
 dev new python-3.13 --init --yes
 dev --platform linux/amd64 build  # Build for production architecture
 dev shell -c "python -m pytest"   # Run tests in container
-```
-
-### Multi-Architecture Builds
-```bash
-# Build for different architectures
-dev --platform linux/arm64 build   # ARM64 (Apple Silicon)
-dev --platform linux/amd64 build   # x86_64 (Intel servers)
-
-# Test on both architectures
-dev --platform linux/arm64 shell -c "npm test"
-dev --platform linux/amd64 shell -c "npm test"
 ```
 
 ## Performance Optimization
