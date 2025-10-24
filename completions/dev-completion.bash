@@ -34,10 +34,10 @@ _dev_completion() {
     fi
 
     # Main commands
-    local commands="new list config security templates env help troubleshoot arch devcontainer run shell build clean"
+    local commands="new list config security templates env help troubleshoot arch devcontainer run shell build clean disk"
     
     # Global flags
-    local global_flags="--help -h --yes -y --platform"
+    local global_flags="--help -h --yes -y --platform -f -t -n --name -e --env --env-file"
     
     case $prev in
         dev)
@@ -55,7 +55,7 @@ _dev_completion() {
             return 0
             ;;
         security)
-            local security_opts="scan validate --help"
+            local security_opts="check --help"
             COMPREPLY=($(compgen -W "$security_opts" -- "$cur"))
             return 0
             ;;

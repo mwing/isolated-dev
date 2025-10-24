@@ -47,12 +47,20 @@ _dev() {
                 'help:Show help'
                 'troubleshoot:Show troubleshooting guide'
                 'arch:Show architecture information'
+                'disk:Show disk usage information'
             )
             _describe 'commands' commands
             _arguments \
                 '--help[Show help]' \
                 '--yes[Skip prompts]' \
-                '--platform[Target platform]:platform:(linux/amd64 linux/arm64)'
+                '--platform[Target platform]:platform:(linux/amd64 linux/arm64)' \
+                '-f[Dockerfile path]:file:_files' \
+                '-t[Custom image tag]:tag:' \
+                '-n[Container name]:name:' \
+                '--name[Container name]:name:' \
+                '-e[Environment variable]:env:' \
+                '--env[Environment variable]:env:' \
+                '--env-file[Environment file]:file:_files'
             ;;
         args)
             case $words[2] in
@@ -73,9 +81,7 @@ _dev() {
                         '1:action:(validate)'
                     ;;
                 security)
-                    _arguments \
-                        '--help[Show help]' \
-                        '1:action:(scan validate)'
+                    compadd -- check --help
                     ;;
                 templates)
                     _arguments \
@@ -115,6 +121,13 @@ _dev() {
                         '--help[Show help]' \
                         '--yes[Skip prompts]' \
                         '--platform[Target platform]:platform:(linux/amd64 linux/arm64)' \
+                        '-f[Dockerfile path]:file:_files' \
+                        '-t[Custom image tag]:tag:' \
+                        '-n[Container name]:name:' \
+                        '--name[Container name]:name:' \
+                        '-e[Environment variable]:env:' \
+                        '--env[Environment variable]:env:' \
+                        '--env-file[Environment file]:file:_files'
                         '--file[Dockerfile path]:file:_files' \
                         '--tag[Image tag]:tag:' \
                         '--name[Container name]:name:'

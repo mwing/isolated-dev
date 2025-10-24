@@ -331,12 +331,17 @@ while [[ $# -gt 0 ]]; do
                 echo "  $(basename "$0") help templates     # Template management help"
                 echo "  $(basename "$0") help env           # Environment management help"
                 echo "  $(basename "$0") arch               # Architecture and platform info"
+                echo "  $(basename "$0") disk               # Show disk usage information"
                 echo "  $(basename "$0") troubleshoot       # Troubleshooting guide"
             fi
             exit 0
             ;;
         troubleshoot)
             show_command_help "troubleshoot"
+            exit 0
+            ;;
+        disk)
+            show_disk_usage
             exit 0
             ;;
         arch|architecture)
@@ -366,36 +371,21 @@ while [[ $# -gt 0 ]]; do
             case "$2" in
                 --help|-h)
                     echo "Security commands:"
-                    echo "  dev security scan          Scan current Dockerfile for security issues"
-                    echo "  dev security validate      Validate Dockerfile security best practices"
-
+                    echo "  dev security check         Comprehensive security check (Dockerfile + vulnerabilities)"
                     exit 0
                     ;;
-                scan)
+                check)
                     if [[ -f "Dockerfile" ]]; then
-                        validate_dockerfile_security "Dockerfile"
-                        echo ""
-                        scan_image_vulnerabilities "test-image"
+                        security_check "Dockerfile"
                     else
                         echo "❌ No Dockerfile found in current directory"
                         exit 1
                     fi
                     exit 0
                     ;;
-                validate)
-                    if [[ -f "Dockerfile" ]]; then
-                        validate_dockerfile_security "Dockerfile"
-                    else
-                        echo "❌ No Dockerfile found in current directory"
-                        exit 1
-                    fi
-                    exit 0
-                    ;;
-
-
                 *)
                     echo "❌ Error: Unknown security subcommand '$2'"
-                    echo "Available: scan, validate, trivy"
+                    echo "Available: check"
                     exit 1
                     ;;
             esac
@@ -408,7 +398,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, arch"
+            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, disk, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;

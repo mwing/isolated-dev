@@ -274,8 +274,7 @@ dev config validate               # Validate configuration files
 
 ### Security Commands
 ```bash
-dev security scan                 # Scan Dockerfile for security issues
-dev security validate             # Validate Dockerfile security best practices
+dev security check                # Comprehensive security check (Dockerfile + vulnerabilities)
 ```
 
 ### Template Management
@@ -347,6 +346,11 @@ port_health_timeout: 5                  # Timeout for port health checks (second
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 
+# Cache and performance settings
+cache_ttl: 86400                         # API cache TTL in seconds (default: 1 day)
+cache_max_size: 100                      # Max cache size in MB (default: 100MB)
+min_disk_space: 5                        # Minimum free disk space in GB (default: 5GB)
+
 # Environment variables to pass to containers
 pass_env_vars:
   # Patterns to match (supports wildcards with *)
@@ -391,6 +395,11 @@ DEV_PORT_HEALTH_TIMEOUT=10 dev                      # Custom health check timeou
 # Resource limit overrides
 DEV_MEMORY_LIMIT="512m" dev                         # Limit container memory
 DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
+
+# Cache and disk space overrides
+DEV_CACHE_TTL=3600 dev                              # Set cache TTL to 1 hour
+DEV_CACHE_MAX_SIZE=50 dev                           # Limit cache to 50MB
+DEV_MIN_DISK_SPACE=10 dev                           # Require 10GB free space
 ```
 
 ### Configuration Validation

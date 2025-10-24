@@ -119,6 +119,19 @@ function prepare_and_run_container() {
     local ready_msg="✅ Connecting to container"
     local cmd_args=""
     
+    # Validate container name and tag before proceeding
+    if [[ -n "$CUSTOM_NAME" ]]; then
+        if ! validate_container_name "$CUSTOM_NAME"; then
+            exit 1
+        fi
+    fi
+    
+    if [[ -n "$CUSTOM_TAG" ]]; then
+        if ! validate_tag_name "$CUSTOM_TAG"; then
+            exit 1
+        fi
+    fi
+    
     if [[ "$command" == "shell" ]]; then
         action_msg="🐚 Opening interactive shell"
         ready_msg="✅ Container ready"
