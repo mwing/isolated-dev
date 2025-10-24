@@ -316,20 +316,8 @@ function track_template_usage() {
     mv "$temp_file" "$usage_file"
 }
 
-function create_from_template() {
+function parse_language_version() {
     local language="$1"
-    local init_project="${2:-false}"
-    local platform="${3:-}"
-    local generate_devcontainer="${4:-false}"
-    local target_file="./Dockerfile"
-    
-    if [[ ! -d "$LANGUAGES_DIR" ]]; then
-        echo "❌ Error: Languages directory not found at $LANGUAGES_DIR"
-        echo "Please run the installer first."
-        exit 1
-    fi
-    
-    # Parse language and version from input (e.g., "python-3.13" -> "python" + "3.13")
     local base_lang="${language%%-*}"
     local version="${language#*-}"
     
@@ -338,17 +326,13 @@ function create_from_template() {
         version=""
     fi
     
-    # Check if language plugin exists
-    local language_dir="$LANGUAGES_DIR/$base_lang"
-    if [[ ! -d "$language_dir" ]]; then
-        echo "❌ Error: Language plugin not found: $base_lang"
-        echo "Available languages:"
-        ls "$LANGUAGES_DIR" 2>/dev/null | grep -v README.md || echo "  (none found)"
-        exit 1
-    fi
-    
-    # Get available versions from language.yaml
+    echo "$base_lang $version"
+}
+
+function get_available_versions() {
+    local language_dir="$1"
     local available_versions=()
+    
     if [[ -f "$language_dir/language.yaml" ]]; then
         local versions_line=$(grep "versions:" "$language_dir/language.yaml" | head -1)
         if [[ "$versions_line" =~ versions:[[:space:]]*\[(.*)\] ]]; then
@@ -361,28 +345,47 @@ function create_from_template() {
         fi
     fi
     
+    printf '%s\n' "${available_versions[@]}"
+}
+
+function resolve_template_version() {
+    local base_lang="$1"
+    local version="$2"
+    local language_dir="$3"
+    
+    local available_versions=()
+    while IFS= read -r v; do
+        [[ -n "$v" ]] && available_versions+=("$v")
+    done < <(get_available_versions "$language_dir")
+    
     # If no version specified and multiple available, prompt user
     if [[ -z "$version" && ${#available_versions[@]} -gt 1 ]]; then
-        echo "❌ Error: Multiple versions available for '$base_lang'."
-        echo "Please specify the version you want:"
-        echo ""
-        printf "  %-20s %s\\n" "Template Name" "Usage"
-        printf "  %-20s %s\\n" "-------------" "-----"
+        echo "❌ Error: Multiple versions available for '$base_lang'." >&2
+        echo "Please specify the version you want:" >&2
+        echo "" >&2
+        printf "  %-20s %s\\n" "Template Name" "Usage" >&2
+        printf "  %-20s %s\\n" "-------------" "-----" >&2
         for v in "${available_versions[@]}"; do
-            printf "  %-20s %s\\n" "$base_lang-$v" "dev new $base_lang-$v"
+            printf "  %-20s %s\\n" "$base_lang-$v" "dev new $base_lang-$v" >&2
         done
-        echo ""
-        echo "Tip: Set a default with 'dev config --edit' to skip this prompt."
+        echo "" >&2
+        echo "Tip: Set a default with 'dev config --edit' to skip this prompt." >&2
         exit 1
     elif [[ -z "$version" && ${#available_versions[@]} -eq 1 ]]; then
         version="${available_versions[0]}"
-        echo "📋 Using version: $base_lang-$version"
+        echo "📋 Using version: $base_lang-$version" >&2
     elif [[ -z "$version" ]]; then
-        echo "❌ Error: No versions defined for language: $base_lang"
+        echo "❌ Error: No versions defined for language: $base_lang" >&2
         exit 1
     else
-        echo "📋 Using template: $base_lang-$version"
+        echo "📋 Using template: $base_lang-$version" >&2
     fi
+    
+    echo "$version"
+}
+
+function check_dockerfile_overwrite() {
+    local target_file="$1"
     
     if [[ -f "$target_file" ]]; then
         echo "⚠️  Warning: Dockerfile already exists in current directory."
@@ -397,8 +400,40 @@ function create_from_template() {
             fi
         fi
     fi
+}
+
+function create_from_template() {
+    local language="$1"
+    local init_project="${2:-false}"
+    local platform="${3:-}"
+    local generate_devcontainer="${4:-false}"
+    local target_file="./Dockerfile"
     
-    # Generate Dockerfile directly from language plugin
+    if [[ ! -d "$LANGUAGES_DIR" ]]; then
+        echo "❌ Error: Languages directory not found at $LANGUAGES_DIR"
+        echo "Please run the installer first."
+        exit 1
+    fi
+    
+    # Parse language and version
+    read -r base_lang version <<< "$(parse_language_version "$language")"
+    
+    # Check if language plugin exists
+    local language_dir="$LANGUAGES_DIR/$base_lang"
+    if [[ ! -d "$language_dir" ]]; then
+        echo "❌ Error: Language plugin not found: $base_lang"
+        echo "Available languages:"
+        ls "$LANGUAGES_DIR" 2>/dev/null | grep -v README.md || echo "  (none found)"
+        exit 1
+    fi
+    
+    # Resolve version
+    version=$(resolve_template_version "$base_lang" "$version" "$language_dir")
+    
+    # Check for overwrite
+    check_dockerfile_overwrite "$target_file"
+    
+    # Generate Dockerfile
     if ! create_dockerfile_from_language_plugin "$base_lang" "$version" "$target_file" "$platform"; then
         echo "❌ Error: Failed to create Dockerfile from language plugin"
         exit 1

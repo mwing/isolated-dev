@@ -279,88 +279,61 @@ EOF
     fi
 }
 
-function handle_config_command() {
-    local subcommand="$1"
+function validate_all_configs() {
+    local exit_code=0
     
-    # Load configuration before processing commands
-    load_config
+    # Validate global config
+    if [[ -f "$GLOBAL_CONFIG" ]]; then
+        if ! validate_config "$GLOBAL_CONFIG"; then
+            exit_code=1
+        fi
+    else
+        echo "ℹ️  No global config found at $GLOBAL_CONFIG"
+    fi
     
-    case "${subcommand:-}" in
-        validate)
-            local config_to_validate="$GLOBAL_CONFIG"
-            local exit_code=0
-            
-            # Validate global config
-            if [[ -f "$GLOBAL_CONFIG" ]]; then
-                if ! validate_config "$GLOBAL_CONFIG"; then
-                    exit_code=1
-                fi
-            else
-                echo "ℹ️  No global config found at $GLOBAL_CONFIG"
+    # Validate project config if it exists
+    if [[ -f "$PROJECT_CONFIG" ]]; then
+        echo ""
+        if ! validate_config "$PROJECT_CONFIG"; then
+            exit_code=1
+        fi
+    fi
+    
+    show_env_overrides
+    exit $exit_code
+}
+
+function edit_global_config() {
+    create_default_config
+    if command -v code >/dev/null 2>&1; then
+        echo "📝 Opening config in VS Code..."
+        code "$GLOBAL_CONFIG"
+    elif command -v vim >/dev/null 2>&1; then
+        echo "📝 Opening config in vim..."
+        vim "$GLOBAL_CONFIG"
+    else
+        echo "📝 Edit your config file: $GLOBAL_CONFIG"
+    fi
+    exit 0
+}
+
+function init_project_config() {
+    if [[ -f "$PROJECT_CONFIG" ]]; then
+        echo "⚠️  Project config already exists: $PROJECT_CONFIG"
+        if [[ "$AUTO_YES" == "true" ]]; then
+            echo "Auto-confirming overwrite (--yes flag set)"
+        else
+            echo -n "Do you want to overwrite it? (y/N): "
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                echo "Operation cancelled."
+                exit 0
             fi
-            
-            # Validate project config if it exists
-            if [[ -f "$PROJECT_CONFIG" ]]; then
-                echo ""
-                if ! validate_config "$PROJECT_CONFIG"; then
-                    exit_code=1
-                fi
-            fi
-            
-            # Show environment variable overrides
-            local env_overrides=()
-            [[ -n "${DEV_VM_NAME:-}" ]] && env_overrides+=("DEV_VM_NAME=$DEV_VM_NAME")
-            [[ -n "${DEV_DEFAULT_TEMPLATE:-}" ]] && env_overrides+=("DEV_DEFAULT_TEMPLATE=$DEV_DEFAULT_TEMPLATE")
-            [[ -n "${DEV_AUTO_START_VM:-}" ]] && env_overrides+=("DEV_AUTO_START_VM=$DEV_AUTO_START_VM")
-            [[ -n "${DEV_CONTAINER_PREFIX:-}" ]] && env_overrides+=("DEV_CONTAINER_PREFIX=$DEV_CONTAINER_PREFIX")
-            [[ -n "${DEV_NETWORK_MODE:-}" ]] && env_overrides+=("DEV_NETWORK_MODE=$DEV_NETWORK_MODE")
-            [[ -n "${DEV_AUTO_HOST_NETWORKING:-}" ]] && env_overrides+=("DEV_AUTO_HOST_NETWORKING=$DEV_AUTO_HOST_NETWORKING")
-            [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE=$DEV_PORT_RANGE")
-            [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK=$DEV_ENABLE_PORT_HEALTH_CHECK")
-            [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT=$DEV_PORT_HEALTH_TIMEOUT")
-            [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT=$DEV_MEMORY_LIMIT")
-            [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT=$DEV_CPU_LIMIT")
-            
-            if [[ ${#env_overrides[@]} -gt 0 ]]; then
-                echo ""
-                echo "🌍 Environment variable overrides:"
-                for override in "${env_overrides[@]}"; do
-                    echo "   $override"
-                done
-            fi
-            
-            exit $exit_code
-            ;;
-        --edit)
-            create_default_config
-            if command -v code >/dev/null 2>&1; then
-                echo "📝 Opening config in VS Code..."
-                code "$GLOBAL_CONFIG"
-            elif command -v vim >/dev/null 2>&1; then
-                echo "📝 Opening config in vim..."
-                vim "$GLOBAL_CONFIG"
-            else
-                echo "📝 Edit your config file: $GLOBAL_CONFIG"
-            fi
-            exit 0
-            ;;
-        --init)
-            if [[ -f "$PROJECT_CONFIG" ]]; then
-                echo "⚠️  Project config already exists: $PROJECT_CONFIG"
-                if [[ "$AUTO_YES" == "true" ]]; then
-                    echo "Auto-confirming overwrite (--yes flag set)"
-                else
-                    echo -n "Do you want to overwrite it? (y/N): "
-                    read -r response
-                    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-                        echo "Operation cancelled."
-                        exit 0
-                    fi
-                fi
-            fi
-            
-            local project_name=$(basename "$(pwd)")
-            cat > "$PROJECT_CONFIG" << EOF
+        fi
+    fi
+    
+    local project_name=$(basename "$(pwd)")
+    cat > "$PROJECT_CONFIG" << EOF
 # Project-specific configuration for $project_name
 # This file overrides global settings for this project only
 
@@ -384,60 +357,95 @@ function handle_config_command() {
 # memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
 # cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")
 EOF
-            echo "✅ Created project config: $PROJECT_CONFIG"
-            echo "   Edit this file to customize settings for this project."
-            exit 0
-            ;;
-        "")
-            # Show current configuration when no subcommand provided
-            create_default_config
-            
-            echo "📋 Current Configuration:"
-            echo "  Global config: $GLOBAL_CONFIG"
-            if [[ -f "$PROJECT_CONFIG" ]]; then
-                echo "  Project config: $PROJECT_CONFIG (active)"
-            else
-                echo "  Project config: none"
-            fi
-            echo ""
-            echo "  VM Name: $VM_NAME"
-            echo "  Default Template: ${DEFAULT_TEMPLATE:-"(prompt for selection)"}"
-            echo "  Auto Start VM: $AUTO_START_VM"
-            echo "  Container Prefix: $CONTAINER_PREFIX"
-            echo "  Network Mode: $NETWORK_MODE"
-            echo "  Auto Host Networking: $AUTO_HOST_NETWORKING"
-            echo "  Port Range: $PORT_RANGE"
-            echo "  Port Health Check: $ENABLE_PORT_HEALTH_CHECK"
-            echo "  Port Health Timeout: ${PORT_HEALTH_TIMEOUT}s"
-            echo "  Memory Limit: ${MEMORY_LIMIT:-"(none)"}"
-            echo "  CPU Limit: ${CPU_LIMIT:-"(none)"}"
-            
-            # Show environment variable overrides if any
-            local env_overrides=()
-            [[ -n "${DEV_VM_NAME:-}" ]] && env_overrides+=("DEV_VM_NAME")
-            [[ -n "${DEV_DEFAULT_TEMPLATE:-}" ]] && env_overrides+=("DEV_DEFAULT_TEMPLATE")
-            [[ -n "${DEV_AUTO_START_VM:-}" ]] && env_overrides+=("DEV_AUTO_START_VM")
-            [[ -n "${DEV_CONTAINER_PREFIX:-}" ]] && env_overrides+=("DEV_CONTAINER_PREFIX")
-            [[ -n "${DEV_NETWORK_MODE:-}" ]] && env_overrides+=("DEV_NETWORK_MODE")
-            [[ -n "${DEV_AUTO_HOST_NETWORKING:-}" ]] && env_overrides+=("DEV_AUTO_HOST_NETWORKING")
-            [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE")
-            [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK")
-            [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT")
-            [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT")
-            [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
-            
-            if [[ ${#env_overrides[@]} -gt 0 ]]; then
-                echo ""
-                echo "🌍 Environment overrides active: ${env_overrides[*]}"
-            fi
-            
-            echo ""
-            echo "Commands:"
-            echo "  dev config --edit      Edit global configuration"
-            echo "  dev config --init      Create project configuration"
-            echo "  dev config validate    Validate configuration files"
-            exit 0
-            ;;
+    echo "✅ Created project config: $PROJECT_CONFIG"
+    echo "   Edit this file to customize settings for this project."
+    exit 0
+}
+
+function show_env_overrides() {
+    local env_overrides=()
+    [[ -n "${DEV_VM_NAME:-}" ]] && env_overrides+=("DEV_VM_NAME=$DEV_VM_NAME")
+    [[ -n "${DEV_DEFAULT_TEMPLATE:-}" ]] && env_overrides+=("DEV_DEFAULT_TEMPLATE=$DEV_DEFAULT_TEMPLATE")
+    [[ -n "${DEV_AUTO_START_VM:-}" ]] && env_overrides+=("DEV_AUTO_START_VM=$DEV_AUTO_START_VM")
+    [[ -n "${DEV_CONTAINER_PREFIX:-}" ]] && env_overrides+=("DEV_CONTAINER_PREFIX=$DEV_CONTAINER_PREFIX")
+    [[ -n "${DEV_NETWORK_MODE:-}" ]] && env_overrides+=("DEV_NETWORK_MODE=$DEV_NETWORK_MODE")
+    [[ -n "${DEV_AUTO_HOST_NETWORKING:-}" ]] && env_overrides+=("DEV_AUTO_HOST_NETWORKING=$DEV_AUTO_HOST_NETWORKING")
+    [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE=$DEV_PORT_RANGE")
+    [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK=$DEV_ENABLE_PORT_HEALTH_CHECK")
+    [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT=$DEV_PORT_HEALTH_TIMEOUT")
+    [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT=$DEV_MEMORY_LIMIT")
+    [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT=$DEV_CPU_LIMIT")
+    
+    if [[ ${#env_overrides[@]} -gt 0 ]]; then
+        echo ""
+        echo "🌍 Environment variable overrides:"
+        for override in "${env_overrides[@]}"; do
+            echo "   $override"
+        done
+    fi
+}
+
+function show_current_config() {
+    create_default_config
+    
+    echo "📋 Current Configuration:"
+    echo "  Global config: $GLOBAL_CONFIG"
+    if [[ -f "$PROJECT_CONFIG" ]]; then
+        echo "  Project config: $PROJECT_CONFIG (active)"
+    else
+        echo "  Project config: none"
+    fi
+    echo ""
+    echo "  VM Name: $VM_NAME"
+    echo "  Default Template: ${DEFAULT_TEMPLATE:-"(prompt for selection)"}"
+    echo "  Auto Start VM: $AUTO_START_VM"
+    echo "  Container Prefix: $CONTAINER_PREFIX"
+    echo "  Network Mode: $NETWORK_MODE"
+    echo "  Auto Host Networking: $AUTO_HOST_NETWORKING"
+    echo "  Port Range: $PORT_RANGE"
+    echo "  Port Health Check: $ENABLE_PORT_HEALTH_CHECK"
+    echo "  Port Health Timeout: ${PORT_HEALTH_TIMEOUT}s"
+    echo "  Memory Limit: ${MEMORY_LIMIT:-"(none)"}"
+    echo "  CPU Limit: ${CPU_LIMIT:-"(none)"}"
+    
+    # Show environment variable overrides if any
+    local env_overrides=()
+    [[ -n "${DEV_VM_NAME:-}" ]] && env_overrides+=("DEV_VM_NAME")
+    [[ -n "${DEV_DEFAULT_TEMPLATE:-}" ]] && env_overrides+=("DEV_DEFAULT_TEMPLATE")
+    [[ -n "${DEV_AUTO_START_VM:-}" ]] && env_overrides+=("DEV_AUTO_START_VM")
+    [[ -n "${DEV_CONTAINER_PREFIX:-}" ]] && env_overrides+=("DEV_CONTAINER_PREFIX")
+    [[ -n "${DEV_NETWORK_MODE:-}" ]] && env_overrides+=("DEV_NETWORK_MODE")
+    [[ -n "${DEV_AUTO_HOST_NETWORKING:-}" ]] && env_overrides+=("DEV_AUTO_HOST_NETWORKING")
+    [[ -n "${DEV_PORT_RANGE:-}" ]] && env_overrides+=("DEV_PORT_RANGE")
+    [[ -n "${DEV_ENABLE_PORT_HEALTH_CHECK:-}" ]] && env_overrides+=("DEV_ENABLE_PORT_HEALTH_CHECK")
+    [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT")
+    [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT")
+    [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
+    
+    if [[ ${#env_overrides[@]} -gt 0 ]]; then
+        echo ""
+        echo "🌍 Environment overrides active: ${env_overrides[*]}"
+    fi
+    
+    echo ""
+    echo "Commands:"
+    echo "  dev config --edit      Edit global configuration"
+    echo "  dev config --init      Create project configuration"
+    echo "  dev config validate    Validate configuration files"
+    exit 0
+}
+
+function handle_config_command() {
+    local subcommand="$1"
+    
+    # Load configuration before processing commands
+    load_config
+    
+    case "${subcommand:-}" in
+        validate) validate_all_configs ;;
+        --edit) edit_global_config ;;
+        --init) init_project_config ;;
+        "") show_current_config ;;
         *)
             echo "❌ Error: Unknown config subcommand '$subcommand'"
             echo "Available subcommands: --edit, --init, validate"
