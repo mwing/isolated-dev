@@ -10,8 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     vim \
     curl \
+    less \
     shellcheck \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional: Uncomment to enable sudo for development tasks
+# RUN apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/* && \
+#     echo 'appuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Set working directory and change ownership
 WORKDIR /workspace

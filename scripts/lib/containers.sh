@@ -60,12 +60,10 @@ function detect_common_ports() {
         ports+=(8080 8000 9000)
     fi
     
-    # Remove duplicates using associative array
-    declare -A unique_ports
-    for port in "${ports[@]}"; do
-        unique_ports["$port"]=1
-    done
-    echo "${!unique_ports[@]}"
+    # Remove duplicates using sort and uniq
+    if [[ ${#ports[@]} -gt 0 ]]; then
+        printf '%s\n' "${ports[@]}" | sort -u | tr '\n' ' '
+    fi
 }
 
 function get_ssh_key_mounts() {
@@ -137,6 +135,12 @@ function prepare_and_run_container() {
     volume_mounts=$(get_common_volume_mounts)
     ssh_mounts=$(get_ssh_key_mounts)
     port_forwards=$(build_port_forwards)
+    env_forwards=$(get_env_forwards)
+    
+    if [[ -n "$env_forwards" ]]; then
+        echo "🔐 Passing environment variables to container" >&2
+    fi
+    
     security_flags=$(get_security_flags)
     resource_limits=$(get_resource_limits)
     
@@ -156,25 +160,105 @@ function prepare_and_run_container() {
     echo "$ready_msg. Your project folder is at '/workspace'."
     
     # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
-    orb -m "$VM_NAME" sudo docker run -it --rm \
+    if ! orb -m "$VM_NAME" sudo docker run -it --rm \
         $security_flags \
         $volume_mounts \
         $ssh_mounts \
         $port_forwards \
+        $env_forwards \
         $resource_limits \
         --name "$CONTAINER_NAME" \
-        "$IMAGE_NAME" $cmd_args
+        "$IMAGE_NAME" $cmd_args; then
+        
+        # Check if it was a port conflict
+        if orb -m "$VM_NAME" sudo docker logs "$CONTAINER_NAME" 2>&1 | grep -q "port is already allocated"; then
+            echo ""
+            echo "❌ Error: Port conflict detected"
+            echo "   One or more ports are already in use on your system."
+            echo ""
+            echo "   Solutions:"
+            echo "   1. Stop the conflicting service using the port"
+            echo "   2. Find what's using the port: lsof -i :<port>"
+            echo "   3. Manually specify different ports in your Dockerfile"
+            echo "   4. Use host networking: DEV_NETWORK_MODE=host dev"
+        fi
+        exit 1
+    fi
+}
+
+function check_port_available() {
+    local port="$1"
+    if lsof -Pi :"$port" -sTCP:LISTEN -t >/dev/null 2>&1 ; then
+        return 1
+    fi
+    return 0
+}
+
+function get_env_forwards() {
+    local env_args=""
+    
+    # Get patterns from config
+    local patterns=$(get_config_array "pass_env_vars.patterns")
+    local explicit=$(get_config_array "pass_env_vars.explicit")
+    
+    # Process pattern-based variables
+    if [[ -n "$patterns" ]]; then
+        while IFS= read -r pattern; do
+            [[ -z "$pattern" ]] && continue
+            
+            # Handle wildcard patterns
+            if [[ "$pattern" == *"*" ]]; then
+                local prefix="${pattern%\*}"
+                while IFS='=' read -r var _; do
+                    [[ "$var" == "$prefix"* ]] || continue
+                    local value="${!var}"
+                    [[ -z "$value" ]] && continue
+                    env_args="$env_args -e $var='$value'"
+                done < <(env)
+            else
+                # Exact match - check if variable is set
+                if [[ -n "${!pattern:-}" ]]; then
+                    local value="${!pattern}"
+                    env_args="$env_args -e $pattern='$value'"
+                fi
+            fi
+        done <<< "$patterns"
+    fi
+    
+    # Process explicit variables
+    if [[ -n "$explicit" ]]; then
+        while IFS= read -r var; do
+            [[ -z "$var" ]] && continue
+            if [[ -n "${!var:-}" ]]; then
+                local value="${!var}"
+                env_args="$env_args -e $var='$value'"
+            fi
+        done <<< "$explicit"
+    fi
+    
+    echo "$env_args"
 }
 
 function build_port_forwards() {
     local ports=($(detect_common_ports))
     local port_args=""
+    local unavailable_ports=()
     
     if [[ ${#ports[@]} -gt 0 ]]; then
         echo "🔌 Detected common development ports: ${ports[*]}" >&2
+        
         for port in "${ports[@]}"; do
-            port_args="$port_args -p $port:$port"
+            if check_port_available "$port"; then
+                port_args="$port_args -p $port:$port"
+            else
+                unavailable_ports+=("$port")
+            fi
         done
+        
+        if [[ ${#unavailable_ports[@]} -gt 0 ]]; then
+            echo "⚠️  Warning: Ports already in use (skipped): ${unavailable_ports[*]}" >&2
+            echo "   To use these ports, stop the conflicting services or use different ports" >&2
+        fi
     fi
     
     echo "$port_args"

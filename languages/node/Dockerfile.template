@@ -8,7 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     vim \
     curl \
+    less \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional: Uncomment to enable sudo for development tasks
+# RUN apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/* && \
+#     echo 'node ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Set working directory and change ownership
 WORKDIR /workspace
@@ -16,6 +21,11 @@ RUN chown -R node:node /workspace
 
 # Switch to non-root user
 USER node
+
+# Configure npm to use user directory for global packages
+RUN mkdir -p /home/node/.npm-global && \
+    npm config set prefix '/home/node/.npm-global'
+ENV PATH=/home/node/.npm-global/bin:$PATH
 
 # Copy package files if they exist
 COPY --chown=node:node package*.json ./

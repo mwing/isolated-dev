@@ -9,12 +9,17 @@ RUN apk add --no-cache \
     git \
     vim \
     curl \
+    less \
     zip \
     unzip \
     libzip-dev \
     icu-dev \
     oniguruma-dev \
     && docker-php-ext-install zip intl mbstring
+
+# Optional: Uncomment to enable sudo for development tasks
+# RUN apk add --no-cache sudo && \
+#     echo 'appuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Install Composer
 RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer

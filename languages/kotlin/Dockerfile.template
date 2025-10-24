@@ -8,9 +8,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     vim \
+    less \
     wget \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional: Uncomment to enable sudo for development tasks
+# RUN apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/* && \
+#     echo 'appuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Install Kotlin compiler
 RUN curl -s https://get.sdkman.io | bash && \

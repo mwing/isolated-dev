@@ -309,6 +309,18 @@ auto_start_vm: true
 
 # Prefix for container and image names
 container_prefix: dev
+
+# Environment variables to pass to containers
+pass_env_vars:
+  # Patterns to match (supports wildcards with *)
+  patterns:
+    - AWS_*
+    - SNYK_*
+    - GITHUB_*
+    - NODE_ENV
+    - DEBUG
+  # Explicit variable names (no wildcards)
+  explicit: []
 EOF
     log "   -> Created global config: $GLOBAL_CONFIG"
 else
