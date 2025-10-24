@@ -628,16 +628,21 @@ Contributions are welcome! To ensure code quality and functionality:
 
 ### Running Tests
 ```bash
-# Run the full test suite
+# Run all tests
 ./test.sh
 
-# Run specific test categories
-./test.sh config    # Configuration tests
-./test.sh template  # Template tests
-./test.sh security  # Security tests
+# In CI environments (automatically skips OrbStack-dependent tests)
+CI=true ./test.sh
 ```
 
-Tests validate core functionality, configuration handling, template generation, and security features. Please run tests before submitting pull requests.
+**Test Coverage:**
+- Configuration system (YAML parsing, precedence, validation)
+- Environment variable passing (patterns, special characters, files)
+- Template generation and project detection
+- Security validation
+- Error handling
+
+Tests automatically skip OrbStack-dependent tests when `CI=true` is set. Please run tests before submitting pull requests.
 
 ### Adding Language Support
 

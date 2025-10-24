@@ -1,0 +1,22 @@
+# Project-specific configuration for isolated-dev
+# This file overrides global settings for this project only
+
+# VM name for this project (optional)
+# vm_name: dev-vm-isolated-dev
+
+# Default template for this project (optional)
+default_template: ubuntu-24.04
+
+# Container prefix for this project (optional)
+container_prefix: isolated-dev
+
+# Network configuration (optional)
+network_mode: host                  # bridge, host, none, or custom network
+# auto_host_networking: false       # Auto-use host networking
+# port_range: "3000-9000"           # Custom port range
+enable_port_health_check: false     # Enable port health checks
+# port_health_timeout: 5            # Port check timeout (seconds)
+
+# Resource limits (optional)
+# memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
+# cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")
