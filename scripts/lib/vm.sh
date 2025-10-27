@@ -4,6 +4,10 @@
 # VM MANAGEMENT FUNCTIONS
 # ==============================================================================
 
+# Source constants
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/constants.sh"
+
 function handle_env_command() {
     local env_command="$1"
     local env_name="$2"
@@ -23,7 +27,7 @@ function handle_env_command() {
         esac
     done
     
-    local setup_dir="$HOME/.dev-envs/setups"
+    local setup_dir="$DEV_HOME/setups"
     
     case "$env_command" in
         new|up|down|rm|status)

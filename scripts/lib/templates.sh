@@ -4,6 +4,10 @@
 # TEMPLATE OPERATIONS AND VERSION DETECTION
 # ==============================================================================
 
+# Source constants
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/constants.sh"
+
 function create_dockerfile_from_language_plugin() {
     local language="$1"
     local version="$2"
@@ -97,7 +101,7 @@ function copy_scaffolding_files_from_plugin() {
 
 function get_cached_api_response() {
     local cache_key="$1"
-    local cache_file="$HOME/.dev-envs/cache/$cache_key"
+    local cache_file="$DEV_CACHE_DIR/$cache_key"
     local cache_ttl="${DEV_CACHE_TTL:-$(get_config_value "cache_ttl")}"
     cache_ttl="${cache_ttl:-86400}"  # Default 1 day
     
@@ -114,16 +118,15 @@ function get_cached_api_response() {
 function cache_api_response() {
     local cache_key="$1"
     local response="$2"
-    local cache_dir="$HOME/.dev-envs/cache"
-    mkdir -p "$cache_dir"
-    echo "$response" > "$cache_dir/$cache_key"
+    mkdir -p "$DEV_CACHE_DIR"
+    echo "$response" > "$DEV_CACHE_DIR/$cache_key"
     
     # Check cache size and suggest cleanup if needed
     check_cache_size_and_suggest_cleanup
 }
 
 function check_cache_size_and_suggest_cleanup() {
-    local cache_dir="$HOME/.dev-envs/cache"
+    local cache_dir="$DEV_CACHE_DIR"
     local max_size="${DEV_CACHE_MAX_SIZE:-$(get_config_value "cache_max_size")}"
     max_size="${max_size:-100}"  # Default 100MB
     
@@ -142,7 +145,7 @@ function check_cache_size_and_suggest_cleanup() {
 }
 
 function clear_cache() {
-    local cache_dir="$HOME/.dev-envs/cache"
+    local cache_dir="$DEV_CACHE_DIR"
     if [[ -d "$cache_dir" ]]; then
         rm -rf "$cache_dir"/*
         echo "🧹 Cache cleared"
@@ -329,7 +332,7 @@ function update_templates() {
 
 function track_template_usage() {
     local template_name="$1"
-    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local usage_file="$DEV_HOME/template_usage.log"
     local timestamp=$(date +%s)
     
     # Create usage directory if it doesn't exist
@@ -601,7 +604,7 @@ function show_template_stats() {
     echo "📊 Language Plugin Statistics"
     echo ""
     
-    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local usage_file="$DEV_HOME/template_usage.log"
     
     if [[ ! -d "$LANGUAGES_DIR" ]]; then
         echo "❌ Languages directory not found: $LANGUAGES_DIR"
@@ -715,7 +718,7 @@ function prune_old_templates() {
     echo ""
     echo "📋 Available language plugins:"
     
-    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local usage_file="$DEV_HOME/template_usage.log"
     local plugin_count=0
     
     for lang_dir in "$LANGUAGES_DIR"/*; do
@@ -753,7 +756,7 @@ function cleanup_unused_templates() {
     echo "🧹 Usage Log Cleanup (removing entries older than $days days)"
     echo ""
     
-    local usage_file="$HOME/.dev-envs/template_usage.log"
+    local usage_file="$DEV_HOME/template_usage.log"
     local current_date=$(date +%s)
     local threshold_date=$((current_date - days * 86400))
     

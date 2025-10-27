@@ -4,6 +4,10 @@
 # UTILITY FUNCTIONS
 # ==============================================================================
 
+# Source constants
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/constants.sh"
+
 function detect_architecture() {
     local arch=$(uname -m)
     case "$arch" in
@@ -80,7 +84,7 @@ function show_disk_usage() {
     fi
     
     # Show cache usage
-    local cache_dir="$HOME/.dev-envs/cache"
+    local cache_dir="$DEV_CACHE_DIR"
     if [[ -d "$cache_dir" ]]; then
         echo ""
         echo "🗂️  Template cache usage:"

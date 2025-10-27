@@ -533,7 +533,7 @@ EOF
     
     # Test network configuration validation with invalid values
     cat > .devenv.yaml << 'EOF'
-network_mode: invalid_mode
+network_mode: invalid@mode!
 port_range: "not-a-range"
 port_health_timeout: not_a_number
 EOF

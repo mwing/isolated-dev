@@ -4,25 +4,30 @@
 # CONFIGURATION
 # ==============================================================================
 
-# shellcheck disable=SC2034  # Used in sourced files
-export CONFIG_DIR="$HOME/.dev-envs"
-GLOBAL_CONFIG="$CONFIG_DIR/config.yaml"
-PROJECT_CONFIG=".devenv.yaml"
-
-# Language plugins directory (installed by install.sh)
-LANGUAGES_DIR="$HOME/.dev-envs/languages"
-
 # Get script directory for sourcing libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Source constants first to get centralized paths
+LIB_DIR="$SCRIPT_DIR/lib"
+source "$LIB_DIR/constants.sh"
+
+# Set paths from constants
+# shellcheck disable=SC2034  # Used in sourced files
+export CONFIG_DIR="$DEV_CONFIG_DIR"
+GLOBAL_CONFIG="$DEV_GLOBAL_CONFIG"
+PROJECT_CONFIG="$DEV_PROJECT_CONFIG"
+LANGUAGES_DIR="$DEV_LANGUAGES_DIR"
+TEMPLATES_DIR="$DEV_TEMPLATES_DIR"
+CACHE_DIR="$DEV_CACHE_DIR"
+
 # Source library modules
-source "$SCRIPT_DIR/lib/utils.sh"
-source "$SCRIPT_DIR/lib/config.sh"
-source "$SCRIPT_DIR/lib/vm.sh"
-source "$SCRIPT_DIR/lib/containers.sh"
-source "$SCRIPT_DIR/lib/templates.sh"
-source "$SCRIPT_DIR/lib/languages.sh"
-source "$SCRIPT_DIR/lib/security.sh"
+source "$LIB_DIR/utils.sh"
+source "$LIB_DIR/config.sh"
+source "$LIB_DIR/vm.sh"
+source "$LIB_DIR/containers.sh"
+source "$LIB_DIR/templates.sh"
+source "$LIB_DIR/languages.sh"
+source "$LIB_DIR/security.sh"
 
 
 
