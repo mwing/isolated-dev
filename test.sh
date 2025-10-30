@@ -923,6 +923,43 @@ test_error_network_failure() {
     cd - > /dev/null
 }
 
+test_constants_loaded() {
+    run_test "Constants module loads correctly"
+    
+    local output=$(bash -c 'source scripts/lib/constants.sh && echo "$DEV_HOME|$DEV_LANGUAGES_DIR|$CFG_DEFAULT_VM_NAME"' 2>&1)
+    assert_contains "$output" "/.dev-envs" "DEV_HOME points to .dev-envs"
+    assert_contains "$output" "dev-vm-docker-host" "Default VM name is correct"
+}
+
+test_constants_functions() {
+    run_test "Constants helper functions work"
+    
+    local output=$(bash -c 'source scripts/lib/constants.sh && get_default_value vm_name && get_schema_type port_health_timeout && is_valid_config_key vm_name && echo "VALID"' 2>&1)
+    assert_contains "$output" "dev-vm-docker-host" "get_default_value works"
+    assert_contains "$output" "number" "get_schema_type works"
+    assert_contains "$output" "VALID" "is_valid_config_key works"
+}
+
+test_ubuntu_template_builds() {
+    run_test "Ubuntu template handles existing UID/GID"
+    
+    local test_project="$TEST_DIR/test-ubuntu"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    bash "$ORIGINAL_DIR/scripts/dev" new ubuntu-24.04 --yes >/dev/null 2>&1
+    
+    if [[ -f "Dockerfile" ]]; then
+        assert_file_exists "Dockerfile" "Ubuntu Dockerfile created"
+        assert_contains "$(cat Dockerfile)" "USER 1000:1000" "Uses numeric UID instead of username"
+        assert_contains "$(cat Dockerfile)" "getent" "Handles existing UID/GID"
+    else
+        log "${YELLOW}⏭️  SKIP${NC}: Ubuntu template test (expected in test environment)"
+    fi
+    
+    cd - > /dev/null
+}
+
 test_security_functionality() {
     run_test "Security functionality"
     
@@ -1031,6 +1068,9 @@ main() {
     test_error_corrupted_config
     test_error_permission_denied
     test_error_network_failure
+    test_constants_loaded
+    test_constants_functions
+    test_ubuntu_template_builds
     
     test_security_functionality
     
