@@ -4,6 +4,9 @@
 # SECURITY FUNCTIONS
 # ==============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/constants.sh"
+
 function validate_container_name() {
     local name="$1"
     if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
