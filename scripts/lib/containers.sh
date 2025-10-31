@@ -4,6 +4,9 @@
 # CONTAINER OPERATIONS
 # ==============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/constants.sh"
+
 function detect_common_ports() {
     local ports=()
     
@@ -92,7 +95,7 @@ function get_common_volume_mounts() {
     # Mount git configuration only if enabled and it exists
     if [[ "$MOUNT_GIT_CONFIG" == "true" ]] && [[ -f "$HOME/.gitconfig" ]]; then
         # Create filtered .gitconfig (remove GPG signing for container compatibility)
-        local temp_dir="$HOME/.dev-envs/tmp"
+        local temp_dir="${DEV_CONFIG_DIR}/tmp"
         mkdir -p "$temp_dir"
         local temp_gitconfig="$temp_dir/gitconfig.$$"
         # Remove gpgsign and gpg.program lines
