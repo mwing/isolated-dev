@@ -17,6 +17,9 @@ network_mode: host                  # bridge, host, none, or custom network
 enable_port_health_check: false     # Enable port health checks
 # port_health_timeout: 5            # Port check timeout (seconds)
 
+mount_ssh_keys: true                  
+mount_git_config: true 
+
 # Resource limits (optional)
 # memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
 # cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")

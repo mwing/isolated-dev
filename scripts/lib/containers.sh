@@ -77,6 +77,12 @@ function get_ssh_key_mounts() {
     echo "$ssh_mounts"
 }
 
+function get_gpg_mounts() {
+    # GPG agent forwarding is complex and often doesn't work in containers
+    # For now, we disable it and let users commit without signing in containers
+    echo ""
+}
+
 function get_common_volume_mounts() {
     local volumes=""
     
@@ -85,7 +91,13 @@ function get_common_volume_mounts() {
     
     # Mount git configuration only if enabled and it exists
     if [[ "$MOUNT_GIT_CONFIG" == "true" ]] && [[ -f "$HOME/.gitconfig" ]]; then
-        volumes="$volumes -v $HOME/.gitconfig:/home/appuser/.gitconfig:ro"
+        # Create filtered .gitconfig (remove GPG signing for container compatibility)
+        local temp_dir="$HOME/.dev-envs/tmp"
+        mkdir -p "$temp_dir"
+        local temp_gitconfig="$temp_dir/gitconfig.$$"
+        # Remove gpgsign and gpg.program lines
+        grep -v "gpgsign" "$HOME/.gitconfig" | grep -v "gpg.program" > "$temp_gitconfig"
+        volumes="$volumes -v $temp_gitconfig:/home/appuser/.gitconfig:ro"
     fi
     
     # Mount Docker socket for Docker-in-Docker development (with warning)
@@ -147,6 +159,7 @@ function prepare_and_run_container() {
     # Build enhanced container options
     volume_mounts=$(get_common_volume_mounts)
     ssh_mounts=$(get_ssh_key_mounts)
+    gpg_mounts=$(get_gpg_mounts)
     port_forwards=$(build_port_forwards)
     env_forwards=$(get_env_forwards)
     
@@ -167,6 +180,9 @@ function prepare_and_run_container() {
     if [[ "$MOUNT_GIT_CONFIG" == "true" ]] && [[ -f "$HOME/.gitconfig" ]]; then
         echo "   -> Git configuration mounted for consistent commits"
     fi
+    if [[ -n "$gpg_mounts" ]]; then
+        echo "   -> GPG agent forwarded for commit signing"
+    fi
     echo "   -> Security hardening enabled (non-root user, limited capabilities)"
     if [[ -n "$resource_limits" ]]; then
         echo "   -> Resource limits applied: $resource_limits"
@@ -179,6 +195,7 @@ function prepare_and_run_container() {
         $security_flags \
         $volume_mounts \
         $ssh_mounts \
+        $gpg_mounts \
         $port_forwards \
         $env_forwards \
         $resource_limits \
