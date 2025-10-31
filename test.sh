@@ -960,6 +960,80 @@ test_ubuntu_template_builds() {
     cd - > /dev/null
 }
 
+test_mount_config_options() {
+    run_test "File mounting configuration options"
+    
+    local test_project="$TEST_DIR/test-mount-config"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test default values (should be false)
+    local config_output=$(bash "$ORIGINAL_DIR/scripts/dev" config 2>&1)
+    assert_contains "$config_output" "Mount SSH Keys: false" "SSH keys disabled by default"
+    assert_contains "$config_output" "Mount Git Config: false" "Git config disabled by default"
+    
+    # Test enabling in project config
+    cat > .devenv.yaml << 'EOF'
+mount_ssh_keys: true
+mount_git_config: true
+EOF
+    
+    local enabled_output=$(bash "$ORIGINAL_DIR/scripts/dev" config 2>&1)
+    assert_contains "$enabled_output" "Mount SSH Keys: true" "SSH keys can be enabled"
+    assert_contains "$enabled_output" "Mount Git Config: true" "Git config can be enabled"
+    
+    # Test validation
+    local validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    assert_contains "$validation" "valid" "Mount config validates correctly"
+    
+    cd - > /dev/null
+}
+
+test_mount_env_overrides() {
+    run_test "File mounting environment overrides"
+    
+    local test_project="$TEST_DIR/test-mount-env"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test environment variable overrides
+    local override_output=$(DEV_MOUNT_SSH_KEYS=true DEV_MOUNT_GIT_CONFIG=true bash "$ORIGINAL_DIR/scripts/dev" config 2>&1)
+    assert_contains "$override_output" "Mount SSH Keys: true" "SSH keys override works"
+    assert_contains "$override_output" "Mount Git Config: true" "Git config override works"
+    assert_contains "$override_output" "DEV_MOUNT_SSH_KEYS" "Shows SSH keys override in active list"
+    assert_contains "$override_output" "DEV_MOUNT_GIT_CONFIG" "Shows git config override in active list"
+    
+    cd - > /dev/null
+}
+
+test_mount_conditional_logic() {
+    run_test "File mounting conditional logic"
+    
+    local test_project="$TEST_DIR/test-mount-logic"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Test with mounting disabled (default)
+    MOUNT_SSH_KEYS="false"
+    MOUNT_GIT_CONFIG="false"
+    local no_mounts=$(get_ssh_key_mounts)
+    assert_equals "" "$no_mounts" "No SSH mounts when disabled"
+    
+    # Test with mounting enabled
+    MOUNT_SSH_KEYS="true"
+    local with_ssh=$(get_ssh_key_mounts)
+    if [[ -d "$HOME/.ssh" ]]; then
+        assert_contains "$with_ssh" ".ssh" "SSH keys mounted when enabled"
+    else
+        assert_equals "" "$with_ssh" "No SSH mount if directory doesn't exist"
+    fi
+    
+    cd - > /dev/null
+}
+
 test_security_functionality() {
     run_test "Security functionality"
     
@@ -1071,6 +1145,9 @@ main() {
     test_constants_loaded
     test_constants_functions
     test_ubuntu_template_builds
+    test_mount_config_options
+    test_mount_env_overrides
+    test_mount_conditional_logic
     
     test_security_functionality
     

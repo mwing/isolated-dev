@@ -32,11 +32,13 @@ readonly CFG_DEFAULT_CPU_LIMIT=""
 readonly CFG_DEFAULT_CACHE_TTL="86400"
 readonly CFG_DEFAULT_CACHE_MAX_SIZE="100"
 readonly CFG_DEFAULT_MIN_DISK_SPACE="5"
+readonly CFG_DEFAULT_MOUNT_SSH_KEYS="false"
+readonly CFG_DEFAULT_MOUNT_GIT_CONFIG="false"
 
 # --- Configuration Schema ---
 # Format: key|type|pattern|max_length_or_range
 # Bash 3 compatible - no associative arrays
-CONFIG_SCHEMA_KEYS="vm_name default_template container_prefix network_mode port_range memory_limit cpu_limit auto_start_vm auto_host_networking enable_port_health_check port_health_timeout cache_ttl cache_max_size min_disk_space pass_env_vars"
+CONFIG_SCHEMA_KEYS="vm_name default_template container_prefix network_mode port_range memory_limit cpu_limit auto_start_vm auto_host_networking enable_port_health_check port_health_timeout cache_ttl cache_max_size min_disk_space pass_env_vars mount_ssh_keys mount_git_config"
 
 # --- Helper Functions ---
 
@@ -58,6 +60,8 @@ function get_default_value() {
         cache_ttl) echo "$CFG_DEFAULT_CACHE_TTL" ;;
         cache_max_size) echo "$CFG_DEFAULT_CACHE_MAX_SIZE" ;;
         min_disk_space) echo "$CFG_DEFAULT_MIN_DISK_SPACE" ;;
+        mount_ssh_keys) echo "$CFG_DEFAULT_MOUNT_SSH_KEYS" ;;
+        mount_git_config) echo "$CFG_DEFAULT_MOUNT_GIT_CONFIG" ;;
         *) echo "" ;;
     esac
 }
@@ -67,7 +71,7 @@ function get_schema_type() {
     local key="$1"
     case "$key" in
         vm_name|default_template|container_prefix|network_mode|port_range|memory_limit|cpu_limit) echo "string" ;;
-        auto_start_vm|auto_host_networking|enable_port_health_check) echo "boolean" ;;
+        auto_start_vm|auto_host_networking|enable_port_health_check|mount_ssh_keys|mount_git_config) echo "boolean" ;;
         port_health_timeout|cache_ttl|cache_max_size|min_disk_space) echo "number" ;;
         pass_env_vars) echo "nested" ;;
         *) echo "unknown" ;;
@@ -126,6 +130,8 @@ function get_env_var_name() {
         cache_ttl) echo "DEV_CACHE_TTL" ;;
         cache_max_size) echo "DEV_CACHE_MAX_SIZE" ;;
         min_disk_space) echo "DEV_MIN_DISK_SPACE" ;;
+        mount_ssh_keys) echo "DEV_MOUNT_SSH_KEYS" ;;
+        mount_git_config) echo "DEV_MOUNT_GIT_CONFIG" ;;
         *) echo "" ;;
     esac
 }

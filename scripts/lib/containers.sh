@@ -69,8 +69,8 @@ function detect_common_ports() {
 function get_ssh_key_mounts() {
     local ssh_mounts=""
     
-    # Mount SSH keys if they exist (for non-root user)
-    if [[ -d "$HOME/.ssh" ]]; then
+    # Mount SSH keys only if enabled and they exist
+    if [[ "$MOUNT_SSH_KEYS" == "true" ]] && [[ -d "$HOME/.ssh" ]]; then
         ssh_mounts="-v $HOME/.ssh:/home/appuser/.ssh:ro"
     fi
     
@@ -83,8 +83,8 @@ function get_common_volume_mounts() {
     # Always mount the current directory (read-write for development)
     volumes="-v $(pwd):/workspace"
     
-    # Mount git configuration if it exists (read-only)
-    if [[ -f "$HOME/.gitconfig" ]]; then
+    # Mount git configuration only if enabled and it exists
+    if [[ "$MOUNT_GIT_CONFIG" == "true" ]] && [[ -f "$HOME/.gitconfig" ]]; then
         volumes="$volumes -v $HOME/.gitconfig:/home/appuser/.gitconfig:ro"
     fi
     
@@ -164,7 +164,9 @@ function prepare_and_run_container() {
     if [[ -n "$ssh_mounts" ]]; then
         echo "   -> SSH keys mounted for git authentication"
     fi
-    echo "   -> Git configuration mounted for consistent commits"
+    if [[ "$MOUNT_GIT_CONFIG" == "true" ]] && [[ -f "$HOME/.gitconfig" ]]; then
+        echo "   -> Git configuration mounted for consistent commits"
+    fi
     echo "   -> Security hardening enabled (non-root user, limited capabilities)"
     if [[ -n "$resource_limits" ]]; then
         echo "   -> Resource limits applied: $resource_limits"

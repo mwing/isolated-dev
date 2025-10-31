@@ -1,6 +1,6 @@
 name: rust
 display_name: Rust
-versions: ["1.75", "1.82"]
+versions: ["1.75", "1.82", "1.91"]
 
 detection:
   files: ["Cargo.toml", "src/main.rs"]

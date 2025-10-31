@@ -346,6 +346,10 @@ port_health_timeout: 5                  # Timeout for port health checks (second
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 
+# File mounting (security: disabled by default)
+mount_ssh_keys: false                   # Mount ~/.ssh for git operations
+mount_git_config: false                 # Mount ~/.gitconfig
+
 # Cache and performance settings
 cache_ttl: 86400                         # API cache TTL in seconds (default: 1 day)
 cache_max_size: 100                      # Max cache size in MB (default: 100MB)
@@ -376,6 +380,17 @@ Example project config:
 vm_name: dev-vm-my-project
 default_template: node-22
 container_prefix: myproject
+
+# File mounting (optional, security: disabled by default)
+mount_ssh_keys: true              # Mount ~/.ssh for git operations
+mount_git_config: true            # Mount ~/.gitconfig
+
+# Environment variables (optional)
+pass_env_vars:
+  patterns:
+    - DATABASE_*
+  explicit:
+    - API_KEY
 ```
 
 ### Environment Variable Overrides
@@ -396,6 +411,10 @@ DEV_PORT_HEALTH_TIMEOUT=10 dev                      # Custom health check timeou
 DEV_MEMORY_LIMIT="512m" dev                         # Limit container memory
 DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
 
+# File mounting overrides (security: disabled by default)
+DEV_MOUNT_SSH_KEYS=true dev                         # Mount SSH keys for one command
+DEV_MOUNT_GIT_CONFIG=true dev                       # Mount git config for one command
+
 # Cache and disk space overrides
 DEV_CACHE_TTL=3600 dev                              # Set cache TTL to 1 hour
 DEV_CACHE_MAX_SIZE=50 dev                           # Limit cache to 50MB
@@ -412,6 +431,31 @@ dev config validate              # Validate all config files
 # - Valid characters in names
 # - Network configuration values
 ```
+
+### File Mounting (Security)
+
+**SSH keys and git config are NOT mounted by default** for security. Enable only when needed:
+
+```yaml
+# In ~/.dev-envs/config.yaml or .devenv.yaml
+mount_ssh_keys: true              # Mount ~/.ssh for git operations
+mount_git_config: true            # Mount ~/.gitconfig
+```
+
+**Per-command override:**
+```bash
+DEV_MOUNT_SSH_KEYS=true dev shell    # Mount SSH keys for this session only
+```
+
+**Why disabled by default:**
+- Reduces attack surface if container is compromised
+- Prevents accidental exposure of credentials
+- Follows principle of least privilege
+
+**When to enable:**
+- Need to clone/push to private git repositories
+- Need git commit signing
+- Need SSH access to remote servers from container
 
 ### Environment Variable Passing
 
@@ -451,11 +495,11 @@ echo $SNYK_TOKEN   # outputs: abc123
 **Command-line environment variables:**
 ```bash
 # Pass specific variables from host environment
-dev --env GITLAB_TOKEN shell
+dev -e GITLAB_TOKEN shell
 dev -e DATABASE_URL -e API_KEY shell
 
 # Pass variables with explicit values
-dev --env NODE_ENV=production shell
+dev -e NODE_ENV=production shell
 dev -e DEBUG=true -e PORT=8080 shell
 
 # Load variables from .env file

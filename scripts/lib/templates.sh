@@ -102,7 +102,7 @@ function copy_scaffolding_files_from_plugin() {
 function get_cached_api_response() {
     local cache_key="$1"
     local cache_file="$DEV_CACHE_DIR/$cache_key"
-    local cache_ttl="${DEV_CACHE_TTL:-$(get_config_value "cache_ttl")}"
+    local cache_ttl="${DEV_CACHE_TTL:-$(get_default_value "cache_ttl")}"
     cache_ttl="${cache_ttl:-86400}"  # Default 1 day
     
     if [[ -f "$cache_file" ]]; then
@@ -127,7 +127,7 @@ function cache_api_response() {
 
 function check_cache_size_and_suggest_cleanup() {
     local cache_dir="$DEV_CACHE_DIR"
-    local max_size="${DEV_CACHE_MAX_SIZE:-$(get_config_value "cache_max_size")}"
+    local max_size="${DEV_CACHE_MAX_SIZE:-$(get_default_value "cache_max_size")}"
     max_size="${max_size:-100}"  # Default 100MB
     
     if [[ ! -d "$cache_dir" ]]; then
@@ -217,58 +217,38 @@ function get_latest_rust_version() {
 }
 
 function check_template_updates() {
-    echo "🔍 Checking for latest template versions..."
-    echo "⏳ Fetching current versions from official sources..."
-    
-    local templates_dir="$TEMPLATES_DIR"
-    local missing_templates=()
-    
-    # Fetch current latest versions dynamically
-    local python_latest="python-$(get_latest_python_version)"
-    local node_latest="node-$(get_latest_node_version)"
-    local golang_latest="golang-$(get_latest_golang_version)"
-    local rust_latest="rust-$(get_latest_rust_version)"
-    
-    # Only check for languages where we can fetch latest versions
-    local recommended=(
-        "$python_latest"
-        "$node_latest"
-        "$golang_latest"
-        "$rust_latest"
-    )
-    
-    echo "📋 Latest versions detected:"
-    for template in "${recommended[@]}"; do
-        echo "  - $template"
-    done
+    echo "🔍 Checking latest versions from Docker Hub..."
+    echo "⏳ Fetching current versions..."
     echo ""
     
-    # Check which templates are missing
-    for template in "${recommended[@]}"; do
-        if [[ ! -f "$templates_dir/Dockerfile-$template" ]]; then
-            missing_templates+=("$template")
-        fi
-    done
+    # Fetch current latest versions dynamically
+    local python_latest=$(get_latest_python_version)
+    local node_latest=$(get_latest_node_version)
+    local golang_latest=$(get_latest_golang_version)
+    local rust_latest=$(get_latest_rust_version)
     
-    if [[ ${#missing_templates[@]} -eq 0 ]]; then
-        echo "✅ All latest template versions are available!"
-    else
-        echo "📦 Missing latest templates:"
-        for template in "${missing_templates[@]}"; do
-            echo "  - $template"
-        done
-        echo ""
-        echo "💡 Run 'dev templates update' to create missing versions."
-    fi
+    echo "📋 Latest versions available:"
+    echo "   Python: $python_latest"
+    echo "   Node.js: $node_latest"
+    echo "   Go: $golang_latest"
+    echo "   Rust: $rust_latest"
+    echo ""
+    echo "ℹ️  These versions are automatically used when you create new projects."
+    echo "   No manual updates needed - templates are generated on-demand!"
+    echo ""
+    echo "💡 Usage:"
+    echo "   dev new python-$python_latest"
+    echo "   dev new node-$node_latest"
+    echo "   dev new golang-$golang_latest"
+    echo "   dev new rust-$rust_latest"
 }
 
 function update_templates() {
-    echo "🔄 Creating missing template versions..."
+    echo "🔄 Updating language plugin versions..."
     echo "⏳ Fetching latest versions..."
     echo ""
     
-    local templates_dir="$TEMPLATES_DIR"
-    local created_count=0
+    local updated_count=0
     
     # Get latest versions dynamically
     local python_version=$(get_latest_python_version)
@@ -276,58 +256,53 @@ function update_templates() {
     local golang_version=$(get_latest_golang_version)
     local rust_version=$(get_latest_rust_version)
     
-    # Python latest (if missing)
-    if [[ ! -f "$templates_dir/Dockerfile-python-$python_version" ]]; then
-        echo "📦 Adding Python $python_version template..."
-        if create_dockerfile_from_language_plugin "python" "$python_version" "$templates_dir/Dockerfile-python-$python_version"; then
-            echo "   ✅ Python $python_version template created"
-            ((created_count++))
-        else
-            echo "   ❌ Failed to create Python $python_version template"
+    # Update Python versions
+    if [[ -f "$LANGUAGES_DIR/python/language.yaml" ]]; then
+        if ! grep -q "\"$python_version\"" "$LANGUAGES_DIR/python/language.yaml"; then
+            echo "📦 Adding Python $python_version to language.yaml..."
+            sed -i.bak "s/versions: \[/versions: [\"$python_version\", /" "$LANGUAGES_DIR/python/language.yaml"
+            rm -f "$LANGUAGES_DIR/python/language.yaml.bak"
+            ((updated_count++))
         fi
     fi
     
-    # Node.js latest (if missing)  
-    if [[ ! -f "$templates_dir/Dockerfile-node-$node_version" ]]; then
-        echo "📦 Adding Node.js $node_version template..."
-        if create_dockerfile_from_language_plugin "node" "$node_version" "$templates_dir/Dockerfile-node-$node_version"; then
-            echo "   ✅ Node.js $node_version template created"
-            ((created_count++))
-        else
-            echo "   ❌ Failed to create Node.js $node_version template"
+    # Update Node.js versions
+    if [[ -f "$LANGUAGES_DIR/node/language.yaml" ]]; then
+        if ! grep -q "\"$node_version\"" "$LANGUAGES_DIR/node/language.yaml"; then
+            echo "📦 Adding Node.js $node_version to language.yaml..."
+            sed -i.bak "s/versions: \[/versions: [\"$node_version\", /" "$LANGUAGES_DIR/node/language.yaml"
+            rm -f "$LANGUAGES_DIR/node/language.yaml.bak"
+            ((updated_count++))
         fi
     fi
     
-    # Golang latest (if missing)
-    if [[ ! -f "$templates_dir/Dockerfile-golang-$golang_version" ]]; then
-        echo "📦 Adding Go $golang_version template..."
-        if create_dockerfile_from_language_plugin "golang" "$golang_version" "$templates_dir/Dockerfile-golang-$golang_version"; then
-            echo "   ✅ Go $golang_version template created"
-            ((created_count++))
-        else
-            echo "   ❌ Failed to create Go $golang_version template"
+    # Update Go versions
+    if [[ -f "$LANGUAGES_DIR/golang/language.yaml" ]]; then
+        if ! grep -q "\"$golang_version\"" "$LANGUAGES_DIR/golang/language.yaml"; then
+            echo "📦 Adding Go $golang_version to language.yaml..."
+            sed -i.bak "s/versions: \[/versions: [\"$golang_version\", /" "$LANGUAGES_DIR/golang/language.yaml"
+            rm -f "$LANGUAGES_DIR/golang/language.yaml.bak"
+            ((updated_count++))
         fi
     fi
     
-    # Rust latest (if missing)
-    if [[ ! -f "$templates_dir/Dockerfile-rust-$rust_version" ]]; then
-        echo "📦 Adding Rust $rust_version template..."
-        if create_dockerfile_from_language_plugin "rust" "$rust_version" "$templates_dir/Dockerfile-rust-$rust_version"; then
-            echo "   ✅ Rust $rust_version template created"
-            ((created_count++))
-        else
-            echo "   ❌ Failed to create Rust $rust_version template"
+    # Update Rust versions
+    if [[ -f "$LANGUAGES_DIR/rust/language.yaml" ]]; then
+        if ! grep -q "\"$rust_version\"" "$LANGUAGES_DIR/rust/language.yaml"; then
+            echo "📦 Adding Rust $rust_version to language.yaml..."
+            sed -i.bak "s/versions: \[/versions: [\"$rust_version\", /" "$LANGUAGES_DIR/rust/language.yaml"
+            rm -f "$LANGUAGES_DIR/rust/language.yaml.bak"
+            ((updated_count++))
         fi
     fi
     
     echo ""
-    if [[ $created_count -gt 0 ]]; then
-        echo "✅ Template updates completed! Created $created_count new templates."
+    if [[ $updated_count -gt 0 ]]; then
+        echo "✅ Updated $updated_count language plugin(s) with latest versions."
+        echo "💡 Run 'dev list' to see all available versions."
     else
-        echo "✅ All templates were already up to date."
+        echo "✅ All language plugins already have the latest versions."
     fi
-    echo ""
-    echo "💡 Tip: Use 'dev list' to see all available templates"
 }
 
 function track_template_usage() {
@@ -693,11 +668,6 @@ function show_template_stats() {
     echo "   Total language plugins: $total_plugins"
     
     echo ""
-    echo "✨ System Benefits:"
-    echo "   ✅ Always up-to-date (generated on-demand)"
-    echo "   ✅ No template file cleanup needed"
-    echo "   ✅ Single source of truth per language"
-    echo "   ✅ Easy to add new languages"
     
     if [[ -f "$usage_file" ]]; then
         local old_entries=$(awk -F: -v threshold="$(($(date +%s) - 60 * 86400))" '$2 < threshold' "$usage_file" | wc -l)

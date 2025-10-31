@@ -79,6 +79,8 @@ function parse_yaml_config() {
                 port_health_timeout) PORT_HEALTH_TIMEOUT="$value" ;;
                 memory_limit) MEMORY_LIMIT="$value" ;;
                 cpu_limit) CPU_LIMIT="$value" ;;
+                mount_ssh_keys) MOUNT_SSH_KEYS="$value" ;;
+                mount_git_config) MOUNT_GIT_CONFIG="$value" ;;
             esac
         # Only YAML format supported
         fi
@@ -98,6 +100,8 @@ function apply_env_overrides() {
     [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && PORT_HEALTH_TIMEOUT="$DEV_PORT_HEALTH_TIMEOUT"
     [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && MEMORY_LIMIT="$DEV_MEMORY_LIMIT"
     [[ -n "${DEV_CPU_LIMIT:-}" ]] && CPU_LIMIT="$DEV_CPU_LIMIT"
+    [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && MOUNT_SSH_KEYS="$DEV_MOUNT_SSH_KEYS"
+    [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && MOUNT_GIT_CONFIG="$DEV_MOUNT_GIT_CONFIG"
 }
 
 function validate_config_value() {
@@ -254,6 +258,8 @@ function load_config() {
     PORT_HEALTH_TIMEOUT=$(get_default_value "port_health_timeout")
     MEMORY_LIMIT=$(get_default_value "memory_limit")
     CPU_LIMIT=$(get_default_value "cpu_limit")
+    MOUNT_SSH_KEYS=$(get_default_value "mount_ssh_keys")
+    MOUNT_GIT_CONFIG=$(get_default_value "mount_git_config")
     
     # Load global config if it exists
     parse_yaml_config "$GLOBAL_CONFIG"
@@ -295,6 +301,18 @@ port_health_timeout: 5                  # Timeout for port health checks (second
 # Resource limits (applied at container runtime)
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
+
+# File mounting (security: disabled by default)
+mount_ssh_keys: false                   # Mount ~/.ssh for git operations
+mount_git_config: false                 # Mount ~/.gitconfig
+
+# Environment variables to pass to containers
+# pass_env_vars:
+#   patterns:
+#     - AWS_*
+#     - GITHUB_*
+#   explicit:
+#     - MY_VAR
 EOF
         echo "📝 Created default config at $GLOBAL_CONFIG"
         echo "   Edit this file to customize your development environment defaults."
@@ -405,6 +423,17 @@ function handle_config_command() {
 # Resource limits (optional)
 # memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
 # cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")
+
+# File mounting (optional, security: disabled by default)
+# mount_ssh_keys: true              # Mount ~/.ssh for git operations
+# mount_git_config: true            # Mount ~/.gitconfig
+
+# Environment variables (optional)
+# pass_env_vars:
+#   patterns:
+#     - DATABASE_*
+#   explicit:
+#     - API_KEY
 EOF
             echo "✅ Created project config: $PROJECT_CONFIG"
             echo "   Edit this file to customize settings for this project."
@@ -433,6 +462,8 @@ EOF
             echo "  Port Health Timeout: ${PORT_HEALTH_TIMEOUT}s"
             echo "  Memory Limit: ${MEMORY_LIMIT:-"(none)"}"
             echo "  CPU Limit: ${CPU_LIMIT:-"(none)"}"
+            echo "  Mount SSH Keys: $MOUNT_SSH_KEYS"
+            echo "  Mount Git Config: $MOUNT_GIT_CONFIG"
             
             # Show environment variable overrides if any
             local env_overrides=()
@@ -447,6 +478,8 @@ EOF
             [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT")
             [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT")
             [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
+            [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && env_overrides+=("DEV_MOUNT_SSH_KEYS")
+            [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && env_overrides+=("DEV_MOUNT_GIT_CONFIG")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then
                 echo ""
