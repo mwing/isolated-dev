@@ -70,7 +70,7 @@ _dev() {
                         '--devcontainer[Generate VS Code config]' \
                         '--yes[Skip prompts]' \
                         '--help[Show help]' \
-                        "*:template:(${templates[@]})"
+                        '1:template:(${templates[@]})'
                     ;;
                 config)
                     _arguments \
@@ -110,7 +110,7 @@ _dev() {
                         '--yes[Skip prompts]' \
                         '--help[Show help]' \
                         '--file[Dockerfile path]:file:_files' \
-                        "*:template:(${templates[@]})"
+                        '1:template:(${templates[@]})'
                     ;;
                 help)
                     local help_topics=(new config security templates env devcontainer)
@@ -128,9 +128,6 @@ _dev() {
                         '-e[Environment variable]:env:' \
                         '--env[Environment variable]:env:' \
                         '--env-file[Environment file]:file:_files'
-                        '--file[Dockerfile path]:file:_files' \
-                        '--tag[Image tag]:tag:' \
-                        '--name[Container name]:name:'
                     ;;
             esac
             ;;
