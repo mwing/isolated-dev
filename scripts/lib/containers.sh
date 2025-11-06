@@ -6,6 +6,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/constants.sh"
+source "$SCRIPT_DIR/config.sh"
 
 function detect_common_ports() {
     local ports=()
@@ -303,12 +304,24 @@ function get_env_forwards() {
 }
 
 function build_port_forwards() {
-    local ports=($(detect_common_ports))
+    local forward_ports_config
+    forward_ports_config=$(get_config_value "forward_ports")
+    
+    local ports=()
+    if [[ -n "$forward_ports_config" ]]; then
+        IFS=',' read -ra ports <<< "$forward_ports_config"
+        echo "🔌 Using configured ports: ${ports[*]}" >&2
+    else
+        ports=($(detect_common_ports))
+        if [[ ${#ports[@]} -gt 0 ]]; then
+            echo "🔌 Detected common development ports: ${ports[*]}" >&2
+        fi
+    fi
+    
     local port_args=""
     local unavailable_ports=()
     
     if [[ ${#ports[@]} -gt 0 ]]; then
-        echo "🔌 Detected common development ports: ${ports[*]}" >&2
         
         for port in "${ports[@]}"; do
             if check_port_available "$port"; then

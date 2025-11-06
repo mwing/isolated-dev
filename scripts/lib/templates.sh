@@ -824,9 +824,7 @@ function generate_devcontainer_config() {
   "dockerFile": "../$(basename "$dockerfile_path")",
   "workspaceFolder": "/workspace",
   "mounts": [
-    "source=\${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
-    "source=\${localEnv:HOME}/.ssh,target=/home/dev/.ssh,type=bind,readonly",
-    "source=\${localEnv:HOME}/.gitconfig,target=/home/dev/.gitconfig,type=bind,readonly"
+    "source=\${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
   ],
 EOF
     
@@ -941,8 +939,14 @@ EOF
             ;;
     esac
     
-    # Close the JSON
-    echo '  "remoteUser": "dev"' >> "$config_file"
+    # Set remote user based on language
+    local remote_user="devuser"
+    case "$base_lang" in
+        node) remote_user="node" ;;
+        python|golang|rust|java|php|ubuntu) remote_user="devuser" ;;
+    esac
+    
+    echo "  \"remoteUser\": \"$remote_user\"" >> "$config_file"
     echo '}' >> "$config_file"
     
     return 0

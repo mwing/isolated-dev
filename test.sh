@@ -1034,6 +1034,65 @@ test_mount_conditional_logic() {
     cd - > /dev/null
 }
 
+test_forward_ports_config() {
+    run_test "Port forwarding configuration"
+    
+    local test_project="$TEST_DIR/test-forward-ports"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test default (empty)
+    local config_output=$(bash "$ORIGINAL_DIR/scripts/dev" config 2>&1)
+    assert_contains "$config_output" "Current Configuration" "Config command works"
+    
+    # Test setting forward_ports in project config
+    cat > .devenv.yaml << 'EOF'
+forward_ports: "8080,9000"
+EOF
+    
+    # Test validation
+    local validation=$(bash "$ORIGINAL_DIR/scripts/dev" config validate 2>&1)
+    assert_contains "$validation" "valid" "forward_ports validates correctly"
+    
+    # Test environment variable override
+    local override_output=$(DEV_FORWARD_PORTS="4000,5000" bash "$ORIGINAL_DIR/scripts/dev" config 2>&1)
+    assert_contains "$override_output" "DEV_FORWARD_PORTS" "Shows forward_ports override in active list"
+    
+    cd - > /dev/null
+}
+
+test_forward_ports_function() {
+    run_test "Port forwarding function logic"
+    
+    local test_project="$TEST_DIR/test-forward-ports-func"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Create package.json for auto-detection
+    echo '{"name": "test"}' > package.json
+    
+    # Test auto-detection (no config)
+    cat > .devenv.yaml << 'EOF'
+vm_name: test-vm
+EOF
+    local auto_ports=$(build_port_forwards 2>&1)
+    assert_contains "$auto_ports" "Detected common development ports" "Auto-detects ports from package.json"
+    
+    # Test manual override
+    cat > .devenv.yaml << 'EOF'
+forward_ports: "8080,9000"
+EOF
+    local manual_ports=$(build_port_forwards 2>&1)
+    assert_contains "$manual_ports" "Using configured ports: 8080 9000" "Uses configured ports instead of auto-detection"
+    assert_contains "$manual_ports" "-p 8080:8080" "Forwards port 8080"
+    assert_contains "$manual_ports" "-p 9000:9000" "Forwards port 9000"
+    
+    cd - > /dev/null
+}
+
 test_security_functionality() {
     run_test "Security functionality"
     
@@ -1148,6 +1207,8 @@ main() {
     test_mount_config_options
     test_mount_env_overrides
     test_mount_conditional_logic
+    test_forward_ports_config
+    test_forward_ports_function
     
     test_security_functionality
     

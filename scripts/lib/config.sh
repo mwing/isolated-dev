@@ -8,6 +8,29 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/constants.sh"
 
+function get_config_value() {
+    local key="$1"
+    local env_var=$(get_env_var_name "$key")
+    
+    # 1. Check environment variable
+    [[ -n "${!env_var:-}" ]] && echo "${!env_var}" && return
+    
+    # 2. Check project config
+    if [[ -f "$DEV_PROJECT_CONFIG" ]]; then
+        local val=$(grep "^${key}:" "$DEV_PROJECT_CONFIG" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^["'"'"']//;s/["'"'"']$//')
+        [[ -n "$val" ]] && echo "$val" && return
+    fi
+    
+    # 3. Check global config
+    if [[ -f "$DEV_GLOBAL_CONFIG" ]]; then
+        local val=$(grep "^${key}:" "$DEV_GLOBAL_CONFIG" 2>/dev/null | sed 's/^[^:]*:[[:space:]]*//' | sed 's/^["'"'"']//;s/["'"'"']$//')
+        [[ -n "$val" ]] && echo "$val" && return
+    fi
+    
+    # 4. Return default
+    get_default_value "$key"
+}
+
 function get_config_array() {
     local key="$1"
     local config_file=""
@@ -102,6 +125,7 @@ function apply_env_overrides() {
     [[ -n "${DEV_CPU_LIMIT:-}" ]] && CPU_LIMIT="$DEV_CPU_LIMIT"
     [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && MOUNT_SSH_KEYS="$DEV_MOUNT_SSH_KEYS"
     [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && MOUNT_GIT_CONFIG="$DEV_MOUNT_GIT_CONFIG"
+    [[ -n "${DEV_FORWARD_PORTS:-}" ]] && FORWARD_PORTS="$DEV_FORWARD_PORTS"
 }
 
 function validate_config_value() {
@@ -360,6 +384,7 @@ function handle_config_command() {
             [[ -n "${DEV_PORT_HEALTH_TIMEOUT:-}" ]] && env_overrides+=("DEV_PORT_HEALTH_TIMEOUT=$DEV_PORT_HEALTH_TIMEOUT")
             [[ -n "${DEV_MEMORY_LIMIT:-}" ]] && env_overrides+=("DEV_MEMORY_LIMIT=$DEV_MEMORY_LIMIT")
             [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT=$DEV_CPU_LIMIT")
+            [[ -n "${DEV_FORWARD_PORTS:-}" ]] && env_overrides+=("DEV_FORWARD_PORTS=$DEV_FORWARD_PORTS")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then
                 echo ""
@@ -480,6 +505,7 @@ EOF
             [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
             [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && env_overrides+=("DEV_MOUNT_SSH_KEYS")
             [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && env_overrides+=("DEV_MOUNT_GIT_CONFIG")
+            [[ -n "${DEV_FORWARD_PORTS:-}" ]] && env_overrides+=("DEV_FORWARD_PORTS")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then
                 echo ""
