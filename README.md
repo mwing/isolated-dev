@@ -350,6 +350,9 @@ cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 mount_ssh_keys: false                   # Mount ~/.ssh for git operations
 mount_git_config: false                 # Mount ~/.gitconfig
 
+# Port forwarding (optional)
+forward_ports: ""                        # Override auto-detected ports (e.g., "8080,9000")
+
 # Cache and performance settings
 cache_ttl: 86400                         # API cache TTL in seconds (default: 1 day)
 cache_max_size: 100                      # Max cache size in MB (default: 100MB)
@@ -380,6 +383,9 @@ Example project config:
 vm_name: dev-vm-my-project
 default_template: node-22
 container_prefix: myproject
+
+# Port forwarding (optional)
+forward_ports: "8080,9000"        # Override auto-detected ports
 
 # File mounting (optional, security: disabled by default)
 mount_ssh_keys: true              # Mount ~/.ssh for git operations
@@ -414,6 +420,9 @@ DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
 # File mounting overrides (security: disabled by default)
 DEV_MOUNT_SSH_KEYS=true dev                         # Mount SSH keys for one command
 DEV_MOUNT_GIT_CONFIG=true dev                       # Mount git config for one command
+
+# Port forwarding override
+DEV_FORWARD_PORTS="8080,9000" dev                   # Override auto-detected ports
 
 # Cache and disk space overrides
 DEV_CACHE_TTL=3600 dev                              # Set cache TTL to 1 hour
@@ -607,6 +616,17 @@ port_health_timeout: 5                  # Health check timeout (seconds)
 - Respects configured `port_range`
 - Automatically forwards detected ports
 
+**Manual Override:**
+```yaml
+# In ~/.dev-envs/config.yaml or .devenv.yaml
+forward_ports: "8080,9000"  # Comma-separated list of ports
+```
+
+```bash
+# Or use environment variable
+DEV_FORWARD_PORTS="8080,9000" dev
+```
+
 **Health Checking:**
 - Verifies port accessibility when `enable_port_health_check: true`
 - Configurable timeout with `port_health_timeout`
@@ -655,6 +675,7 @@ dev env up docker-host            # Start VM
 - Ensure app binds to `0.0.0.0`, not `localhost`
 - Check for port conflicts on host
 - Verify project files exist (package.json, requirements.txt, etc.)
+- Override auto-detected ports: `DEV_FORWARD_PORTS="8080,9000" dev`
 
 **SSH keys not working:**
 ```bash

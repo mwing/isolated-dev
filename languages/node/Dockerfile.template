@@ -27,9 +27,8 @@ RUN mkdir -p /home/node/.npm-global && \
     npm config set prefix '/home/node/.npm-global'
 ENV PATH=/home/node/.npm-global/bin:$PATH
 
-# Copy package files if they exist
-COPY --chown=node:node package*.json ./
-RUN if [ -f package.json ]; then npm install --omit=dev; fi
+# Note: package.json will be available via mounted /workspace volume
+# Run 'npm install' manually after container starts if needed
 
 # Keep container running
 CMD ["bash"]
