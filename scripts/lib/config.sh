@@ -44,12 +44,9 @@ function get_config_array() {
         return
     fi
     
-    # Extract array values from YAML using awk
-    # Parse pass_env_vars.patterns or pass_env_vars.explicit
     local section_key="${key%%.*}"
     local array_key="${key##*.}"
     
-    # First try to get inline array format: [item1, item2]
     local inline_array=$(awk -v section="$section_key" -v array="$array_key" '
         /^[a-zA-Z_]/ { in_section=0 }
         $0 ~ "^" section ":" { in_section=1; next }
@@ -66,7 +63,6 @@ function get_config_array() {
         return
     fi
     
-    # Fall back to multi-line array format
     awk -v section="$section_key" -v array="$array_key" '
         /^[a-zA-Z_]/ { in_section=0 }
         $0 ~ "^" section ":" { in_section=1; next }
@@ -76,7 +72,6 @@ function get_config_array() {
     ' "$config_file"
 }
 
-# Legacy compatibility - redirect to constants.sh
 function get_config_type() {
     get_schema_type "$1"
 }
