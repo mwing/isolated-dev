@@ -36,10 +36,10 @@ function get_config_array() {
     local config_file=""
     
     # Check project config first
-    if [[ -f "$PROJECT_CONFIG" ]]; then
-        config_file="$PROJECT_CONFIG"
-    elif [[ -f "$GLOBAL_CONFIG" ]]; then
-        config_file="$GLOBAL_CONFIG"
+    if [[ -f "$DEV_PROJECT_CONFIG" ]]; then
+        config_file="$DEV_PROJECT_CONFIG"
+    elif [[ -f "$DEV_GLOBAL_CONFIG" ]]; then
+        config_file="$DEV_GLOBAL_CONFIG"
     else
         return
     fi
@@ -49,6 +49,24 @@ function get_config_array() {
     local section_key="${key%%.*}"
     local array_key="${key##*.}"
     
+    # First try to get inline array format: [item1, item2]
+    local inline_array=$(awk -v section="$section_key" -v array="$array_key" '
+        /^[a-zA-Z_]/ { in_section=0 }
+        $0 ~ "^" section ":" { in_section=1; next }
+        in_section && $0 ~ "^  " array ": *\\[" { 
+            sub(/^.*: *\[/, ""); sub(/\].*$/, ""); 
+            gsub(/ *, */, "\n"); gsub(/^ *| *$/, ""); 
+            if (length($0) > 0) print; 
+            exit 
+        }
+    ' "$config_file")
+    
+    if [[ -n "$inline_array" ]]; then
+        echo "$inline_array"
+        return
+    fi
+    
+    # Fall back to multi-line array format
     awk -v section="$section_key" -v array="$array_key" '
         /^[a-zA-Z_]/ { in_section=0 }
         $0 ~ "^" section ":" { in_section=1; next }
