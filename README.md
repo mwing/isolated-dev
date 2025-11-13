@@ -256,6 +256,7 @@ dev -f Dockerfile.dev             # Use custom Dockerfile
 dev --platform linux/arm64        # Build for specific architecture
 dev -e VAR_NAME                   # Pass environment variable from host
 dev -e VAR=value                  # Pass environment variable with value
+dev -e 'VAR=value with spaces'    # Pass environment variable with spaces (quote entire argument)
 dev --env-file .env               # Load environment variables from file
 dev -y, --yes                     # Automatically answer 'yes' to all prompts
 dev arch                          # Show architecture and platform information
@@ -511,6 +512,10 @@ dev -e DATABASE_URL -e API_KEY shell
 dev -e NODE_ENV=production shell
 dev -e DEBUG=true -e PORT=8080 shell
 
+# Pass variables with spaces (quote the entire argument)
+dev -e 'VAR=value with spaces' shell
+dev -e "VAR=value with spaces" shell
+
 # Load variables from .env file
 dev --env-file .env shell
 dev --env-file .env.production shell
@@ -518,6 +523,13 @@ dev --env-file .env.production shell
 # Combine multiple methods
 dev -e GITLAB_TOKEN --env-file .env shell
 ```
+
+**Important**: For environment variables with spaces, quote the entire `VAR=value` argument, not just the value:
+- ✅ Correct: `dev -e 'VAR=value with spaces'` 
+- ✅ Correct: `dev -e "VAR=value with spaces"`
+- ❌ Wrong: `dev -e VAR="value with spaces"`
+
+The quotes must wrap the entire `VAR=value` argument to prevent the shell from treating spaces as argument separators.
 
 **Project-specific variables:**
 ```bash
@@ -676,6 +688,11 @@ dev env up docker-host            # Start VM
 - Check for port conflicts on host
 - Verify project files exist (package.json, requirements.txt, etc.)
 - Override auto-detected ports: `DEV_FORWARD_PORTS="8080,9000" dev`
+
+**Environment variable issues:**
+- For variables with spaces, quote the entire argument: `dev -e 'VAR=value with spaces'`
+- Avoid quoting only the value: `dev -e VAR="value with spaces"` (incorrect)
+- Use configuration files for complex variables: `.devenv.yaml` with `pass_env_vars`
 
 **SSH keys not working:**
 ```bash
