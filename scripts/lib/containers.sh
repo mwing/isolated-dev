@@ -236,23 +236,17 @@ function check_port_available() {
 function get_env_forwards() {
     local env_args=""
     
-    # Process custom env vars from --env flags
     if [[ ${#CUSTOM_ENV_VARS[@]} -gt 0 ]]; then
         for env_spec in "${CUSTOM_ENV_VARS[@]}"; do
-            # Handle both VAR=value and VAR formats
             if [[ "$env_spec" == *"="* ]]; then
-                # Direct value: VAR=value
                 local var="${env_spec%%=*}"
                 local value="${env_spec#*=}"
-                # Always quote environment variables to handle special characters
                 local escaped_value="${value//\\/\\\\}"
                 escaped_value="${escaped_value//\"/\\\"}"
                 env_args="$env_args -e \"$var=$escaped_value\""
             else
-                # Variable name only: VAR (get value from environment)
                 if [[ -n "${!env_spec:-}" ]]; then
                     local value="${!env_spec}"
-                    # Always quote environment variables to handle special characters
                     local escaped_value="${value//\\/\\\\}"
                     escaped_value="${escaped_value//\"/\\\"}"
                     env_args="$env_args -e \"$env_spec=$escaped_value\""
@@ -261,7 +255,6 @@ function get_env_forwards() {
         done
     fi
     
-    # Process custom env files from --env-file flags
     if [[ ${#CUSTOM_ENV_FILES[@]} -gt 0 ]]; then
         for env_file in "${CUSTOM_ENV_FILES[@]}"; do
             if [[ -f "$env_file" ]]; then
@@ -272,32 +265,26 @@ function get_env_forwards() {
         done
     fi
     
-    # Get patterns from config
     local patterns=$(get_config_array "pass_env_vars.patterns")
     local explicit=$(get_config_array "pass_env_vars.explicit")
     
-    # Process pattern-based variables
     if [[ -n "$patterns" ]]; then
         while IFS= read -r pattern; do
             [[ -z "$pattern" ]] && continue
             
-            # Handle wildcard patterns
             if [[ "$pattern" == *"*" ]]; then
                 local prefix="${pattern%\*}"
                 while IFS='=' read -r var _; do
                     [[ "$var" == "$prefix"* ]] || continue
                     local value="${!var}"
                     [[ -z "$value" ]] && continue
-                    # Always quote environment variables to handle special characters
                     local escaped_value="${value//\\/\\\\}"
                     escaped_value="${escaped_value//\"/\\\"}"
                     env_args="$env_args -e \"$var=$escaped_value\""
                 done < <(env)
             else
-                # Exact match - check if variable is set
                 if [[ -n "${!pattern:-}" ]]; then
                     local value="${!pattern}"
-                    # Always quote environment variables to handle special characters
                     local escaped_value="${value//\\/\\\\}"
                     escaped_value="${escaped_value//\"/\\\"}"
                     env_args="$env_args -e \"$pattern=$escaped_value\""
@@ -306,13 +293,11 @@ function get_env_forwards() {
         done <<< "$patterns"
     fi
     
-    # Process explicit variables
     if [[ -n "$explicit" ]]; then
         while IFS= read -r var; do
             [[ -z "$var" ]] && continue
             if [[ -n "${!var:-}" ]]; then
                 local value="${!var}"
-                # Always quote environment variables to handle special characters
                 local escaped_value="${value//\\/\\\\}"
                 escaped_value="${escaped_value//\"/\\\"}"
                 env_args="$env_args -e \"$var=$escaped_value\""

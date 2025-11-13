@@ -419,7 +419,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Check for remaining unprocessed arguments BEFORE any other processing
 if [[ $# -gt 0 ]]; then
     echo "❌ Error: Unrecognized arguments: $*"
     echo ""
@@ -432,7 +431,6 @@ if [[ $# -gt 0 ]]; then
     exit 1
 fi
 
-# --- Load Configuration ---
 load_config
 
 # --- Validate Requirements ---
