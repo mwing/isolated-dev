@@ -313,10 +313,19 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -e|--env)
+            if [[ -z "$2" ]]; then
+                echo "❌ Error: -e flag requires an argument"
+                echo "Usage: dev -e 'VAR=value' or dev -e VAR"
+                exit 1
+            fi
             CUSTOM_ENV_VARS+=("$2")
             shift 2
             ;;
         --env-file)
+            if [[ -z "$2" ]]; then
+                echo "❌ Error: --env-file flag requires an argument"
+                exit 1
+            fi
             CUSTOM_ENV_FILES+=("$2")
             shift 2
             ;;
@@ -409,6 +418,19 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Check for remaining unprocessed arguments BEFORE any other processing
+if [[ $# -gt 0 ]]; then
+    echo "❌ Error: Unrecognized arguments: $*"
+    echo ""
+    echo "💡 Common issue: Environment variables with spaces need proper quoting:"
+    echo "   ✅ Correct: dev -e 'VAR=value with spaces' shell"
+    echo "   ✅ Correct: dev -e \"VAR=value with spaces\" shell"  
+    echo "   ❌ Wrong:   dev -e VAR=\"value with spaces\" shell"
+    echo ""
+    echo "The quotes must wrap the entire VAR=value argument, not just the value."
+    exit 1
+fi
 
 # --- Load Configuration ---
 load_config

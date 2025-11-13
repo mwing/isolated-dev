@@ -194,17 +194,20 @@ function prepare_and_run_container() {
     echo ""
     echo "$ready_msg. Your project folder is at '/workspace'."
     
-    # shellcheck disable=SC2086  # Intentionally unquoted for multiple flags
-    if ! orb -m "$VM_NAME" sudo docker run -it --rm \
-        $security_flags \
-        $volume_mounts \
-        $ssh_mounts \
-        $gpg_mounts \
-        $port_forwards \
-        $env_forwards \
-        $resource_limits \
-        --name "$CONTAINER_NAME" \
-        "$IMAGE_NAME" $cmd_args; then
+    # Build command with proper escaping
+    local cmd="orb -m \"$VM_NAME\" sudo docker run -it --rm"
+    [[ -n "$security_flags" ]] && cmd="$cmd $security_flags"
+    [[ -n "$volume_mounts" ]] && cmd="$cmd $volume_mounts"
+    [[ -n "$ssh_mounts" ]] && cmd="$cmd $ssh_mounts"
+    [[ -n "$gpg_mounts" ]] && cmd="$cmd $gpg_mounts"
+    [[ -n "$port_forwards" ]] && cmd="$cmd $port_forwards"
+    [[ -n "$env_forwards" ]] && cmd="$cmd $env_forwards"
+    [[ -n "$resource_limits" ]] && cmd="$cmd $resource_limits"
+    cmd="$cmd --name \"$CONTAINER_NAME\" \"$IMAGE_NAME\""
+    [[ -n "$cmd_args" ]] && cmd="$cmd $cmd_args"
+    
+    # Execute using eval to properly handle quotes
+    if ! eval "$cmd"; then
         
         # Check if it was a port conflict
         if orb -m "$VM_NAME" sudo docker logs "$CONTAINER_NAME" 2>&1 | grep -q "port is already allocated"; then
@@ -239,12 +242,20 @@ function get_env_forwards() {
             # Handle both VAR=value and VAR formats
             if [[ "$env_spec" == *"="* ]]; then
                 # Direct value: VAR=value
-                env_args="$env_args -e $env_spec"
+                local var="${env_spec%%=*}"
+                local value="${env_spec#*=}"
+                # Always quote environment variables to handle special characters
+                local escaped_value="${value//\\/\\\\}"
+                escaped_value="${escaped_value//\"/\\\"}"
+                env_args="$env_args -e \"$var=$escaped_value\""
             else
                 # Variable name only: VAR (get value from environment)
                 if [[ -n "${!env_spec:-}" ]]; then
                     local value="${!env_spec}"
-                    env_args="$env_args -e $env_spec='$value'"
+                    # Always quote environment variables to handle special characters
+                    local escaped_value="${value//\\/\\\\}"
+                    escaped_value="${escaped_value//\"/\\\"}"
+                    env_args="$env_args -e \"$env_spec=$escaped_value\""
                 fi
             fi
         done
@@ -277,13 +288,19 @@ function get_env_forwards() {
                     [[ "$var" == "$prefix"* ]] || continue
                     local value="${!var}"
                     [[ -z "$value" ]] && continue
-                    env_args="$env_args -e $var='$value'"
+                    # Always quote environment variables to handle special characters
+                    local escaped_value="${value//\\/\\\\}"
+                    escaped_value="${escaped_value//\"/\\\"}"
+                    env_args="$env_args -e \"$var=$escaped_value\""
                 done < <(env)
             else
                 # Exact match - check if variable is set
                 if [[ -n "${!pattern:-}" ]]; then
                     local value="${!pattern}"
-                    env_args="$env_args -e $pattern='$value'"
+                    # Always quote environment variables to handle special characters
+                    local escaped_value="${value//\\/\\\\}"
+                    escaped_value="${escaped_value//\"/\\\"}"
+                    env_args="$env_args -e \"$pattern=$escaped_value\""
                 fi
             fi
         done <<< "$patterns"
@@ -295,7 +312,10 @@ function get_env_forwards() {
             [[ -z "$var" ]] && continue
             if [[ -n "${!var:-}" ]]; then
                 local value="${!var}"
-                env_args="$env_args -e $var='$value'"
+                # Always quote environment variables to handle special characters
+                local escaped_value="${value//\\/\\\\}"
+                escaped_value="${escaped_value//\"/\\\"}"
+                env_args="$env_args -e \"$var=$escaped_value\""
             fi
         done <<< "$explicit"
     fi
