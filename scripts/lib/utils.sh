@@ -8,6 +8,94 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/constants.sh"
 
+# Simple debug functions using only environment variables
+function debug_log() {
+    [[ "${DEBUG:-false}" == "true" ]] || return 0
+    echo "🐛 DEBUG: $*" >&2
+}
+
+function verbose_log() {
+    [[ "${VERBOSE:-false}" == "true" ]] || return 0
+    echo "📝 VERBOSE: $*" >&2
+}
+
+function trace_log() {
+    [[ "${TRACE:-false}" == "true" ]] || return 0
+    echo "🔍 TRACE: ${FUNCNAME[1]}: $*" >&2
+}
+
+function debug_show_info() {
+    echo "🐛 Debug Information:"
+    echo ""
+    echo "Environment:"
+    echo "  DEBUG: ${DEBUG:-false}"
+    echo "  VERBOSE: ${VERBOSE:-false}"
+    echo "  TRACE: ${TRACE:-false}"
+    echo "  Architecture: $(detect_architecture)"
+    echo "  Platform: $(uname -s)/$(uname -m)"
+    echo ""
+    echo "Available checks:"
+    echo "  dev debug --check-vm       # VM connectivity"
+    echo "  dev debug --check-docker   # Docker daemon"
+}
+
+function debug_check_vm() {
+    echo "🔍 Checking VM connectivity..."
+    local vm_name="dev-vm-docker-host"
+    
+    if command -v orb >/dev/null 2>&1; then
+        echo "✅ OrbStack CLI found"
+        if orb list | grep -q "$vm_name"; then
+            if orb list | grep -q "$vm_name.*running"; then
+                echo "✅ VM '$vm_name' is running"
+            else
+                echo "⚠️  VM '$vm_name' exists but not running"
+            fi
+        else
+            echo "❌ VM '$vm_name' not found"
+        fi
+    else
+        echo "❌ OrbStack CLI not found"
+    fi
+}
+
+function debug_check_docker() {
+    echo "🔍 Checking Docker daemon in VM..."
+    local vm_name="dev-vm-docker-host"
+    
+    # Check if VM is running first
+    if ! orb list | grep -q "$vm_name.*running"; then
+        echo "❌ VM '$vm_name' is not running"
+        echo "💡 Fix: dev env up docker-host"
+        return 1
+    fi
+    
+    echo "✅ VM '$vm_name' is running"
+    
+    # Check Docker daemon in VM (using sudo as required)
+    if orb -m "$vm_name" sudo docker version >/dev/null 2>&1; then
+        echo "✅ Docker daemon accessible in VM"
+        local version=$(orb -m "$vm_name" sudo docker version --format "{{.Server.Version}}" 2>/dev/null)
+        [[ -n "$version" ]] && echo "  Docker version: $version"
+    else
+        echo "❌ Docker daemon not accessible in VM"
+        echo "💡 Possible fixes:"
+        echo "   • Wait a moment (Docker may still be starting)"
+        echo "   • Restart VM: dev env down docker-host && dev env up docker-host"
+        echo "   • Check if Docker service is running: orb -m $vm_name systemctl status docker"
+    fi
+    
+    # Check docker-compose in VM
+    if orb -m "$vm_name" command -v docker-compose >/dev/null 2>&1; then
+        echo "✅ Docker Compose available in VM"
+    elif orb -m "$vm_name" sudo docker compose version >/dev/null 2>&1; then
+        echo "✅ Docker Compose (plugin) available in VM"
+    else
+        echo "⚠️  Docker Compose not found in VM"
+        echo "💡 Note: Modern Docker includes 'docker compose' command"
+    fi
+}
+
 function detect_architecture() {
     local arch=$(uname -m)
     case "$arch" in
@@ -125,11 +213,14 @@ function usage() {
     echo "  arch                         Architecture information"
     echo "  disk                         Show disk usage information"
     echo "  help [cmd], troubleshoot     Help and diagnostics"
+    echo "  debug [--check-*]            Debug information and checks"
     echo ""
     echo "Options:"
     echo "  -f FILE        Dockerfile path    -t TAG         Custom image tag"
     echo "  -n NAME        Container name     --platform     Target architecture"
     echo "  -y, --yes      Skip prompts       -h, --help     Show help"
+    echo "  --debug        Enable debug mode  --verbose, -v  Verbose output"
+    echo "  --trace        Enable tracing"
     echo ""
     echo "Quick Start:"
     echo "  $(basename "$0") env new docker-host    # One-time setup"
