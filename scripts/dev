@@ -308,6 +308,18 @@ while [[ $# -gt 0 ]]; do
             AUTO_YES=true
             shift
             ;;
+        --debug)
+            export DEBUG=true
+            shift
+            ;;
+        -v|--verbose)
+            export VERBOSE=true
+            shift
+            ;;
+        --trace)
+            export TRACE=true
+            shift
+            ;;
         --platform)
             TARGET_PLATFORM="$2"
             shift 2
@@ -348,6 +360,20 @@ while [[ $# -gt 0 ]]; do
                 echo "  $(basename "$0") disk               # Show disk usage information"
                 echo "  $(basename "$0") troubleshoot       # Troubleshooting guide"
             fi
+            exit 0
+            ;;
+        debug)
+            case "$2" in
+                --check-vm)
+                    debug_check_vm
+                    ;;
+                --check-docker)
+                    debug_check_docker
+                    ;;
+                *)
+                    debug_show_info
+                    ;;
+            esac
             exit 0
             ;;
         troubleshoot)
@@ -412,7 +438,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, disk, arch"
+            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, debug, disk, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;

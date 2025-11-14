@@ -10,8 +10,43 @@ source "$SCRIPT_DIR/constants.sh"
 
 function handle_env_command() {
     local env_command="$1"
-    local env_name="$2"
-    shift 2  # Remove command and env name
+    local env_name=""
+    
+    # Handle empty command
+    if [[ -z "$env_command" ]]; then
+        echo "❌ Error: Unknown env command ''"
+        echo "Use 'dev env help' for usage information."
+        exit 1
+    fi
+    
+    # Commands that don't need env_name
+    case "$env_command" in
+        list|--help|-h|help)
+            shift 1  # Only remove command
+            ;;
+        new|up|down|rm|status)
+            if [[ $# -lt 2 ]]; then
+                echo "❌ Error: Environment name required"
+                echo "Usage: $(basename "$0") env $env_command <environment>"
+                echo ""
+                echo "Available environments:"
+                local setup_dir="$DEV_HOME/setups"
+                if [[ -d "$setup_dir" ]]; then
+                    ls -1 "$setup_dir" | grep -v '\\.backup\\.' | sed 's/\\..*$//' | sort -u | sed 's/^/  /'
+                else
+                    echo "  (No environments found - run installer first)"
+                fi
+                exit 1
+            fi
+            env_name="$2"
+            shift 2  # Remove command and env name
+            ;;
+        *)
+            echo "❌ Error: Unknown env command '$env_command'"
+            echo "Use 'dev env help' for usage information."
+            exit 1
+            ;;
+    esac
     
     # Process additional flags
     while [[ $# -gt 0 ]]; do

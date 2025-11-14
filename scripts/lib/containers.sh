@@ -346,9 +346,13 @@ function build_port_forwards() {
 }
 
 function ensure_vm_running() {
+    debug_log "Checking if VM '$VM_NAME' is running"
+    
     if ! orb status "$VM_NAME" 2>/dev/null | grep -q "running"; then
+        debug_log "VM not running, AUTO_START_VM='$AUTO_START_VM'"
         if [[ "$AUTO_START_VM" == "true" ]]; then
             echo "   -> Starting VM '$VM_NAME'..."
+            verbose_log "Running: orb start $VM_NAME"
             orb start "$VM_NAME"
         else
             echo "❌ Error: VM '$VM_NAME' is not running"
@@ -356,31 +360,42 @@ function ensure_vm_running() {
             echo "   Or set auto_start_vm=true in your config"
             exit 1
         fi
+    else
+        debug_log "VM '$VM_NAME' is already running"
     fi
 }
 
 function build_image() {
     local platform_flag="$1"
     local current_arch=$(detect_architecture)
+    
+    debug_log "Building image with platform_flag='$platform_flag'"
+    trace_log "Dockerfile: $DOCKERFILE, Image: $IMAGE_NAME, VM: $VM_NAME"
+    
     echo "   -> Building Docker image '$IMAGE_NAME'..."
     echo "   -> Host architecture: $current_arch"
     
     local build_result
     if [[ -n "$platform_flag" ]]; then
         echo "   -> Target platform: ${platform_flag#--platform }"
+        verbose_log "Docker build command: docker build $platform_flag -f $DOCKERFILE -t $IMAGE_NAME ."
         orb -m "$VM_NAME" sudo docker build $platform_flag -f "$DOCKERFILE" -t "$IMAGE_NAME" .
         build_result=$?
     else
         echo "   -> Target platform: auto-detected (linux/$current_arch)"
+        verbose_log "Docker build command: docker build -f $DOCKERFILE -t $IMAGE_NAME ."
         orb -m "$VM_NAME" sudo docker build -f "$DOCKERFILE" -t "$IMAGE_NAME" .
         build_result=$?
     fi
     
     if [[ $build_result -ne 0 ]]; then
+        debug_log "Docker build failed with exit code: $build_result"
         echo "❌ Error: Docker build failed"
         echo "   Check your Dockerfile and requirements files"
         exit 1
     fi
+    
+    debug_log "Docker build completed successfully"
 }
 
 function cleanup_existing_container() {
