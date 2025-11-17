@@ -44,32 +44,22 @@ function get_config_array() {
         return
     fi
     
-    local section_key="${key%%.*}"
-    local array_key="${key##*.}"
-    
-    local inline_array=$(awk -v section="$section_key" -v array="$array_key" '
-        /^[a-zA-Z_]/ { in_section=0 }
-        $0 ~ "^" section ":" { in_section=1; next }
-        in_section && $0 ~ "^  " array ": *\\[" { 
-            sub(/^.*: *\[/, ""); sub(/\].*$/, ""); 
-            gsub(/ *, */, "\n"); gsub(/^ *| *$/, ""); 
-            if (length($0) > 0) print; 
-            exit 
-        }
-    ' "$config_file")
-    
-    if [[ -n "$inline_array" ]]; then
-        echo "$inline_array"
-        return
+    # Use yq for consistent YAML parsing
+    if command -v yq >/dev/null 2>&1; then
+        yq eval ".${key}[]" "$config_file" 2>/dev/null | grep -v "^null$" || true
+    else
+        # Fallback to awk for systems without yq
+        local section_key="${key%%.*}"
+        local array_key="${key##*.}"
+        
+        awk -v section="$section_key" -v array="$array_key" '
+            /^[a-zA-Z_]/ { in_section=0 }
+            $0 ~ "^" section ":" { in_section=1; next }
+            in_section && $0 ~ "^  " array ":" { in_array=1; next }
+            in_array && /^    - / { sub(/^    - /, ""); print; next }
+            in_array && /^  [a-z]/ { exit }
+        ' "$config_file"
     fi
-    
-    awk -v section="$section_key" -v array="$array_key" '
-        /^[a-zA-Z_]/ { in_section=0 }
-        $0 ~ "^" section ":" { in_section=1; next }
-        in_section && $0 ~ "^  " array ":" { in_array=1; next }
-        in_array && /^    - / { sub(/^    - /, ""); print; next }
-        in_array && /^  [a-z]/ { exit }
-    ' "$config_file"
 }
 
 function get_config_type() {
