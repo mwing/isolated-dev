@@ -8,21 +8,20 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/constants.sh"
 
-# Simple debug functions using only environment variables
-function debug_log() {
-    [[ "${DEBUG:-false}" == "true" ]] || return 0
-    echo "🐛 DEBUG: $*" >&2
+# Consolidated logging function with levels
+function log() {
+    local level="$1"; shift
+    case "$level" in
+        debug) [[ "${DEBUG:-false}" == "true" ]] && echo "🐛 DEBUG: $*" >&2 ;;
+        verbose) [[ "${VERBOSE:-false}" == "true" ]] && echo "📝 VERBOSE: $*" >&2 ;;
+        trace) [[ "${TRACE:-false}" == "true" ]] && echo "🔍 TRACE: ${FUNCNAME[2]}: $*" >&2 ;;
+    esac
 }
 
-function verbose_log() {
-    [[ "${VERBOSE:-false}" == "true" ]] || return 0
-    echo "📝 VERBOSE: $*" >&2
-}
-
-function trace_log() {
-    [[ "${TRACE:-false}" == "true" ]] || return 0
-    echo "🔍 TRACE: ${FUNCNAME[1]}: $*" >&2
-}
+# Legacy compatibility functions
+function debug_log() { log debug "$@"; }
+function verbose_log() { log verbose "$@"; }
+function trace_log() { log trace "$@"; }
 
 function debug_show_info() {
     echo "🐛 Debug Information:"
@@ -41,7 +40,9 @@ function debug_show_info() {
 
 function debug_check_vm() {
     echo "🔍 Checking VM connectivity..."
-    local vm_name="dev-vm-docker-host"
+    local vm_name="${1:-dev-vm-docker-host}"
+    
+    [[ -z "$vm_name" ]] && { echo "❌ VM name required"; return 1; }
     
     if command -v orb >/dev/null 2>&1; then
         echo "✅ OrbStack CLI found"
@@ -61,7 +62,9 @@ function debug_check_vm() {
 
 function debug_check_docker() {
     echo "🔍 Checking Docker daemon in VM..."
-    local vm_name="dev-vm-docker-host"
+    local vm_name="${1:-dev-vm-docker-host}"
+    
+    [[ -z "$vm_name" ]] && { echo "❌ VM name required"; return 1; }
     
     # Check if VM is running first
     if ! orb list | grep -q "$vm_name.*running"; then

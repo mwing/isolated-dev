@@ -194,20 +194,20 @@ function prepare_and_run_container() {
     echo ""
     echo "$ready_msg. Your project folder is at '/workspace'."
     
-    # Build command with proper escaping
-    local cmd="orb -m \"$VM_NAME\" sudo docker run -it --rm"
-    [[ -n "$security_flags" ]] && cmd="$cmd $security_flags"
-    [[ -n "$volume_mounts" ]] && cmd="$cmd $volume_mounts"
-    [[ -n "$ssh_mounts" ]] && cmd="$cmd $ssh_mounts"
-    [[ -n "$gpg_mounts" ]] && cmd="$cmd $gpg_mounts"
-    [[ -n "$port_forwards" ]] && cmd="$cmd $port_forwards"
-    [[ -n "$env_forwards" ]] && cmd="$cmd $env_forwards"
-    [[ -n "$resource_limits" ]] && cmd="$cmd $resource_limits"
-    cmd="$cmd --name \"$CONTAINER_NAME\" \"$IMAGE_NAME\""
-    [[ -n "$cmd_args" ]] && cmd="$cmd $cmd_args"
+    # Build command array for proper argument handling
+    local cmd_array=(orb -m "$VM_NAME" sudo docker run -it --rm)
+    [[ -n "$security_flags" ]] && cmd_array+=($security_flags)
+    [[ -n "$volume_mounts" ]] && cmd_array+=($volume_mounts)
+    [[ -n "$ssh_mounts" ]] && cmd_array+=($ssh_mounts)
+    [[ -n "$gpg_mounts" ]] && cmd_array+=($gpg_mounts)
+    [[ -n "$port_forwards" ]] && cmd_array+=($port_forwards)
+    [[ -n "$env_forwards" ]] && cmd_array+=($env_forwards)
+    [[ -n "$resource_limits" ]] && cmd_array+=($resource_limits)
+    cmd_array+=(--name "$CONTAINER_NAME" "$IMAGE_NAME")
+    [[ -n "$cmd_args" ]] && cmd_array+=($cmd_args)
     
-    # Execute using eval to properly handle quotes
-    if ! eval "$cmd"; then
+    # Execute with proper argument handling
+    if ! "${cmd_array[@]}"; then
         
         # Check if it was a port conflict
         if orb -m "$VM_NAME" sudo docker logs "$CONTAINER_NAME" 2>&1 | grep -q "port is already allocated"; then
@@ -241,15 +241,11 @@ function get_env_forwards() {
             if [[ "$env_spec" == *"="* ]]; then
                 local var="${env_spec%%=*}"
                 local value="${env_spec#*=}"
-                local escaped_value="${value//\\/\\\\}"
-                escaped_value="${escaped_value//\"/\\\"}"
-                env_args="$env_args -e \"$var=$escaped_value\""
+                env_args="$env_args -e \"$var=$value\""
             else
                 if [[ -n "${!env_spec:-}" ]]; then
                     local value="${!env_spec}"
-                    local escaped_value="${value//\\/\\\\}"
-                    escaped_value="${escaped_value//\"/\\\"}"
-                    env_args="$env_args -e \"$env_spec=$escaped_value\""
+                    env_args="$env_args -e \"$env_spec=$value\""
                 fi
             fi
         done
@@ -278,16 +274,12 @@ function get_env_forwards() {
                     [[ "$var" == "$prefix"* ]] || continue
                     local value="${!var}"
                     [[ -z "$value" ]] && continue
-                    local escaped_value="${value//\\/\\\\}"
-                    escaped_value="${escaped_value//\"/\\\"}"
-                    env_args="$env_args -e \"$var=$escaped_value\""
+                    env_args="$env_args -e \"$var=$value\""
                 done < <(env)
             else
                 if [[ -n "${!pattern:-}" ]]; then
                     local value="${!pattern}"
-                    local escaped_value="${value//\\/\\\\}"
-                    escaped_value="${escaped_value//\"/\\\"}"
-                    env_args="$env_args -e \"$pattern=$escaped_value\""
+                    env_args="$env_args -e \"$pattern=$value\""
                 fi
             fi
         done <<< "$patterns"
@@ -298,9 +290,7 @@ function get_env_forwards() {
             [[ -z "$var" ]] && continue
             if [[ -n "${!var:-}" ]]; then
                 local value="${!var}"
-                local escaped_value="${value//\\/\\\\}"
-                escaped_value="${escaped_value//\"/\\\"}"
-                env_args="$env_args -e \"$var=$escaped_value\""
+                env_args="$env_args -e \"$var=$value\""
             fi
         done <<< "$explicit"
     fi

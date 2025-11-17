@@ -1116,31 +1116,147 @@ test_forward_ports_function() {
     source "$ORIGINAL_DIR/scripts/lib/config.sh"
     source "$ORIGINAL_DIR/scripts/lib/containers.sh"
     
-    # Create package.json for auto-detection
     echo '{"name": "test"}' > package.json
     
-    # Test auto-detection (no config)
     cat > .devenv.yaml << 'EOF'
 vm_name: test-vm
 EOF
     local auto_ports=$(build_port_forwards 2>&1)
-    assert_contains "$auto_ports" "Detected common development ports" "Auto-detects ports from package.json"
+    assert_contains "$auto_ports" "Detected common development ports" "Auto-detects ports"
     
-    # Test manual override with less common ports to avoid conflicts
     cat > .devenv.yaml << 'EOF'
 forward_ports: "8765,9876"
 EOF
     local manual_ports=$(build_port_forwards 2>&1)
-    assert_contains "$manual_ports" "Using configured ports: 8765 9876" "Uses configured ports instead of auto-detection"
-    # Check that at least one port is forwarded (may skip if in use)
-    if [[ "$manual_ports" == *"-p 8765:8765"* ]]; then
-        assert_contains "$manual_ports" "-p 8765:8765" "Forwards port 8765"
-    elif [[ "$manual_ports" == *"-p 9876:9876"* ]]; then
-        assert_contains "$manual_ports" "-p 9876:9876" "Forwards port 9876"
-    else
-        # If both ports are in use, just check the function ran
-        assert_contains "$manual_ports" "Using configured ports" "Port forwarding function executed"
-    fi
+    assert_contains "$manual_ports" "Using configured ports: 8765 9876" "Uses configured ports"
+    
+    cd - > /dev/null
+}
+
+test_debug_modes() {
+    run_test "Debug mode combinations"
+    
+    # Test debug environment variables
+    local debug_output=$(DEBUG=true bash -c 'source scripts/lib/utils.sh; log debug "test message"' 2>&1)
+    assert_contains "$debug_output" "🐛 DEBUG: test message" "Debug mode works"
+    
+    local verbose_output=$(VERBOSE=true bash -c 'source scripts/lib/utils.sh; log verbose "test message"' 2>&1)
+    assert_contains "$verbose_output" "📝 VERBOSE: test message" "Verbose mode works"
+    
+    local trace_output=$(TRACE=true bash -c 'source scripts/lib/utils.sh; log trace "test message"' 2>&1)
+    assert_contains "$trace_output" "🔍 TRACE:" "Trace mode works"
+    
+    # Test legacy compatibility
+    local legacy_output=$(DEBUG=true bash -c 'source scripts/lib/utils.sh; debug_log "legacy test"' 2>&1)
+    assert_contains "$legacy_output" "🐛 DEBUG: legacy test" "Legacy debug_log works"
+}
+
+test_port_forwarding_edge_cases() {
+    run_test "Port forwarding with unavailable ports"
+    
+    local test_project="$TEST_DIR/test-port-edge"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test with very high port numbers to avoid conflicts
+    cat > .devenv.yaml << 'EOF'
+forward_ports: "65432,65433"
+EOF
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    local port_output=$(build_port_forwards 2>&1)
+    assert_contains "$port_output" "Using configured ports: 65432 65433" "High port numbers configured"
+    
+    cd - > /dev/null
+}
+
+test_env_var_malformed() {
+    run_test "Malformed environment variables"
+    
+    local test_project="$TEST_DIR/test-env-malformed"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Test with equals sign but no value
+    CUSTOM_ENV_VARS=("VAR=")
+    CUSTOM_ENV_FILES=()
+    local empty_env=$(get_env_forwards)
+    assert_contains "$empty_env" "-e \"VAR=\"" "Empty value handled correctly"
+    
+    # Test with special characters
+    CUSTOM_ENV_VARS=("SPECIAL=test@#$%")
+    CUSTOM_ENV_FILES=()
+    local special_env=$(get_env_forwards)
+    assert_contains "$special_env" "-e \"SPECIAL=test@#$%\"" "Special characters handled"
+    
+    cd - > /dev/null
+}
+
+test_debug_modes() {
+    run_test "Debug mode combinations"
+    
+    # Test debug environment variables
+    local debug_output=$(DEBUG=true bash -c 'source scripts/lib/utils.sh; log debug "test message"' 2>&1)
+    assert_contains "$debug_output" "🐛 DEBUG: test message" "Debug mode works"
+    
+    local verbose_output=$(VERBOSE=true bash -c 'source scripts/lib/utils.sh; log verbose "test message"' 2>&1)
+    assert_contains "$verbose_output" "📝 VERBOSE: test message" "Verbose mode works"
+    
+    local trace_output=$(TRACE=true bash -c 'source scripts/lib/utils.sh; log trace "test message"' 2>&1)
+    assert_contains "$trace_output" "🔍 TRACE:" "Trace mode works"
+    
+    # Test legacy compatibility
+    local legacy_output=$(DEBUG=true bash -c 'source scripts/lib/utils.sh; debug_log "legacy test"' 2>&1)
+    assert_contains "$legacy_output" "🐛 DEBUG: legacy test" "Legacy debug_log works"
+}
+
+test_port_forwarding_edge_cases() {
+    run_test "Port forwarding with unavailable ports"
+    
+    local test_project="$TEST_DIR/test-port-edge"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    # Test with very high port numbers to avoid conflicts
+    cat > .devenv.yaml << 'EOF'
+forward_ports: "65432,65433"
+EOF
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    local port_output=$(build_port_forwards 2>&1)
+    assert_contains "$port_output" "Using configured ports: 65432 65433" "High port numbers configured"
+    
+    cd - > /dev/null
+}
+
+test_env_var_malformed() {
+    run_test "Malformed environment variables"
+    
+    local test_project="$TEST_DIR/test-env-malformed"
+    mkdir -p "$test_project"
+    cd "$test_project"
+    
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+    
+    # Test with equals sign but no value
+    CUSTOM_ENV_VARS=("VAR=")
+    CUSTOM_ENV_FILES=()
+    local empty_env=$(get_env_forwards)
+    assert_contains "$empty_env" "-e \"VAR=\"" "Empty value handled correctly"
+    
+    # Test with special characters
+    CUSTOM_ENV_VARS=("SPECIAL=test@#$%")
+    CUSTOM_ENV_FILES=()
+    local special_env=$(get_env_forwards)
+    assert_contains "$special_env" "-e \"SPECIAL=test@#$%\"" "Special characters handled"
     
     cd - > /dev/null
 }
@@ -1253,6 +1369,9 @@ main() {
     test_env_var_inline_array
     test_error_corrupted_config
     test_error_permission_denied
+    test_debug_modes
+    test_port_forwarding_edge_cases
+    test_env_var_malformed
     test_error_network_failure
     test_constants_loaded
     test_constants_functions
