@@ -724,6 +724,9 @@ Contributions are welcome! To ensure code quality and functionality:
 
 # In CI environments (automatically skips OrbStack-dependent tests)
 CI=true ./test.sh
+
+# Run only integration tests (requires OrbStack)
+./integration-test.sh
 ```
 
 **Test Coverage:**
