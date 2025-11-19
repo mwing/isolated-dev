@@ -28,6 +28,7 @@ source "$LIB_DIR/containers.sh"
 source "$LIB_DIR/templates.sh"
 source "$LIB_DIR/languages.sh"
 source "$LIB_DIR/security.sh"
+source "$LIB_DIR/project_init.sh"
 
 
 
@@ -170,126 +171,9 @@ while [[ $# -gt 0 ]]; do
             esac
             ;;
         new)
-            # Parse flags first to handle cases like "dev new --yes"
-            init_project=false
-            generate_devcontainer=false
-            language=""
-            shift 1  # Remove 'new'
-            
-            # Process all arguments
-            while [[ $# -gt 0 ]]; do
-                case $1 in
-                    --help|-h)
-                        show_command_help "new"
-                        exit 0
-                        ;;
-                    --init)
-                        init_project=true
-                        shift
-                        ;;
-                    --devcontainer)
-                        generate_devcontainer=true
-                        shift
-                        ;;
-                    --yes|-y)
-                        AUTO_YES=true
-                        shift
-                        ;;
-                    -*)
-                        echo "❌ Error: Unknown flag for 'new' command: $1"
-                        exit 1
-                        ;;
-                    *)
-                        if [[ -z "$language" ]]; then
-                            language="$1"
-                        else
-                            echo "❌ Error: Multiple language arguments provided: $language and $1"
-                            exit 1
-                        fi
-                        shift
-                        ;;
-                esac
-            done
-            
-            # If no language specified, auto-detect
-            if [[ -z "$language" ]]; then
-                # Try new language system first, fallback to old system
-                if [[ -d "$LANGUAGES_DIR" ]]; then
-                    detection_result=$(detect_project_type_from_languages "$LANGUAGES_DIR")
-                else
-                    detection_result=$(detect_project_type)
-                fi
-                detected_lang=$(echo "$detection_result" | cut -d: -f1)
-                detected_version=$(echo "$detection_result" | cut -d: -f2)
-                confidence=$(echo "$detection_result" | cut -d: -f3)
-                
-                if [[ -n "$detected_lang" ]]; then
-                    current_arch=$(detect_architecture)
-                    suggested_template="$detected_lang"
-                    
-                    # Add version if detected and available, otherwise find best match
-                    if [[ -n "$detected_version" ]]; then
-                        # Try exact match first
-                        if [[ -f "$TEMPLATES_DIR/Dockerfile-$detected_lang-$detected_version" ]]; then
-                            suggested_template="$detected_lang-$detected_version"
-                        else
-                            # Try major.minor match (e.g., 3.12.0 -> 3.12)
-                            major_minor=$(echo "$detected_version" | cut -d. -f1,2)
-                            if [[ -f "$TEMPLATES_DIR/Dockerfile-$detected_lang-$major_minor" ]]; then
-                                suggested_template="$detected_lang-$major_minor"
-                            else
-                                # Fall back to latest available
-                                latest_template=$(find "$TEMPLATES_DIR" -name "Dockerfile-$detected_lang-*" -type f 2>/dev/null | \
-                                    sed "s/.*Dockerfile-$detected_lang-//" | \
-                                    sort -V | tail -1)
-                                if [[ -n "$latest_template" ]]; then
-                                    suggested_template="$detected_lang-$latest_template"
-                                fi
-                            fi
-                        fi
-                    else
-                        # Find the latest version available locally
-                        latest_template=$(find "$TEMPLATES_DIR" -name "Dockerfile-$detected_lang-*" -type f 2>/dev/null | \
-                            sed "s/.*Dockerfile-$detected_lang-//" | \
-                            sort -V | tail -1)
-                        if [[ -n "$latest_template" ]]; then
-                            suggested_template="$detected_lang-$latest_template"
-                        fi
-                    fi
-                    
-                    echo "🔍 Project Detection Results:"
-                    echo "   Language: $detected_lang"
-                    [[ -n "$detected_version" ]] && echo "   Version: $detected_version"
-                    echo "   Architecture: $current_arch"
-                    echo "   Confidence: $confidence"
-                    echo ""
-                    echo "💡 Suggested template: $suggested_template"
-                    
-                    if [[ "$AUTO_YES" == "true" ]]; then
-                        echo "Auto-confirming suggestion (--yes flag set)"
-                        create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
-                    else
-                        echo -n "Use this template? (Y/n): "
-                        read -r response
-                        if [[ -z "$response" ]] || [[ "$response" =~ ^[Yy]$ ]]; then
-                            create_from_template "$suggested_template" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
-                        else
-                            echo "Template creation cancelled."
-                            echo "Use 'dev list' to see available options or 'dev new <language>' to specify manually."
-                            exit 0
-                        fi
-                    fi
-                else
-                    echo "🔍 No project files detected in current directory."
-                    echo "Use 'dev new <language>' to create a template manually."
-                    echo "Available languages: python, node, golang, rust, java, php, bash"
-                    echo "Example: dev new python-3.13 --init"
-                    exit 1
-                fi
-            else
-                # Language specified manually
-                create_from_template "$language" "$init_project" "$TARGET_PLATFORM" "$generate_devcontainer"
-            fi
+            shift 1
+            handle_new_command "$@"
+            exit 0
             ;;
 
         -f|--file)
