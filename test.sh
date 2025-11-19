@@ -669,20 +669,20 @@ test_env_parsing() {
     CUSTOM_ENV_VARS=("TEST_VAR")
     CUSTOM_ENV_FILES=()
     local single_env=$(get_env_forwards)
-    assert_contains "$single_env" "-e \"TEST_VAR=test_value\"" "Single env var passed correctly"
+    assert_contains "$single_env" "-e TEST_VAR=test_value" "Single env var passed correctly"
     
     # Test with env var containing special characters (like GitLab token)
     export GITLAB_TOKEN="glpat-abc123.456.xyz789"
     CUSTOM_ENV_VARS=("GITLAB_TOKEN")
     CUSTOM_ENV_FILES=()
     local token_env=$(get_env_forwards)
-    assert_contains "$token_env" "-e \"GITLAB_TOKEN=glpat-abc123.456.xyz789\"" "Token with special chars passed correctly"
+    assert_contains "$token_env" "-e GITLAB_TOKEN=glpat-abc123.456.xyz789" "Token with special chars passed correctly"
     
     # Test with env var with explicit value
     CUSTOM_ENV_VARS=("NODE_ENV=production")
     CUSTOM_ENV_FILES=()
     local explicit_env=$(get_env_forwards)
-    assert_contains "$explicit_env" "-e \"NODE_ENV=production\"" "Explicit value passed correctly"
+    assert_contains "$explicit_env" "-e NODE_ENV=production" "Explicit value passed correctly"
     
     # Test with multiple env vars
     export VAR1="value1"
@@ -690,8 +690,8 @@ test_env_parsing() {
     CUSTOM_ENV_VARS=("VAR1" "VAR2")
     CUSTOM_ENV_FILES=()
     local multi_env=$(get_env_forwards)
-    assert_contains "$multi_env" "-e \"VAR1=value1\"" "First var in multiple passed correctly"
-    assert_contains "$multi_env" "-e \"VAR2=value2\"" "Second var in multiple passed correctly"
+    assert_contains "$multi_env" "-e VAR1=value1" "First var in multiple passed correctly"
+    assert_contains "$multi_env" "-e VAR2=value2" "Second var in multiple passed correctly"
     
     # Test with env file
     cat > test.env << 'EOF'
@@ -714,7 +714,7 @@ EOF
     CUSTOM_ENV_VARS=("COMBO_VAR")
     CUSTOM_ENV_FILES=("test.env")
     local combo_env=$(get_env_forwards)
-    assert_contains "$combo_env" "-e \"COMBO_VAR=combo_value\"" "Var passed in combination"
+    assert_contains "$combo_env" "-e COMBO_VAR=combo_value" "Var passed in combination"
     assert_contains "$combo_env" "--env-file test.env" "File passed in combination"
     
     # Clean up
@@ -895,13 +895,13 @@ EOF
     local inline_env=$(get_env_forwards)
     
     # Check that explicit variables are passed correctly
-    assert_contains "$inline_env" "-e \"TEST_VAR1=value1\"" "Inline explicit var 1 passed correctly"
-    assert_contains "$inline_env" "-e \"TEST_VAR2=value2\"" "Inline explicit var 2 passed correctly"
-    assert_contains "$inline_env" "-e \"CUSTOM_VAR=custom_value\"" "Inline explicit custom var passed correctly"
-    assert_contains "$inline_env" "-e \"SPACE_VAR=hello world\"" "Variable with spaces passed correctly"
+    assert_contains "$inline_env" "-e TEST_VAR1=value1" "Inline explicit var 1 passed correctly"
+    assert_contains "$inline_env" "-e TEST_VAR2=value2" "Inline explicit var 2 passed correctly"
+    assert_contains "$inline_env" "-e CUSTOM_VAR=custom_value" "Inline explicit custom var passed correctly"
+    assert_contains "$inline_env" "-e SPACE_VAR=hello world" "Variable with spaces passed correctly"
     
     # Check that pattern variables still work
-    assert_contains "$inline_env" "-e \"AWS_PROFILE=test\"" "Pattern var still works with inline explicit"
+    assert_contains "$inline_env" "-e AWS_PROFILE=test" "Pattern var still works with inline explicit"
     
     # Verify no single quotes around values (the old bug)
     assert_not_contains "$inline_env" "='value1'" "No single quotes around values"
@@ -1186,13 +1186,13 @@ test_env_var_malformed() {
     CUSTOM_ENV_VARS=("VAR=")
     CUSTOM_ENV_FILES=()
     local empty_env=$(get_env_forwards)
-    assert_contains "$empty_env" "-e \"VAR=\"" "Empty value handled correctly"
+    assert_contains "$empty_env" "-e VAR=" "Empty value handled correctly"
     
     # Test with special characters
     CUSTOM_ENV_VARS=("SPECIAL=test@#$%")
     CUSTOM_ENV_FILES=()
     local special_env=$(get_env_forwards)
-    assert_contains "$special_env" "-e \"SPECIAL=test@#$%\"" "Special characters handled"
+    assert_contains "$special_env" "-e SPECIAL=test@#$%" "Special characters handled"
     
     cd - > /dev/null
 }
@@ -1250,13 +1250,13 @@ test_env_var_malformed() {
     CUSTOM_ENV_VARS=("VAR=")
     CUSTOM_ENV_FILES=()
     local empty_env=$(get_env_forwards)
-    assert_contains "$empty_env" "-e \"VAR=\"" "Empty value handled correctly"
+    assert_contains "$empty_env" "-e VAR=" "Empty value handled correctly"
     
     # Test with special characters
     CUSTOM_ENV_VARS=("SPECIAL=test@#$%")
     CUSTOM_ENV_FILES=()
     local special_env=$(get_env_forwards)
-    assert_contains "$special_env" "-e \"SPECIAL=test@#$%\"" "Special characters handled"
+    assert_contains "$special_env" "-e SPECIAL=test@#$%" "Special characters handled"
     
     cd - > /dev/null
 }

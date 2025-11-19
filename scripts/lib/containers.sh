@@ -201,7 +201,11 @@ function prepare_and_run_container() {
     [[ -n "$ssh_mounts" ]] && cmd_array+=($ssh_mounts)
     [[ -n "$gpg_mounts" ]] && cmd_array+=($gpg_mounts)
     [[ -n "$port_forwards" ]] && cmd_array+=($port_forwards)
+    
+    # Add environment variables properly
+    local env_forwards=$(get_env_forwards)
     [[ -n "$env_forwards" ]] && cmd_array+=($env_forwards)
+    
     [[ -n "$resource_limits" ]] && cmd_array+=($resource_limits)
     cmd_array+=(--name "$CONTAINER_NAME" "$IMAGE_NAME")
     [[ -n "$cmd_args" ]] && cmd_array+=($cmd_args)
@@ -241,11 +245,11 @@ function get_env_forwards() {
             if [[ "$env_spec" == *"="* ]]; then
                 local var="${env_spec%%=*}"
                 local value="${env_spec#*=}"
-                env_args="$env_args -e \"$var=$value\""
+                env_args="$env_args -e $var=$value"
             else
                 if [[ -n "${!env_spec:-}" ]]; then
                     local value="${!env_spec}"
-                    env_args="$env_args -e \"$env_spec=$value\""
+                    env_args="$env_args -e $env_spec=$value"
                 fi
             fi
         done
@@ -274,12 +278,12 @@ function get_env_forwards() {
                     [[ "$var" == "$prefix"* ]] || continue
                     local value="${!var}"
                     [[ -z "$value" ]] && continue
-                    env_args="$env_args -e \"$var=$value\""
+                    env_args="$env_args -e $var=$value"
                 done < <(env)
             else
                 if [[ -n "${!pattern:-}" ]]; then
                     local value="${!pattern}"
-                    env_args="$env_args -e \"$pattern=$value\""
+                    env_args="$env_args -e $pattern=$value"
                 fi
             fi
         done <<< "$patterns"
@@ -290,7 +294,7 @@ function get_env_forwards() {
             [[ -z "$var" ]] && continue
             if [[ -n "${!var:-}" ]]; then
                 local value="${!var}"
-                env_args="$env_args -e \"$var=$value\""
+                env_args="$env_args -e $var=$value"
             fi
         done <<< "$explicit"
     fi
