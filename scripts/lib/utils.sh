@@ -235,29 +235,6 @@ function usage() {
     exit 0
 }
 
-function show_new_help() {
-    echo "Usage: $(basename "$0") new [<language>] [--init] [--devcontainer]"
-    echo ""
-    echo "Create a Dockerfile from a language template."
-    echo ""
-    echo "Arguments:"
-    echo "  <language>     Language template (python, node, golang, rust, java, php, bash)"
-    echo "                 Optionally specify version: python-3.12, node-22, etc."
-    echo "                 If omitted, auto-detects project type from current directory"
-    echo ""
-    echo "Options:"
-    echo "  --init         Also create project scaffolding for the language"
-    echo "  --devcontainer Also generate VS Code devcontainer.json configuration"
-    echo "  --yes, -y      Skip confirmation prompts"
-    echo ""
-    echo "Examples:"
-    echo "  $(basename "$0") new                   # Auto-detect project type"
-    echo "  $(basename "$0") new python           # Latest Python template"
-    echo "  $(basename "$0") new python-3.11      # Specific Python version"
-    echo "  $(basename "$0") new node --init       # Node.js with package.json"
-    echo "  $(basename "$0") new rust --init --devcontainer  # Rust with VS Code config"
-}
-
 function show_config_help() {
     echo "Usage: $(basename "$0") config [--edit|--init|validate]"
     echo ""
@@ -374,38 +351,6 @@ function show_arch_help() {
     echo "  $(basename "$0") --platform linux/arm64  # Use specific platform"
 }
 
-function show_devcontainer_help() {
-    echo "Usage: $(basename "$0") devcontainer [<language>] [-f <dockerfile>]"
-    echo ""
-    echo "Generate VS Code devcontainer.json configuration for seamless IDE integration."
-    echo ""
-    echo "Arguments:"
-    echo "  <language>     Language template (python, node, golang, rust, java, php, bash)"
-    echo "                 Optionally specify version: python-3.12, node-22, etc."
-    echo "                 If omitted, auto-detects project type from current directory"
-    echo ""
-    echo "Options:"
-    echo "  -f FILE        Path to Dockerfile (default: ./Dockerfile)"
-    echo "  --yes, -y      Skip confirmation prompts"
-    echo ""
-    echo "What it creates:"
-    echo "  • .devcontainer/devcontainer.json with language-specific settings"
-    echo "  • Automatic port forwarding based on detected project type"
-    echo "  • SSH key and git configuration mounting"
-    echo "  • Language-specific VS Code extensions and settings"
-    echo ""
-    echo "Examples:"
-    echo "  $(basename "$0") devcontainer              # Auto-detect project type"
-    echo "  $(basename "$0") devcontainer python       # Python devcontainer"
-    echo "  $(basename "$0") devcontainer node-22      # Node.js v22 devcontainer"
-    echo "  $(basename "$0") devcontainer rust -f Dockerfile.dev  # Custom Dockerfile"
-    echo ""
-    echo "After generation:"
-    echo "  1. Open project in VS Code"
-    echo "  2. Install 'Dev Containers' extension"
-    echo "  3. Cmd+Shift+P → 'Dev Containers: Reopen in Container'"
-}
-
 function show_command_help() {
     local command="$1"
     case "$command" in
@@ -471,95 +416,5 @@ function list_templates() {
     echo "  dev new <language>         # Use default/latest version"
     echo "  dev new <language-version> # Use specific version"
     echo "  dev new python-3.13 --init # Create with project scaffolding"
-    exit 0
-}
-
-function handle_devcontainer_command() {
-    local language="$1"
-    local dockerfile_path="$2"
-    
-    # Check if Dockerfile exists
-    if [[ ! -f "$dockerfile_path" ]]; then
-        echo "❌ Error: Dockerfile not found at '$dockerfile_path'"
-        echo ""
-        echo "💡 Suggestions:"
-        echo "   • Create from template: 'dev new <language>'"
-        echo "   • Use different file: 'dev devcontainer <language> -f /path/to/Dockerfile'"
-        echo "   • See available templates: 'dev list'"
-        exit 1
-    fi
-    
-    # Auto-detect language if not provided
-    if [[ -z "$language" ]]; then
-        echo "🔍 Auto-detecting project type..."
-        local detection_result=$(detect_project_type)
-        local detected_lang=$(echo "$detection_result" | cut -d: -f1)
-        local detected_version=$(echo "$detection_result" | cut -d: -f2)
-        
-        if [[ -n "$detected_lang" ]]; then
-            if [[ -n "$detected_version" ]]; then
-                language="$detected_lang-$detected_version"
-            else
-                language="$detected_lang"
-            fi
-            echo "   Detected: $language"
-        else
-            echo "❌ Error: Could not auto-detect project type."
-            echo "Please specify the language: 'dev devcontainer <language>'"
-            echo "Available languages: python, node, golang, rust, java, php, bash"
-            exit 1
-        fi
-    fi
-    
-    # Check if .devcontainer already exists
-    if [[ -d ".devcontainer" ]]; then
-        echo "⚠️  Warning: .devcontainer directory already exists."
-        if [[ "$AUTO_YES" == "true" ]]; then
-            echo "Auto-confirming overwrite (--yes flag set)"
-        else
-            echo -n "Do you want to overwrite it? (y/N): "
-            read -r response
-            if [[ ! "$response" =~ ^[Yy]$ ]]; then
-                echo "Operation cancelled."
-                exit 0
-            fi
-        fi
-    fi
-    
-    # Parse language and version
-    local base_lang="${language%%-*}"
-    local version="${language#*-}"
-    if [[ "$base_lang" == "$version" ]]; then
-        version=""
-    fi
-    
-    echo "🔧 Generating VS Code devcontainer configuration..."
-    echo "   Language: $base_lang"
-    [[ -n "$version" ]] && echo "   Version: $version"
-    echo "   Dockerfile: $dockerfile_path"
-    
-    # Generate the devcontainer configuration
-    if generate_devcontainer_config "$language" "$version" "$dockerfile_path"; then
-        echo ""
-        echo "✅ VS Code devcontainer configuration created!"
-        echo ""
-        echo "📁 Generated files:"
-        echo "   .devcontainer/devcontainer.json"
-        echo ""
-        echo "🚀 Next steps:"
-        echo "   1. Open this project in VS Code"
-        echo "   2. Install the 'Dev Containers' extension if not already installed"
-        echo "   3. Press Cmd+Shift+P and select 'Dev Containers: Reopen in Container'"
-        echo "   4. VS Code will build and open your project in the isolated container"
-        echo ""
-        echo "💡 Benefits:"
-        echo "   • Full IDE features (IntelliSense, debugging, extensions)"
-        echo "   • Automatic port forwarding and SSH key mounting"
-        echo "   • Consistent development environment across your team"
-    else
-        echo "❌ Error: Failed to generate devcontainer configuration"
-        exit 1
-    fi
-    
     exit 0
 }
