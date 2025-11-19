@@ -115,6 +115,18 @@ Your project is mounted at `/workspace` in the container with automatic:
 - Port forwarding based on project type
 - SSH key mounting for git operations
 - Git configuration sharing
+ 
+ ### 4. Interactive Mode
+ ```bash
+ dev interactive  # Launch the interactive menu
+ ```
+ 
+ The interactive menu provides a guided experience for:
+ - Creating new projects (with version selection)
+ - Managing environments and configuration
+ - Troubleshooting and help
+ 
+ If you run `dev` in a directory without a `Dockerfile`, the interactive menu launches automatically.
 
 ## Available Templates
 
@@ -248,6 +260,7 @@ dev new <language> --init         # Create template with project scaffolding
 dev new <language> --devcontainer # Create template with VS Code devcontainer.json
 dev new <language> --init --devcontainer --yes  # Full setup with scaffolding and VS Code
 dev devcontainer [language]       # Generate VS Code devcontainer.json for existing project
+dev interactive                   # Launch interactive menu
 dev                               # Build and run container (default)
 dev shell                         # Open interactive bash shell in container
 dev build                         # Build image only

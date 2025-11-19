@@ -29,6 +29,7 @@ source "$LIB_DIR/templates.sh"
 source "$LIB_DIR/languages.sh"
 source "$LIB_DIR/security.sh"
 source "$LIB_DIR/project_init.sh"
+source "$LIB_DIR/interactive.sh"
 
 
 
@@ -45,6 +46,7 @@ AUTO_YES=false
 TARGET_PLATFORM=""
 CUSTOM_ENV_VARS=()
 CUSTOM_ENV_FILES=()
+EXPLICIT_COMMAND=false
 
 # Process command line arguments
 while [[ $# -gt 0 ]]; do
@@ -227,6 +229,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         run|build|clean|shell)
             COMMAND="$1"
+            EXPLICIT_COMMAND=true
             shift
             ;;
         help)
@@ -320,9 +323,13 @@ while [[ $# -gt 0 ]]; do
             handle_env_command "$@"
             exit 0
             ;;
+        interactive)
+            show_interactive_menu
+            exit 0
+            ;;
         *)
             echo "❌ Error: Unknown option '$1'"
-            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, help, troubleshoot, debug, disk, arch"
+            echo "Available commands: run, shell, build, clean, new, devcontainer, list, config, templates, security, env, interactive, help, troubleshoot, debug, disk, arch"
             echo "Use --help for usage information or 'help <command>' for command-specific help."
             exit 1
             ;;
@@ -346,6 +353,12 @@ load_config
 # --- Validate Requirements ---
 if [[ "$COMMAND" != "clean" ]]; then
     if [ ! -f "$DOCKERFILE" ]; then
+        # If no command was explicitly given, and no Dockerfile exists, enter interactive mode
+        if [[ "$EXPLICIT_COMMAND" == "false" ]]; then
+            show_interactive_menu
+            exit 0
+        fi
+        
         echo "❌ Error: No Dockerfile found at '$DOCKERFILE'"
         echo ""
         echo "💡 Suggestions:"
