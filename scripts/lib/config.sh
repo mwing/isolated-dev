@@ -90,6 +90,8 @@ function parse_yaml_config() {
             
             # Clean up key and value
             key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            # Strip inline comments (careful with quotes, but simple parser assumes standard usage)
+            value=$(echo "$value" | sed 's/[[:space:]]*#.*$//')
             value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'"'"']//;s/["'"'"']$//')
             
             # Set configuration variable
@@ -241,6 +243,8 @@ function validate_config() {
         
         # Clean up key and value
         key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        # Strip inline comments
+        value=$(echo "$value" | sed 's/[[:space:]]*#.*$//')
         value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^["'"'"']//;s/["'"'"']$//')
         
         # Only validate top-level keys (no leading spaces)
