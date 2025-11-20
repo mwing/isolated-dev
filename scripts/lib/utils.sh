@@ -211,6 +211,7 @@ function usage() {
     echo "  devcontainer [lang]          Generate VS Code devcontainer.json"
     echo "  list                         Show available templates"
     echo "  env <cmd>                    Manage VMs (new, up, down, status, rm)"
+    echo "  security <cmd>               Check for security issues"
     echo "  config [--edit|--init]       Configuration management"
     echo "  templates <cmd>              Template management (update, prune, stats)"
     echo "  interactive                  Launch interactive menu"
@@ -363,6 +364,13 @@ function show_command_help() {
         env) show_env_help ;;
         arch) show_arch_help ;;
         devcontainer) show_devcontainer_help ;;
+        security)
+            echo "Usage: $(basename "$0") security <command>"
+            echo ""
+            echo "Security commands:"
+            echo "  check        Comprehensive security check (Dockerfile + vulnerabilities)"
+            echo "  scan         Run external vulnerability scanners (trivy, grype)"
+            ;;
         *)
             echo "No specific help available for command: $command"
             echo "Use --help for general usage information."

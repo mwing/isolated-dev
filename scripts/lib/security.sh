@@ -227,7 +227,63 @@ function scan_image_vulnerabilities() {
     echo "   -> Security hardening applied: non-root users, capability dropping, resource limits"
     
     echo "   -> For detailed vulnerability scanning, use:"
+    echo "      • dev security scan (uses trivy or grype if installed)"
     echo "      • docker scout cves $image_name (if Docker Scout is installed)"
-    echo "      • External tools: trivy, snyk, or grype"
+}
+
+function run_vulnerability_scanners() {
+    local image_name="$1"
+    local scanner_ran=false
+    
+    echo "🔍 Running vulnerability scanners for '$image_name'..."
+    
+    # Check if any scanners are available
+    if ! command -v trivy >/dev/null 2>&1 && ! command -v grype >/dev/null 2>&1; then
+        echo ""
+        echo "⚠️  No vulnerability scanners found."
+        echo "   To enable advanced scanning, install one of the following:"
+        echo "   • Trivy: brew install trivy"
+        echo "   • Grype: brew install grype"
+        return 1
+    fi
+
+    # Export image to tarball for scanning
+    # This is necessary because the image exists in the OrbStack VM, but scanners run on host
+    local tar_path="/tmp/${image_name}.tar"
+    echo "   -> Exporting image to '$tar_path' for scanning..."
+    
+    if [[ -z "$VM_NAME" ]]; then
+        echo "❌ Error: VM_NAME is not set. Cannot access Docker in VM."
+        return 1
+    fi
+
+    ensure_vm_running
+    if ! orb -m "$VM_NAME" sudo docker save "$image_name" > "$tar_path"; then
+        echo "❌ Error: Failed to export image '$image_name' from VM '$VM_NAME'."
+        echo "   Please ensure the image exists and the VM is running."
+        return 1
+    fi
+    
+    # Check for Trivy
+    if command -v trivy >/dev/null 2>&1; then
+        echo ""
+        echo "🛡️  Running Trivy scan..."
+        echo "   (This might take a moment)"
+        trivy image --input "$tar_path" --severity MEDIUM,HIGH,CRITICAL --scanners vuln
+        scanner_ran=true
+    fi
+    
+    # Check for Grype
+    if command -v grype >/dev/null 2>&1; then
+        echo ""
+        echo "🛡️  Running Grype scan..."
+        grype "docker-archive:$tar_path" --fail-on medium
+        scanner_ran=true
+    fi
+    
+    # Cleanup
+    rm -f "$tar_path"
+    
+    return 0
 }
 
