@@ -295,10 +295,33 @@ while [[ $# -gt 0 ]]; do
             esac
             ;;
         security)
+            # Initialize configuration and common variables
+            load_config
+            PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+            
             case "$2" in
                 --help|-h)
                     echo "Security commands:"
                     echo "  dev security check         Comprehensive security check (Dockerfile + vulnerabilities)"
+                    echo "  dev security scan          Run external vulnerability scanners (trivy, grype)"
+                    exit 0
+                    ;;
+                scan)
+                    echo "🔍 Starting vulnerability scan..."
+                    # Ensure image is built or identified
+                    if [[ -z "$IMAGE_NAME" ]]; then
+                         IMAGE_NAME="${CUSTOM_TAG:-${CONTAINER_PREFIX}-img-${PROJECT_NAME}}"
+                    fi
+                    
+                    # Check if image exists, if not build it
+                    ensure_vm_running
+                    if ! orb -m "$VM_NAME" sudo docker inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+                        echo "   -> Image '$IMAGE_NAME' not found. Building..."
+                        platform_flag=$(get_platform_flag "$TARGET_PLATFORM")
+                        build_image "$platform_flag"
+                    fi
+                    
+                    run_vulnerability_scanners "$IMAGE_NAME"
                     exit 0
                     ;;
                 check)
@@ -312,7 +335,7 @@ while [[ $# -gt 0 ]]; do
                     ;;
                 *)
                     echo "❌ Error: Unknown security subcommand '$2'"
-                    echo "Available: check"
+                    echo "Available: check, scan"
                     exit 1
                     ;;
             esac

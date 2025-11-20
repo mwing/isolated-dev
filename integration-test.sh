@@ -112,6 +112,34 @@ EOF
     echo "  ✅ Environment variable test completed"
 }
 
+test_security_scan() {
+    echo "🧪 Testing security scan..."
+    
+    cd /tmp/test-integration
+    
+    # Check if scanners are available
+    if ! command -v trivy >/dev/null 2>&1 && ! command -v grype >/dev/null 2>&1; then
+        echo "  ⚠️  No scanners found (trivy/grype), skipping security scan test"
+        return 0
+    fi
+    
+    cat > Dockerfile << 'EOF'
+FROM alpine:latest
+CMD ["echo", "secure"]
+EOF
+    
+    echo "  → Building image..."
+    "$SCRIPT_DIR/scripts/dev" build
+    
+    echo "  → Running security scan..."
+    "$SCRIPT_DIR/scripts/dev" security scan || {
+        echo "  ❌ Security scan failed"
+        exit 1
+    }
+    
+    echo "  ✅ Security scan test completed"
+}
+
 main() {
     echo "🚀 Starting OrbStack integration tests..."
     echo "Test VM: $TEST_VM_NAME"
@@ -120,6 +148,7 @@ main() {
     test_container_lifecycle
     test_port_forwarding
     test_environment_variables
+    test_security_scan
     
     echo ""
     echo "✅ All integration tests completed successfully!"
