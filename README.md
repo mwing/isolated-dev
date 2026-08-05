@@ -650,6 +650,7 @@ dev clean && dev build            # Rebuild with correct architecture
 
 ## Additional Resources
 
+- [🗺️ Go Rewrite Roadmap](docs/ROADMAP.md) - Plan for v2: agent sandbox mode, egress control, trust model
 - [📚 Development Cookbook](COOKBOOK.md) - Practical recipes and examples for common scenarios
 - [GitHub Repository](https://github.com/mwing/isolated-dev) - Source code, issues, and contributions
 - [Language Plugin Guide](languages/README.md) - How to add new language support
