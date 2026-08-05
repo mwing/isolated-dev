@@ -31,10 +31,16 @@ function validate_tag_name() {
     fi
 }
 
-function sanitize_env_var() {
-    local var="$1"
-    # Remove any characters that could be used for injection
-    echo "$var" | sed 's/[`$(){};&|<>]//g'
+# Turn an arbitrary directory name into a valid docker image/container
+# name fragment: lowercase, invalid characters replaced with '-',
+# leading non-alphanumerics stripped, length capped.
+function sanitize_project_name() {
+    local name="$1"
+    name=$(echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_.-]/-/g' | sed 's/^[^a-z0-9]*//')
+    name="${name:0:40}"
+    # Fall back to a safe default if nothing valid remains
+    [[ -z "$name" ]] && name="project"
+    echo "$name"
 }
 
 function get_security_flags() {
@@ -233,10 +239,10 @@ function scan_image_vulnerabilities() {
 
 function run_vulnerability_scanners() {
     local image_name="$1"
-    local scanner_ran=false
-    
+    local worst_rc=0
+
     echo "🔍 Running vulnerability scanners for '$image_name'..."
-    
+
     # Check if any scanners are available
     if ! command -v trivy >/dev/null 2>&1 && ! command -v grype >/dev/null 2>&1; then
         echo ""
@@ -247,43 +253,52 @@ function run_vulnerability_scanners() {
         return 1
     fi
 
-    # Export image to tarball for scanning
-    # This is necessary because the image exists in the OrbStack VM, but scanners run on host
-    local tar_path="/tmp/${image_name}.tar"
-    echo "   -> Exporting image to '$tar_path' for scanning..."
-    
     if [[ -z "$VM_NAME" ]]; then
         echo "❌ Error: VM_NAME is not set. Cannot access Docker in VM."
         return 1
     fi
 
+    # Export image to tarball for scanning
+    # This is necessary because the image exists in the OrbStack VM, but scanners run on host.
+    # mktemp avoids predictable paths in the shared /tmp.
+    local tar_path
+    tar_path=$(mktemp -t dev-image-scan.XXXXXX) || return 1
+    echo "   -> Exporting image for scanning..."
+
     ensure_vm_running
     if ! orb -m "$VM_NAME" sudo docker save "$image_name" > "$tar_path"; then
         echo "❌ Error: Failed to export image '$image_name' from VM '$VM_NAME'."
         echo "   Please ensure the image exists and the VM is running."
+        rm -f "$tar_path"
         return 1
     fi
-    
+
     # Check for Trivy
     if command -v trivy >/dev/null 2>&1; then
         echo ""
         echo "🛡️  Running Trivy scan..."
         echo "   (This might take a moment)"
-        trivy image --input "$tar_path" --severity MEDIUM,HIGH,CRITICAL --scanners vuln
-        scanner_ran=true
+        trivy image --input "$tar_path" --severity MEDIUM,HIGH,CRITICAL --exit-code 1 --scanners vuln
+        local rc=$?
+        [[ $rc -gt $worst_rc ]] && worst_rc=$rc
     fi
-    
+
     # Check for Grype
     if command -v grype >/dev/null 2>&1; then
         echo ""
         echo "🛡️  Running Grype scan..."
         grype "docker-archive:$tar_path" --fail-on medium
-        scanner_ran=true
+        local rc=$?
+        [[ $rc -gt $worst_rc ]] && worst_rc=$rc
     fi
-    
+
     # Cleanup
     rm -f "$tar_path"
-    
-    return 0
+
+    if [[ $worst_rc -ne 0 ]]; then
+        echo ""
+        echo "❌ Vulnerabilities found (exit code $worst_rc). Failing so CI can act on it."
+    fi
+    return $worst_rc
 }
 

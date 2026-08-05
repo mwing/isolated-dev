@@ -933,6 +933,12 @@ EOF
 test_error_permission_denied() {
     run_test "Permission denied error handling"
     
+    # Root ignores file permission bits, so this test is meaningless as root (e.g. containers)
+    if [[ $EUID -eq 0 ]]; then
+        log "${YELLOW}⏭️  SKIP${NC}: Permission denied test requires non-root user"
+        return
+    fi
+    
     local test_project="$TEST_DIR/test-permission"
     mkdir -p "$test_project"
     cd "$test_project"
@@ -1337,6 +1343,86 @@ EOF
     cd - > /dev/null
 }
 
+test_project_name_sanitization() {
+    run_test "Project name sanitization"
+
+    source "$ORIGINAL_DIR/scripts/lib/security.sh"
+
+    assert_equals "myproject" "$(sanitize_project_name "MyProject")" "Lowercases names"
+    assert_equals "my-project" "$(sanitize_project_name "My Project")" "Replaces spaces with hyphens"
+    assert_equals "my-app-2" "$(sanitize_project_name 'my@app!2')" "Replaces invalid characters"
+    assert_equals "project" "$(sanitize_project_name '!!!')" "Falls back to default for all-invalid names"
+    assert_equals "app" "$(sanitize_project_name '--app')" "Strips leading non-alphanumerics"
+}
+
+test_templates_cleanup_args() {
+    run_test "Templates cleanup argument handling"
+
+    local test_project="$TEST_DIR/test-cleanup-args"
+    mkdir -p "$test_project"
+    cd "$test_project"
+
+    # No days argument should use the default, not error
+    local no_days=$(bash "$ORIGINAL_DIR/scripts/dev" templates cleanup 2>&1)
+    assert_not_contains "$no_days" "Unknown flag" "Cleanup without days uses default"
+    assert_contains "$no_days" "60 days" "Cleanup default is 60 days"
+
+    # Explicit days still works
+    local with_days=$(bash "$ORIGINAL_DIR/scripts/dev" templates cleanup 30 --yes 2>&1)
+    assert_contains "$with_days" "30 days" "Cleanup accepts explicit days"
+
+    # Invalid days rejected
+    local bad_days=$(bash "$ORIGINAL_DIR/scripts/dev" templates cleanup abc 2>&1)
+    assert_contains "$bad_days" "must be a positive number" "Cleanup rejects non-numeric days"
+
+    cd - > /dev/null
+}
+
+test_env_var_spaces_array() {
+    run_test "Environment variables with spaces survive as single arguments"
+
+    local test_project="$TEST_DIR/test-env-spaces"
+    mkdir -p "$test_project"
+    cd "$test_project"
+
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+
+    CUSTOM_ENV_VARS=("SPACE_VAR=hello world")
+    CUSTOM_ENV_FILES=()
+    build_env_forwards
+    assert_equals "2" "${#DEV_ENV_ARGS[@]}" "Env pair is exactly two argv entries"
+    assert_equals "-e" "${DEV_ENV_ARGS[0]}" "First entry is the -e flag"
+    assert_equals "SPACE_VAR=hello world" "${DEV_ENV_ARGS[1]}" "Value with spaces is one argument"
+
+    cd - > /dev/null
+}
+
+test_docker_socket_opt_in() {
+    run_test "Docker socket mounting is opt-in"
+
+    local test_project="$TEST_DIR/test-docker-socket"
+    mkdir -p "$test_project"
+    cd "$test_project"
+
+    source "$ORIGINAL_DIR/scripts/lib/config.sh"
+    source "$ORIGINAL_DIR/scripts/lib/containers.sh"
+
+    MOUNT_SSH_KEYS="false"
+    MOUNT_GIT_CONFIG="false"
+
+    # Default: no socket mount even if the socket exists on this machine
+    MOUNT_DOCKER_SOCKET="false"
+    build_volume_mounts
+    local joined="${DEV_VOLUME_ARGS[*]}"
+    assert_not_contains "$joined" "docker.sock" "No docker socket mount by default"
+
+    # Workspace is always mounted
+    assert_contains "$joined" "/workspace" "Workspace mounted"
+
+    cd - > /dev/null
+}
+
 # Main test execution
 main() {
     log "${BLUE}🚀 Starting isolated-dev test suite${NC}"
@@ -1381,7 +1467,11 @@ main() {
     test_mount_conditional_logic
     test_forward_ports_config
     test_forward_ports_function
-    
+    test_project_name_sanitization
+    test_templates_cleanup_args
+    test_env_var_spaces_array
+    test_docker_socket_opt_in
+
     test_security_functionality
     
     # Print results

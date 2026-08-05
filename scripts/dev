@@ -77,8 +77,16 @@ while [[ $# -gt 0 ]]; do
                     ;;
                 cleanup)
                     # Handle optional days parameter and --yes flag
-                    days="$3"
-                    shift 3  # Remove 'templates', 'cleanup', and days
+                    shift 2  # Remove 'templates' and 'cleanup'
+                    days=""
+                    if [[ $# -gt 0 && "$1" != -* ]]; then
+                        days="$1"
+                        shift
+                    fi
+                    if [[ -n "$days" && ! "$days" =~ ^[0-9]+$ ]]; then
+                        echo "❌ Error: days must be a positive number, got '$days'"
+                        exit 1
+                    fi
                     while [[ $# -gt 0 ]]; do
                         case $1 in
                             --yes|-y)
@@ -219,6 +227,15 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_ENV_VARS+=("$2")
             shift 2
             ;;
+        -c|--command)
+            if [[ -z "$2" ]]; then
+                echo "❌ Error: -c flag requires an argument"
+                echo "Usage: dev shell -c 'command to run'"
+                exit 1
+            fi
+            SHELL_COMMAND="$2"
+            shift 2
+            ;;
         --env-file)
             if [[ -z "$2" ]]; then
                 echo "❌ Error: --env-file flag requires an argument"
@@ -297,7 +314,7 @@ while [[ $# -gt 0 ]]; do
         security)
             # Initialize configuration and common variables
             load_config
-            PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+            PROJECT_NAME=$(sanitize_project_name "$(basename "$(pwd)")")
             
             case "$2" in
                 --help|-h)
@@ -322,7 +339,7 @@ while [[ $# -gt 0 ]]; do
                     fi
                     
                     run_vulnerability_scanners "$IMAGE_NAME"
-                    exit 0
+                    exit $?
                     ;;
                 check)
                     if [[ -f "Dockerfile" ]]; then
@@ -394,7 +411,7 @@ if [[ "$COMMAND" != "clean" ]]; then
 fi
 
 # --- Generate Names ---
-PROJECT_NAME=$(basename "$(pwd)" | tr '[:upper:]' '[:lower:]')
+PROJECT_NAME=$(sanitize_project_name "$(basename "$(pwd)")")
 IMAGE_NAME="${CUSTOM_TAG:-${CONTAINER_PREFIX}-img-${PROJECT_NAME}}"
 CONTAINER_NAME="${CUSTOM_NAME:-${CONTAINER_PREFIX}-ctn-${PROJECT_NAME}}"
 

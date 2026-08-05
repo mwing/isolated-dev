@@ -34,12 +34,13 @@ readonly CFG_DEFAULT_CACHE_MAX_SIZE="100"
 readonly CFG_DEFAULT_MIN_DISK_SPACE="5"
 readonly CFG_DEFAULT_MOUNT_SSH_KEYS="false"
 readonly CFG_DEFAULT_MOUNT_GIT_CONFIG="false"
+readonly CFG_DEFAULT_MOUNT_DOCKER_SOCKET="false"
 readonly CFG_DEFAULT_FORWARD_PORTS=""
 
 # --- Configuration Schema ---
 # Format: key|type|pattern|max_length_or_range
 # Bash 3 compatible - no associative arrays
-CONFIG_SCHEMA_KEYS="vm_name default_template container_prefix network_mode port_range memory_limit cpu_limit auto_start_vm auto_host_networking enable_port_health_check port_health_timeout cache_ttl cache_max_size min_disk_space pass_env_vars mount_ssh_keys mount_git_config forward_ports"
+CONFIG_SCHEMA_KEYS="vm_name default_template container_prefix network_mode port_range memory_limit cpu_limit auto_start_vm auto_host_networking enable_port_health_check port_health_timeout cache_ttl cache_max_size min_disk_space pass_env_vars mount_ssh_keys mount_git_config mount_docker_socket forward_ports"
 
 # --- Helper Functions ---
 
@@ -63,6 +64,7 @@ function get_default_value() {
         min_disk_space) echo "$CFG_DEFAULT_MIN_DISK_SPACE" ;;
         mount_ssh_keys) echo "$CFG_DEFAULT_MOUNT_SSH_KEYS" ;;
         mount_git_config) echo "$CFG_DEFAULT_MOUNT_GIT_CONFIG" ;;
+        mount_docker_socket) echo "$CFG_DEFAULT_MOUNT_DOCKER_SOCKET" ;;
         forward_ports) echo "$CFG_DEFAULT_FORWARD_PORTS" ;;
         *) echo "" ;;
     esac
@@ -73,7 +75,7 @@ function get_schema_type() {
     local key="$1"
     case "$key" in
         vm_name|default_template|container_prefix|network_mode|port_range|memory_limit|cpu_limit|forward_ports) echo "string" ;;
-        auto_start_vm|auto_host_networking|enable_port_health_check|mount_ssh_keys|mount_git_config) echo "boolean" ;;
+        auto_start_vm|auto_host_networking|enable_port_health_check|mount_ssh_keys|mount_git_config|mount_docker_socket) echo "boolean" ;;
         port_health_timeout|cache_ttl|cache_max_size|min_disk_space) echo "number" ;;
         pass_env_vars) echo "nested" ;;
         *) echo "unknown" ;;
@@ -134,6 +136,7 @@ function get_env_var_name() {
         min_disk_space) echo "DEV_MIN_DISK_SPACE" ;;
         mount_ssh_keys) echo "DEV_MOUNT_SSH_KEYS" ;;
         mount_git_config) echo "DEV_MOUNT_GIT_CONFIG" ;;
+        mount_docker_socket) echo "DEV_MOUNT_DOCKER_SOCKET" ;;
         forward_ports) echo "DEV_FORWARD_PORTS" ;;
         *) echo "" ;;
     esac

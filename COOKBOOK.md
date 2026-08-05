@@ -326,59 +326,20 @@ dev shell
 
 ## Network Configuration
 
-### Host Networking for Performance
-```bash
-# Use host networking for single services (better performance)
-DEV_NETWORK_MODE=host dev
-
-# Or configure per project (recommended)
-dev config --init --yes
-cat >> .devenv.yaml << EOF
-network_mode: host
-auto_host_networking: true
-EOF
-
-# Or configure globally for all projects
-cat >> ~/.dev-envs/config.yaml << EOF
-network_mode: host
-auto_host_networking: true
-EOF
-```
-
-### Custom Port Ranges
+### Overriding Forwarded Ports
 ```bash
 # Configure per project (recommended)
 dev config --init --yes
 cat >> .devenv.yaml << EOF
-port_range: "8000-8999"
-enable_port_health_check: true
-port_health_timeout: 10
-EOF
-
-# Or configure globally for all projects
-cat >> ~/.dev-envs/config.yaml << EOF
-port_range: "8000-8999"
-enable_port_health_check: true
-port_health_timeout: 10
+forward_ports: "8080,9000"
 EOF
 
 # Or override per session
-DEV_PORT_RANGE="3000-3999" dev
+DEV_FORWARD_PORTS="8080,9000" dev
 ```
 
-### Multi-Service Development
-```bash
-# Configure for microservices development (per project)
-dev config --init --yes
-cat >> .devenv.yaml << EOF
-network_mode: bridge
-port_range: "8000-8010"
-enable_port_health_check: true
-EOF
-
-# Each service gets its own port automatically
-# Team shares this config via git
-```
+Custom network modes (host networking, named networks, port ranges) are
+planned for the Go rewrite; see docs/ROADMAP.md.
 
 ## Team Workflows
 
@@ -417,8 +378,7 @@ dev config --init --yes
 cat >> .devenv.yaml << EOF
 vm_name: dev-vm-myproject
 container_prefix: myproject
-network_mode: bridge
-port_range: "3000-3010"
+forward_ports: "3000,3001"
 EOF
 
 # Team shares this configuration via git
@@ -462,9 +422,7 @@ dev shell -c "python -m pytest"   # Run tests in container
 dev config --init --yes
 cat >> .devenv.yaml << EOF
 auto_start_vm: true
-network_mode: host
-enable_port_health_check: false
-port_range: "8000-8010"  # Narrow range
+forward_ports: "8000"    # Skip port auto-detection
 memory_limit: "512m"     # Limit memory for faster startup
 cpu_limit: "0.5"         # Limit CPU usage
 EOF

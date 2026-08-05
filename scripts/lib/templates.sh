@@ -367,6 +367,19 @@ function resolve_template_version() {
         [[ -n "$v" ]] && available_versions+=("$v")
     done < <(get_available_versions "$language_dir")
     
+    # If no version specified, try the configured default_template first
+    if [[ -z "$version" && -n "${DEFAULT_TEMPLATE:-}" && "$DEFAULT_TEMPLATE" == "$base_lang-"* ]]; then
+        local default_version="${DEFAULT_TEMPLATE#"$base_lang"-}"
+        for v in "${available_versions[@]}"; do
+            if [[ "$v" == "$default_version" ]]; then
+                echo "📋 Using configured default template: $DEFAULT_TEMPLATE" >&2
+                echo "$default_version"
+                return 0
+            fi
+        done
+        echo "⚠️  Configured default_template '$DEFAULT_TEMPLATE' has no matching version, ignoring" >&2
+    fi
+
     # If no version specified and multiple available, prompt user
     if [[ -z "$version" && ${#available_versions[@]} -gt 1 ]]; then
         echo "❌ Error: Multiple versions available for '$base_lang'." >&2

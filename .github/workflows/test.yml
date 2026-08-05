@@ -19,8 +19,13 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y jq
-    
+        sudo apt-get install -y jq shellcheck
+
+    - name: ShellCheck
+      run: |
+        # Gate at error level for now; warning-level cleanup is tracked separately
+        shellcheck -S error scripts/dev scripts/lib/*.sh install.sh test.sh integration-test.sh
+
     - name: Run syntax and basic tests
       run: |
         # Run syntax validation and tests that don't require OrbStack

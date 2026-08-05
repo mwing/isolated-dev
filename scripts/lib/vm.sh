@@ -32,7 +32,7 @@ function handle_env_command() {
                 echo "Available environments:"
                 local setup_dir="$DEV_HOME/setups"
                 if [[ -d "$setup_dir" ]]; then
-                    ls -1 "$setup_dir" | grep -v '\\.backup\\.' | sed 's/\\..*$//' | sort -u | sed 's/^/  /'
+                    ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
                 else
                     echo "  (No environments found - run installer first)"
                 fi
@@ -72,7 +72,7 @@ function handle_env_command() {
                 echo ""
                 echo "Available environments:"
                 if [[ -d "$setup_dir" ]]; then
-                    ls -1 "$setup_dir" | grep -v '\\.backup\\.' | sed 's/\\..*$//' | sort -u | sed 's/^/  /'
+                    ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
                 else
                     echo "  (No environments found - run installer first)"
                 fi
@@ -99,7 +99,7 @@ function handle_env_command() {
                         echo ""
                         echo "Available environments:"
                         if [[ -d "$setup_dir" ]]; then
-                            ls -1 "$setup_dir" | grep -v '\\.backup\\.' | sed 's/\\..*$//' | sort -u | sed 's/^/  /'
+                            ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
                         fi
                         exit 1
                     fi
@@ -186,7 +186,7 @@ function handle_env_command() {
             echo ""
             echo "Available environments:"
             if [[ -d "$setup_dir" ]]; then
-                ls -1 "$setup_dir" | grep -v '\\.backup\\.' | sed 's/\\..*$//' | sort -u | sed 's/^/  /'
+                ls -1 "$setup_dir" | grep -v '\.backup\.' | sed 's/\..*$//' | sort -u | sed 's/^/  /'
             else
                 echo "  (No environments found - run installer first)"
             fi

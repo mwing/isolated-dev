@@ -34,7 +34,6 @@
 - [Configuration](#configuration)
 - [VS Code Integration](#vs-code-integration)
 - [Multi-Architecture Support](#multi-architecture-support)
-- [Network Optimization](#network-optimization)
 - [Troubleshooting](#troubleshooting)
 - [📚 Development Cookbook](COOKBOOK.md) - Practical recipes and examples
 
@@ -111,10 +110,9 @@ dev        # Build and run container
 dev shell  # Open interactive shell
 ```
 
-Your project is mounted at `/workspace` in the container with automatic:
-- Port forwarding based on project type
-- SSH key mounting for git operations
-- Git configuration sharing
+Your project is mounted at `/workspace` in the container with automatic
+port forwarding based on project type. SSH keys and git configuration can be
+mounted on opt-in (see [File Mounting](#file-mounting-security)).
  
  ### 4. Interactive Mode
  ```bash
@@ -263,6 +261,7 @@ dev devcontainer [language]       # Generate VS Code devcontainer.json for exist
 dev interactive                   # Launch interactive menu
 dev                               # Build and run container (default)
 dev shell                         # Open interactive bash shell in container
+dev shell -c "npm test"           # Run a single command in the container
 dev build                         # Build image only
 dev clean                         # Remove containers and images
 dev -f Dockerfile.dev             # Use custom Dockerfile
@@ -349,13 +348,6 @@ default_template: python-3.13
 auto_start_vm: true
 container_prefix: dev
 
-# Network optimization settings
-network_mode: bridge                    # bridge, host, none, or custom network name
-auto_host_networking: false             # Auto-use host networking for single services
-port_range: "3000-9000"                 # Port range for auto-detection
-enable_port_health_check: true          # Check if ports are accessible
-port_health_timeout: 5                  # Timeout for port health checks (seconds)
-
 # Resource limits (applied at container runtime)
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
@@ -363,6 +355,7 @@ cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 # File mounting (security: disabled by default)
 mount_ssh_keys: false                   # Mount ~/.ssh for git operations
 mount_git_config: false                 # Mount ~/.gitconfig
+mount_docker_socket: false              # Mount Docker socket (DANGER: container can control Docker host)
 
 # Port forwarding (optional)
 forward_ports: ""                        # Override auto-detected ports (e.g., "8080,9000")
@@ -372,17 +365,15 @@ cache_ttl: 86400                         # API cache TTL in seconds (default: 1 
 cache_max_size: 100                      # Max cache size in MB (default: 100MB)
 min_disk_space: 5                        # Minimum free disk space in GB (default: 5GB)
 
-# Environment variables to pass to containers
-pass_env_vars:
-  # Patterns to match (supports wildcards with *)
-  patterns:
-    - AWS_*
-    - SNYK_*
-    - GITHUB_*
-    - NODE_ENV
-    - DEBUG
-  # Explicit variable names (no wildcards)
-  explicit: []
+# Environment variables to pass to containers.
+# SECURITY: empty by default. Anything listed here is readable by all code
+# in the container, including untrusted dependencies. Opt in deliberately:
+# pass_env_vars:
+#   patterns:
+#     - AWS_*          # cloud credentials (trusted projects only)
+#     - GITHUB_*       # GitHub tokens
+#   explicit:
+#     - NODE_ENV
 ```
 
 > **Note**: Only YAML format is supported for configuration files. The legacy `key=value` format has been removed for better consistency and validation.
@@ -420,13 +411,6 @@ DEV_VM_NAME=custom-vm dev
 DEV_DEFAULT_TEMPLATE=python-3.14 dev new python
 DEV_CONTAINER_PREFIX=myapp dev build
 
-# Network configuration overrides
-DEV_NETWORK_MODE=host dev                           # Use host networking
-DEV_AUTO_HOST_NETWORKING=true dev                   # Enable auto host networking
-DEV_PORT_RANGE="8000-8999" dev                      # Custom port range
-DEV_ENABLE_PORT_HEALTH_CHECK=false dev              # Disable port health checks
-DEV_PORT_HEALTH_TIMEOUT=10 dev                      # Custom health check timeout
-
 # Resource limit overrides
 DEV_MEMORY_LIMIT="512m" dev                         # Limit container memory
 DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
@@ -434,6 +418,7 @@ DEV_CPU_LIMIT="0.5" dev                             # Limit container CPU usage
 # File mounting overrides (security: disabled by default)
 DEV_MOUNT_SSH_KEYS=true dev                         # Mount SSH keys for one command
 DEV_MOUNT_GIT_CONFIG=true dev                       # Mount git config for one command
+DEV_MOUNT_DOCKER_SOCKET=true dev                    # Mount Docker socket for one command (dangerous)
 
 # Port forwarding override
 DEV_FORWARD_PORTS="8080,9000" dev                   # Override auto-detected ports
@@ -452,7 +437,6 @@ dev config validate              # Validate all config files
 # - Known configuration keys
 # - Correct value types (boolean, string, number)
 # - Valid characters in names
-# - Network configuration values
 ```
 
 ### File Mounting (Security)
@@ -601,78 +585,22 @@ dev --platform linux/amd64     # x86_64 (Intel)
 - Native builds (ARM64 on Apple Silicon, x86_64 on Intel): Fastest
 - Cross-platform builds: Slower due to emulation
 
-## Network Optimization
+## Networking Notes
 
-### Network Configuration Options
+Containers use Docker bridge networking. Detected or configured ports are
+published to your Mac via OrbStack. To override which ports are forwarded:
 
-Configure networking behavior through configuration files or environment variables:
-
-```yaml
-# Network optimization settings in ~/.dev-envs/config.yaml
-network_mode: bridge                    # Default: bridge networking
-auto_host_networking: false             # Auto-detect when to use host networking
-port_range: "3000-9000"                 # Port range for auto-detection
-enable_port_health_check: true          # Verify port accessibility
-port_health_timeout: 5                  # Health check timeout (seconds)
-```
-
-### Network Modes
-
-**Bridge Mode (Default):**
-- Isolated container networking
-- Port forwarding required
-- Best for security and multi-container setups
-
-**Host Mode:**
-- Direct access to host network
-- No port forwarding needed
-- Better performance for single services
-- Use when `auto_host_networking: true` or `network_mode: host`
-
-**Custom Networks:**
-- Set `network_mode` to custom network name
-- Enables service discovery between containers
-- Useful for multi-container development
-
-### Port Management
-
-**Auto-Detection:**
-- Scans project files for framework-specific ports
-- Respects configured `port_range`
-- Automatically forwards detected ports
-
-**Manual Override:**
 ```yaml
 # In ~/.dev-envs/config.yaml or .devenv.yaml
-forward_ports: "8080,9000"  # Comma-separated list of ports
+forward_ports: "8080,9000"
 ```
 
 ```bash
-# Or use environment variable
 DEV_FORWARD_PORTS="8080,9000" dev
 ```
 
-**Health Checking:**
-- Verifies port accessibility when `enable_port_health_check: true`
-- Configurable timeout with `port_health_timeout`
-- Helps identify port conflicts
-
-### Performance Tips
-
-1. **Use host networking for single services:**
-   ```bash
-   DEV_NETWORK_MODE=host dev
-   ```
-
-2. **Optimize port range for your stack:**
-   ```yaml
-   port_range: "8000-8999"  # Narrow range for faster detection
-   ```
-
-3. **Disable health checks for faster startup:**
-   ```yaml
-   enable_port_health_check: false
-   ```
+Custom network modes (host networking, named networks) are planned for the
+Go rewrite; see docs/ROADMAP.md.
 
 ## Troubleshooting
 
@@ -787,7 +715,7 @@ dev --platform <TAB>         # Shows: linux/amd64, linux/arm64
 - **Security Hardening**: Non-root containers, capability dropping, resource limits, vulnerability scanning
 - **OrbStack Integration**: VM isolation, security enforcement, Docker engine integration
 - **Auto Port Forwarding**: Detects common development ports
-- **Git Integration**: SSH keys and configuration automatically mounted
+- **Git Integration**: SSH keys and configuration mounted on opt-in
 - **VS Code Support**: Generate devcontainer.json configurations
 - **Multi-Architecture**: ARM64 and x86_64 support with auto-detection
 - **Smart Templates**: Auto-updating versions from Docker Hub with caching

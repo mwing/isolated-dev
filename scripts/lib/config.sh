@@ -33,33 +33,60 @@ function get_config_value() {
 
 function get_config_array() {
     local key="$1"
+    local section_key="${key%%.*}"
+    local array_key="${key##*.}"
     local config_file=""
-    
-    # Check project config first
-    if [[ -f "$DEV_PROJECT_CONFIG" ]]; then
+
+    # Prefer the config file that actually defines the section
+    if [[ -f "$DEV_PROJECT_CONFIG" ]] && grep -q "^${section_key}:" "$DEV_PROJECT_CONFIG" 2>/dev/null; then
         config_file="$DEV_PROJECT_CONFIG"
-    elif [[ -f "$DEV_GLOBAL_CONFIG" ]]; then
+    elif [[ -f "$DEV_GLOBAL_CONFIG" ]] && grep -q "^${section_key}:" "$DEV_GLOBAL_CONFIG" 2>/dev/null; then
         config_file="$DEV_GLOBAL_CONFIG"
     else
         return
     fi
-    
-    # Use yq for consistent YAML parsing
-    if command -v yq >/dev/null 2>&1; then
-        yq eval ".${key}[]" "$config_file" 2>/dev/null | grep -v "^null$" || true
-    else
-        # Fallback to awk for systems without yq
-        local section_key="${key%%.*}"
-        local array_key="${key##*.}"
-        
-        awk -v section="$section_key" -v array="$array_key" '
-            /^[a-zA-Z_]/ { in_section=0 }
-            $0 ~ "^" section ":" { in_section=1; next }
-            in_section && $0 ~ "^  " array ":" { in_array=1; next }
-            in_array && /^    - / { sub(/^    - /, ""); print; next }
-            in_array && /^  [a-z]/ { exit }
-        ' "$config_file"
-    fi
+
+    # Single bash-native parser (no yq dependency) that handles both:
+    #   block arrays:   explicit:
+    #                     - VAR1
+    #   inline arrays:  explicit: [VAR1, VAR2]
+    awk -v section="$section_key" -v array="$array_key" '
+        # A non-indented key starts/ends a section
+        /^[^[:space:]#]/ {
+            in_section = ($0 ~ "^" section ":") ? 1 : 0
+            in_array = 0
+            next
+        }
+        in_section && $0 ~ "^[[:space:]]+" array ":" {
+            line = $0
+            sub("^[[:space:]]+" array ":[[:space:]]*", "", line)
+            sub(/[[:space:]]*#.*$/, "", line)
+            if (line ~ /^\[/) {
+                # Inline array
+                sub(/^\[/, "", line)
+                sub(/\][[:space:]]*$/, "", line)
+                n = split(line, parts, ",")
+                for (i = 1; i <= n; i++) {
+                    item = parts[i]
+                    gsub(/^[[:space:]"'"'"']+|[[:space:]"'"'"']+$/, "", item)
+                    if (item != "") print item
+                }
+                in_array = 0
+            } else {
+                in_array = 1
+            }
+            next
+        }
+        in_array && /^[[:space:]]*-[[:space:]]*/ {
+            item = $0
+            sub(/^[[:space:]]*-[[:space:]]*/, "", item)
+            sub(/[[:space:]]*#.*$/, "", item)
+            gsub(/^["'"'"']+|["'"'"']+$/, "", item)
+            if (item != "") print item
+            next
+        }
+        in_array && /^[[:space:]]*[A-Za-z_]/ { in_array = 0 }
+    ' "$config_file"
 }
 
 function get_config_type() {
@@ -109,6 +136,7 @@ function parse_yaml_config() {
                 cpu_limit) CPU_LIMIT="$value" ;;
                 mount_ssh_keys) MOUNT_SSH_KEYS="$value" ;;
                 mount_git_config) MOUNT_GIT_CONFIG="$value" ;;
+                mount_docker_socket) MOUNT_DOCKER_SOCKET="$value" ;;
             esac
         # Only YAML format supported
         fi
@@ -130,6 +158,7 @@ function apply_env_overrides() {
     [[ -n "${DEV_CPU_LIMIT:-}" ]] && CPU_LIMIT="$DEV_CPU_LIMIT"
     [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && MOUNT_SSH_KEYS="$DEV_MOUNT_SSH_KEYS"
     [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && MOUNT_GIT_CONFIG="$DEV_MOUNT_GIT_CONFIG"
+    [[ -n "${DEV_MOUNT_DOCKER_SOCKET:-}" ]] && MOUNT_DOCKER_SOCKET="$DEV_MOUNT_DOCKER_SOCKET"
     [[ -n "${DEV_FORWARD_PORTS:-}" ]] && FORWARD_PORTS="$DEV_FORWARD_PORTS"
 }
 
@@ -291,6 +320,7 @@ function load_config() {
     CPU_LIMIT=$(get_default_value "cpu_limit")
     MOUNT_SSH_KEYS=$(get_default_value "mount_ssh_keys")
     MOUNT_GIT_CONFIG=$(get_default_value "mount_git_config")
+    MOUNT_DOCKER_SOCKET=$(get_default_value "mount_docker_socket")
     
     # Load global config if it exists
     parse_yaml_config "$GLOBAL_CONFIG"
@@ -336,12 +366,16 @@ cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
 # File mounting (security: disabled by default)
 mount_ssh_keys: false                   # Mount ~/.ssh for git operations
 mount_git_config: false                 # Mount ~/.gitconfig
+mount_docker_socket: false              # Mount /var/run/docker.sock (DANGER: root on Docker host)
 
-# Environment variables to pass to containers
+# Environment variables to pass to containers.
+# SECURITY: empty by default. Credentials passed here are readable by any
+# code running in the container, including untrusted dependencies.
+# Enable per project or per session only when you trust the code, e.g.:
 # pass_env_vars:
 #   patterns:
-#     - AWS_*
-#     - GITHUB_*
+#     - AWS_*          # cloud credentials (only for trusted projects)
+#     - GITHUB_*       # GitHub tokens
 #   explicit:
 #     - MY_VAR
 EOF
@@ -496,6 +530,7 @@ EOF
             echo "  CPU Limit: ${CPU_LIMIT:-"(none)"}"
             echo "  Mount SSH Keys: $MOUNT_SSH_KEYS"
             echo "  Mount Git Config: $MOUNT_GIT_CONFIG"
+            echo "  Mount Docker Socket: $MOUNT_DOCKER_SOCKET"
             
             # Show environment variable overrides if any
             local env_overrides=()
@@ -512,6 +547,7 @@ EOF
             [[ -n "${DEV_CPU_LIMIT:-}" ]] && env_overrides+=("DEV_CPU_LIMIT")
             [[ -n "${DEV_MOUNT_SSH_KEYS:-}" ]] && env_overrides+=("DEV_MOUNT_SSH_KEYS")
             [[ -n "${DEV_MOUNT_GIT_CONFIG:-}" ]] && env_overrides+=("DEV_MOUNT_GIT_CONFIG")
+            [[ -n "${DEV_MOUNT_DOCKER_SOCKET:-}" ]] && env_overrides+=("DEV_MOUNT_DOCKER_SOCKET")
             [[ -n "${DEV_FORWARD_PORTS:-}" ]] && env_overrides+=("DEV_FORWARD_PORTS")
             
             if [[ ${#env_overrides[@]} -gt 0 ]]; then

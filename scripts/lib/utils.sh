@@ -224,6 +224,7 @@ function usage() {
     echo "  -f FILE        Dockerfile path    -t TAG         Custom image tag"
     echo "  -n NAME        Container name     --platform     Target architecture"
     echo "  -y, --yes      Skip prompts       -h, --help     Show help"
+    echo "  -c CMD         Run command in container (with run/shell)"
     echo "  --debug        Enable debug mode  --verbose, -v  Verbose output"
     echo "  --trace        Enable tracing"
     echo ""

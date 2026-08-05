@@ -232,9 +232,8 @@ cleanup_old_backups() {
     local file="$1"
     local backup_pattern="${file}.backup.*"
     
-    # Find all backup files for this specific file, sort by modification time, keep newest 3
-    find "$(dirname "$file")" -name "$(basename "$file").backup.*" -type f 2>/dev/null | \
-        sort -t. -k3 -r | \
+    # Find all backup files for this specific file, newest first by mtime, keep newest 3
+    ls -1t "$file".backup.* 2>/dev/null | \
         tail -n +4 | \
         while IFS= read -r old_backup; do
             log "   -> Cleaning up old backup: $(basename "$old_backup")"
@@ -309,27 +308,27 @@ auto_start_vm: true
 # Prefix for container and image names
 container_prefix: dev
 
-# Environment variables to pass to containers
-pass_env_vars:
-  # Patterns to match (supports wildcards with *)
-  patterns:
-    - AWS_*
-    - SNYK_*
-    - GITHUB_*
-    - NODE_ENV
-    - DEBUG
-  # Explicit variable names (no wildcards)
-  explicit: []
+# File mounting (security: disabled by default)
+mount_ssh_keys: false                   # Mount ~/.ssh for git operations
+mount_git_config: false                 # Mount ~/.gitconfig
+mount_docker_socket: false              # Mount /var/run/docker.sock (DANGER: root on Docker host)
+
+# Environment variables to pass to containers.
+# SECURITY: empty by default. Anything listed here is readable by all code
+# running in the container, including untrusted dependencies. Opt in per
+# project (.devenv.yaml) or per session (dev -e VAR) when you trust the code.
+# Examples:
+# pass_env_vars:
+#   patterns:
+#     - AWS_*          # cloud credentials
+#     - GITHUB_*       # GitHub tokens
+#   explicit:
+#     - NODE_ENV
 EOF
     log "   -> Created global config: $GLOBAL_CONFIG"
 else
     log "   -> Global config already exists: $GLOBAL_CONFIG"
 fi
-
-# Copy the cloud-init config file
-log "   -> Installing config to $CONFIG_DIR"
-backup_existing "$CONFIG_DIR/docker-host.yaml"
-cp "$SRC_DIR/config/docker-host.yaml" "$CONFIG_DIR/docker-host.yaml" || error_exit "Failed to copy config file"
 
 # Detect shell and appropriate profile file
 detect_shell_profile() {
