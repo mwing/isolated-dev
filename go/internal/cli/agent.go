@@ -15,6 +15,7 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
+	"github.com/mwing/isolated-dev/go/internal/trust"
 )
 
 func newAgentCmd(env *Env) *cobra.Command {
@@ -29,6 +30,9 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentRunCmd(env))
 	cmd.AddCommand(newAgentLogoutCmd(env))
 	cmd.AddCommand(newAgentPolicyCmd(env))
+	cmd.AddCommand(newAgentAllowCmd(env))
+	cmd.AddCommand(newAgentRevokeCmd(env))
+	cmd.AddCommand(newAgentConfigCmd(env))
 	return cmd
 }
 
@@ -244,6 +248,29 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	a := opts.Agent
 	eng := container.New(orbstack.New(cfg.VMName, env.Runner))
 
+	store, err := trust.Load(env.Paths.Home, opts.Project)
+	if err != nil {
+		return err
+	}
+	saved := store.Resolve(a.Name)
+	granted := saved.AllowHosts
+	opts.ExtraHosts = append(append([]string(nil), granted...), opts.ExtraHosts...)
+
+	// Command-line flags win over the stored file; the file wins over the
+	// agent's built-in defaults.
+	if opts.Image == "" && saved.Base != "" {
+		opts.Image = saved.Base
+	}
+	if opts.Memory == "" {
+		opts.Memory = saved.Memory
+	}
+	if opts.CPUs == "" {
+		opts.CPUs = saved.CPUs
+	}
+	if len(opts.Command) == 0 && len(saved.Args) > 0 {
+		opts.Command = append([]string{a.Binary}, saved.Args...)
+	}
+
 	allowEntries := opts.Allowlist()
 	allow, err := netpolicy.Parse(allowEntries)
 	if err != nil {
@@ -256,7 +283,10 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	}
 	fmt.Fprintln(env.Stdout)
 	fmt.Fprintf(env.Stdout, "Project:   %s\n", opts.Project)
-	fmt.Fprintf(env.Stdout, "Egress:    %s\n", strings.Join(allowEntries, " "))
+	fmt.Fprintf(env.Stdout, "Egress:    %s\n", strings.Join(a.AllowHosts, " "))
+	if len(granted) > 0 {
+		fmt.Fprintf(env.Stdout, "  granted: %s\n", strings.Join(granted, " "))
+	}
 	fmt.Fprintf(env.Stdout, "Auth:      %s\n", authDescription(opts))
 	fmt.Fprintln(env.Stdout)
 
@@ -319,7 +349,9 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		for _, line := range summary {
 			fmt.Fprintf(env.Stderr, "  %s\n", line)
 		}
-		fmt.Fprintf(env.Stderr, "To permit one of these, re-run with --allow-host HOST\n")
+		fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")
+		fmt.Fprintf(env.Stderr, "Allow from now:   dev2 agent allow HOST\n")
+		fmt.Fprintf(env.Stderr, "Edit the file:    dev2 agent config edit\n")
 	}()
 
 	// Live egress notices. A denial mid-run is actionable — the user can
