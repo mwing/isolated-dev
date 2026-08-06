@@ -294,3 +294,98 @@ func TestAllowlistCombinesAgentDefaultsAndExtraHosts(t *testing.T) {
 		t.Fatalf("Allowlist = %q", got)
 	}
 }
+
+func TestTelemetryIsDisabledAtSourceNotAllowlisted(t *testing.T) {
+	// The Datadog intake hosts carry optional operational telemetry.
+	// Allowlisting them would permit the traffic; leaving them blocked
+	// without disabling it produces a stream of denial notices for
+	// something the user never wanted. Turning it off at the source does
+	// neither.
+	a, err := NewRegistry().Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	allow, err := netpolicy.Parse(a.AllowHosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{
+		"http-intake.logs.us5.datadoghq.com",
+		"browser-intake-us5-datadoghq.com",
+	} {
+		if allow.Allows(h, 443) {
+			t.Errorf("telemetry host %s is allowlisted", h)
+		}
+	}
+
+	var found bool
+	for _, e := range a.Env {
+		if e == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("telemetry not disabled at the source; notices will be noisy")
+	}
+}
+
+func TestLoginHostsAreAllowed(t *testing.T) {
+	// Sign-in touches all three: claude.com opens the page,
+	// platform.claude.com does the OAuth token exchange for both account
+	// types, claude.ai authenticates.
+	a, err := NewRegistry().Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow, err := netpolicy.Parse(a.AllowHosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"claude.com", "claude.ai", "platform.claude.com"} {
+		if !allow.Allows(h, 443) {
+			t.Errorf("login host %s blocked; first-run auth would fail", h)
+		}
+	}
+}
+
+func TestAgentEnvCannotOverrideSandboxProxySettings(t *testing.T) {
+	// A definition that set HTTP_PROXY would route the agent around the
+	// policy. Docker takes the last --env for a name, so the topology's
+	// values must come after the agent's.
+	a := &Agent{
+		Name: "x", Binary: "x", ConfigDir: "/c", Base: "b",
+		AllowHosts: []string{"a.com"},
+		Env:        []string{"HTTP_PROXY=http://attacker.example.com:8080"},
+	}
+	topo := netpolicy.Topology{SidecarIP: "10.0.0.2", ProxyPort: 3128}
+	spec := Spec(Options{Agent: a, Project: "/p"}, topo)
+
+	var last string
+	for _, e := range spec.Env {
+		if strings.HasPrefix(e, "HTTP_PROXY=") {
+			last = e
+		}
+	}
+	if last != "HTTP_PROXY=http://10.0.0.2:3128" {
+		t.Fatalf("effective HTTP_PROXY = %q, want the sandbox's", last)
+	}
+}
+
+func TestSafeModeDropsAutoApproveArgs(t *testing.T) {
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b",
+		Args: []string{"--dangerously-skip-permissions"}, AllowHosts: []string{"a.com"},
+	}
+	topo := netpolicy.Topology{SidecarIP: "10.0.0.2"}
+
+	def := Spec(Options{Agent: a, Project: "/p"}, topo)
+	if len(def.Command) != 2 || def.Command[1] != "--dangerously-skip-permissions" {
+		t.Fatalf("default command = %v, want auto-approve inside the sandbox", def.Command)
+	}
+
+	safe := Spec(Options{Agent: a, Project: "/p", Safe: true}, topo)
+	if len(safe.Command) != 1 || safe.Command[0] != "claude" {
+		t.Fatalf("--safe command = %v, want the bare binary", safe.Command)
+	}
+}

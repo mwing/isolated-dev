@@ -22,13 +22,31 @@ func builtins() []Agent {
 			AuthEnv:   []string{"ANTHROPIC_API_KEY"},
 			Base:      "node:22-bookworm-slim",
 			Install:   "npm install -g @anthropic-ai/claude-code",
+			// Rather than allowlist the telemetry endpoints, turn the
+			// traffic off at the source: nothing to block, nothing to
+			// report, no noise in the notices.
+			Env: []string{
+				"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
+				// An agent that self-updates inside the sandbox changes
+				// what runs between two invocations, which defeats the
+				// point of pinning the image.
+				"DISABLE_AUTOUPDATER=1",
+			},
+			// Hosts per Claude Code's documented network requirements.
 			AllowHosts: []string{
 				"api.anthropic.com",
-				// Login. Without these the OAuth flow fails on first run,
-				// which reads as a broken tool rather than a policy.
+				// Sign-in: claude.com opens the page, platform.claude.com
+				// does the OAuth token exchange for BOTH account types,
+				// claude.ai authenticates. Missing any of these fails
+				// first-run login, which reads as a broken tool.
+				"claude.com",
+				"claude.ai",
 				"platform.claude.com",
 				"console.anthropic.com",
-				"claude.ai",
+				// MCP connectors are on by default for claude.ai accounts.
+				"mcp-proxy.anthropic.com",
+				// Documentation lookups by the built-in guide agent.
+				"code.claude.com",
 				"statsig.anthropic.com",
 				"registry.npmjs.org",
 				"github.com",

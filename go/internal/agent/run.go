@@ -33,6 +33,9 @@ type Options struct {
 	Command []string
 	// Interactive attaches a TTY.
 	Interactive bool
+	// Safe drops the agent's auto-approve arguments, restoring its own
+	// per-action prompts on top of the sandbox.
+	Safe bool
 	// Image is the project image to overlay. Empty uses the agent's base.
 	Image string
 	// Memory and CPUs bound the container.
@@ -115,6 +118,10 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		{Source: a.VolumeName(), Target: HomePath, Volume: true},
 	}
 
+	// Agent defaults first, sandbox variables second: docker takes the
+	// last --env for a name, so the topology's proxy settings win over
+	// anything an agent definition declares.
+	spec.Env = append(spec.Env, a.Env...)
 	spec.Env = append(spec.Env, topo.Env()...)
 	spec.Env = append(spec.Env,
 		"HOME="+HomePath,
@@ -126,7 +133,15 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 
 	spec.Command = o.Command
 	if len(spec.Command) == 0 {
-		spec.Command = append([]string{a.Binary}, a.Args...)
+		spec.Command = []string{a.Binary}
+		// The agent's default args are its auto-approve flags. They are
+		// only defensible because the sandbox is the boundary: no host
+		// credentials, no route out beyond the allowlist, no host path
+		// but the workspace. --safe drops them for anyone who wants the
+		// in-agent prompts as a second layer.
+		if !o.Safe {
+			spec.Command = append(spec.Command, a.Args...)
+		}
 	}
 	return spec
 }

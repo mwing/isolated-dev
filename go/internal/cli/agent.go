@@ -142,6 +142,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		dryRun     bool
 		tty        string
 		notify     string
+		safe       bool
 	)
 
 	cmd := &cobra.Command{
@@ -202,6 +203,8 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"print the policy and the exact docker invocation, then stop")
 	cmd.Flags().StringVar(&tty, "tty", "auto", "allocate a terminal: auto, on, or off")
+	cmd.Flags().BoolVar(&safe, "safe", false,
+		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
 		"report blocked destinations: live (as they happen) or off (summary only)")
 	return cmd

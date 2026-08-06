@@ -40,6 +40,11 @@ type Agent struct {
 	// settings. It is backed by a named volume so an OAuth login survives
 	// across runs.
 	ConfigDir string `yaml:"config_dir"`
+	// Env are non-secret environment defaults for the agent, e.g. turning
+	// off telemetry. They are applied before the sandbox's own variables,
+	// so an agent definition cannot override the proxy settings that make
+	// egress control work.
+	Env []string `yaml:"env"`
 	// AuthEnv names environment variables that carry an API key in `env`
 	// auth mode. Values are never taken implicitly: the user must ask.
 	AuthEnv []string `yaml:"auth_env"`
