@@ -1,3 +1,5 @@
 test/
 TODO.md
 .devcontainer
+go/bin/
+go/dist/

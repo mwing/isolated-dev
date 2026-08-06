@@ -262,6 +262,11 @@ first would delay the only genuinely new capability.
 Exit criteria: binary builds on both platforms in CI, doctor works against a
 real OrbStack.
 
+Status: implemented on the `v2-go-rewrite` branch under `go/`. `runner`
+(with fake), `config` (layering, provenance, grant extraction, dead-key
+reporting), `backend` + orbstack probe, `version`, `doctor`, CI matrix,
+goreleaser. `doctor` verified against a live OrbStack VM.
+
 ### M1: Agent mode (the flagship)
 
 - `dev2 agent claude`, `dev2 agent codex`, `dev2 agent list`.

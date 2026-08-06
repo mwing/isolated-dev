@@ -1,0 +1,78 @@
+name: Go (v2)
+
+on:
+  push:
+    branches: [ main, develop, v2-go-rewrite ]
+    paths: [ 'go/**', '.github/workflows/go.yml' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'go/**', '.github/workflows/go.yml' ]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: go
+
+jobs:
+  test:
+    # M0 exit criterion: the binary builds and the suite passes on both
+    # platforms. Linux has no OrbStack, which is precisely why the backend
+    # probe is behind an injected PATH lookup.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go/go.sum
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: go build ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go/go.sum
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: go
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go/go.sum
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
