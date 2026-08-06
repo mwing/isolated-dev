@@ -35,5 +35,13 @@ fmt-check:
 install: build
 	install -m 0755 bin/$(BINARY) $(HOME)/.local/bin/$(BINARY)
 
+# The sidecar image is built inside the OrbStack VM, where the agent
+# containers will run. VM name follows the dev config default.
+VM ?= dev-vm-docker-host
+PROXY_IMAGE ?= dev2-proxy:latest
+
+proxy-image:
+	tar -czf - . | orb -m $(VM) sudo docker build -t $(PROXY_IMAGE) -f Dockerfile.proxy -
+
 clean:
 	rm -rf bin

@@ -4,27 +4,50 @@ Work in progress. This tree is the Go rewrite described in
 [docs/ROADMAP.md](../docs/ROADMAP.md). The bash v1 in `scripts/` remains the
 working tool; nothing here replaces it yet.
 
-Status: **M0 (skeleton)**.
+Status: **M1 in progress** — the agent sandbox runs.
 
 ## What exists
 
 | | |
 |---|---|
 | `cmd/dev2` | entry point |
+| `cmd/dev2-proxy` | the egress sidecar, a separate binary in a separate trust domain |
 | `internal/runner` | the single choke point for external processes, with a fake for tests |
 | `internal/config` | v1-compatible config loading and layering, grant extraction |
-| `internal/backend` | engine abstraction; `orbstack` driver probes, `docker` driver lands in M3 |
-| `internal/cli` | cobra command tree: `version`, `doctor` |
+| `internal/backend` | engine abstraction; `orbstack` driver, `docker` driver lands in M3 |
+| `internal/container` | `RunSpec` → argv, and the docker operations built on it |
+| `internal/netpolicy` | allowlist, CONNECT proxy, filtering resolver, sidecar lifecycle, live notices |
+| `internal/agent` | agent registry, overlay images, run orchestration |
+| `internal/cli` | `version`, `doctor`, `agent` |
 
 ## Build and test
 
 ```sh
-make check      # gofmt, vet, race tests
-make build      # bin/dev2
-./bin/dev2 doctor
+make check          # gofmt, vet, race tests
+make build          # bin/dev2 and bin/dev2-proxy
+make proxy-image    # builds dev2-proxy:latest inside the OrbStack VM
 ```
 
 Requires Go 1.26+.
+
+## Running an agent
+
+```sh
+cd /path/to/your/project
+dev2 agent list                     # what is available, and its egress policy
+dev2 agent policy claude            # what a run would allow, without running
+dev2 agent run claude               # Claude Code, sandboxed
+dev2 agent run claude --dry-run     # the exact docker invocation
+dev2 agent logout claude            # discard the stored login
+```
+
+Useful flags: `--allow-host HOST` adds a destination for one run,
+`--tty on|off` overrides terminal detection, `--egress-notify off` silences
+live denial notices, `--rebuild` refreshes the agent image.
+
+The first run builds an overlay image (project base + agent) and creates a
+named volume for the agent's home, so a login survives across runs without
+any credential entering the project tree.
 
 ## Design notes that matter early
 

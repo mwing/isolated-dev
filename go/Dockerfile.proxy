@@ -1,0 +1,20 @@
+# The egress sidecar. Built inside docker so the host needs no
+# cross-compilation setup.
+#
+# The runtime stage is scratch on purpose: the sidecar is the one component
+# the workload can reach, so it carries no shell, no package manager and
+# nothing to pivot to. Its policy arrives as argv at startup and there is no
+# control plane to rewrite it through (ROADMAP 4.3).
+FROM golang:1.26 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/dev2-proxy ./cmd/dev2-proxy
+
+FROM scratch
+COPY --from=build /out/dev2-proxy /dev2-proxy
+# Runs as the same unprivileged uid as the workload; it only moves bytes.
+USER 1000:1000
+EXPOSE 3128 53/udp 53/tcp
+ENTRYPOINT ["/dev2-proxy"]

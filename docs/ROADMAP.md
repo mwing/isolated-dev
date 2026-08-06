@@ -280,6 +280,13 @@ goreleaser. `doctor` verified against a live OrbStack VM.
   interception, denied-connection log surfaced at exit.
 - **Agent home volumes**: named volume per agent (configurable per-project),
   OAuth login persists across runs; `dev2 agent logout <name>` removes it.
+- **Live egress notices**: blocked destinations are surfaced the moment
+  they happen, not only in the exit summary. A denial mid-run is
+  actionable — the user can decide whether to allow it — but only while it
+  is still happening. Repeats of the same destination are counted and
+  suppressed rather than printed: a retrying client emits hundreds of
+  identical denials per second, and a notifier that prints all of them is
+  one the user switches off, at which point it protects nobody.
 - Auth modes: `volume` (default) and `env` (API key by name, for CI).
 - Agent runs are always `untrusted` level + allowlist regardless of project
   trust; `--allow-host` adds destinations per run.
@@ -302,6 +309,21 @@ goreleaser. `doctor` verified against a live OrbStack VM.
 Exit criteria: Claude Code and Codex both complete a real task in a sample
 repo with egress logging showing only allowlisted hosts; credentials
 demonstrably absent from the container when not granted.
+
+Status (in progress on `v2-go-rewrite`): the sandbox and its enforcement
+are built and verified against a real OrbStack daemon — allowlist, CONNECT
+proxy with no TLS interception, filtering resolver, internal-network
+topology, agent registry, overlay images, home volumes, live notices.
+`dev2 agent run claude` runs Claude Code in the sandbox today. Verified in
+the live container: uid 1000 (not root), no host credentials present, an
+allowlisted API reachable, a non-allowlisted host blocked and reported.
+
+Remaining before the milestone closes: Codex exercised end to end (only
+Claude has been), the `--allow-push` grant, and a real task completed by an
+agent rather than probe commands. Interactive TTY through
+`orb -m <vm> sudo docker` is unverified — it could not be tested from a
+non-terminal harness; `--tty on|off` exists to override the detection if it
+guesses wrong.
 
 ### M2: Core loop parity
 
