@@ -139,7 +139,15 @@ func newConfigEditCmd(env *Env) *cobra.Command {
 			// buffer: the file has to explain its own layout, since there
 			// is nowhere else the user would look.
 			if _, err := os.Stat(path); os.IsNotExist(err) {
-				if err := writeTemplate(path, env.Paths.ProjectDir, agentOrDefault(agentName)); err != nil {
+				// Show what the agent already allows, so the user is not
+				// editing blind and re-adding permitted destinations.
+				var builtin []string
+				if reg, rerr := registry(env); rerr == nil {
+					if a, aerr := reg.Get(agentOrDefault(agentName)); aerr == nil {
+						builtin = a.AllowHosts
+					}
+				}
+				if err := writeTemplate(path, env.Paths.ProjectDir, agentOrDefault(agentName), builtin); err != nil {
 					return err
 				}
 			}
@@ -259,11 +267,12 @@ func newConfigListCmd(env *Env) *cobra.Command {
 	}
 }
 
-func writeTemplate(path, projectDir, agentName string) error {
+func writeTemplate(path, projectDir, agentName string, builtinHosts []string) error {
 	if err := os.MkdirAll(dirOf(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(trust.Template(projectDir, agentName)), 0o600)
+	return os.WriteFile(path,
+		[]byte(trust.Template(projectDir, agentName, builtinHosts)), 0o600)
 }
 
 func dirOf(path string) string {

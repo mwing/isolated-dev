@@ -166,6 +166,43 @@ sandbox (non-root, capability drop, egress control, no host paths beyond the
 workspace) is what contains it. TOFU must never be presented as protection
 against the code itself.
 
+### 4.2.1 Two files, two jobs: requests and acceptances
+
+`.devenv.yaml` lives in the repository and is shared by the team.
+`~/.dev-envs/projects/<slug>-<hash>.yaml` lives on one machine and belongs
+to one user. Both must work, and the split between them is not an
+accident of history — it is the trust model expressed as two files:
+
+- **The project file states what the project needs.** "This service talks
+  to `internal.example.com` and our package mirror." It is committed,
+  reviewed like code, and shared, so a new teammate does not rediscover
+  the allowlist by trial and error.
+- **The user file records what this user accepted.** It is never
+  committed and never written by anything but an explicit user action.
+
+A project file is therefore a *request*, never a grant. On each run the
+tool diffs what the project asks for against what the user has accepted,
+and anything new stops the run with a confirmation showing exactly what is
+being added. `dev2 agent accept` records the decision; from then on the
+project's config applies silently until it changes again. This is the
+trust-on-first-use flow of 4.2 with the request written down instead of
+inferred, which makes it *better* than a purely local file: the team can
+propose a policy, and each user still consents to it.
+
+Non-security preferences in the project file — base image, memory, cpus —
+apply directly without a prompt. They change how the sandbox is built, not
+what it may reach or read.
+
+The failure this design exists to prevent: honoring `allow_hosts` from a
+cloned repository, which would let a hostile project widen its own egress
+before anyone read a line of it.
+
+Status: the user file is implemented (`dev2 agent allow`, `dev2 agent
+config edit`). The project-file half and the accept flow land with the
+trust store in M2. Until then `.devenv.yaml` carries only v1's keys and
+its agent section is not read, so there is no window where a project grants
+itself anything.
+
 ### 4.3 Egress enforcement
 
 Egress control is enforced by network topology, not by environment variables:

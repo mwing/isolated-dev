@@ -232,9 +232,19 @@ func TestProjectFilesListsEveryProject(t *testing.T) {
 }
 
 func TestTemplateIsValidYAMLAndSelfExplaining(t *testing.T) {
-	tmpl := Template("/proj/a", "claude")
+	tmpl := Template("/proj/a", "claude", []string{"api.anthropic.com", "github.com"})
 	if !strings.Contains(tmpl, "claude:") || !strings.Contains(tmpl, "allow_hosts") {
 		t.Errorf("template missing the fields it should teach:\n%s", tmpl)
+	}
+	// The built-in allowlist must be visible, or the user edits blind and
+	// re-adds destinations that are already permitted.
+	for _, h := range []string{"api.anthropic.com", "github.com"} {
+		if !strings.Contains(tmpl, h) {
+			t.Errorf("template does not show the built-in host %q:\n%s", h, tmpl)
+		}
+	}
+	if strings.Contains(tmpl, "\n  - api.anthropic.com") {
+		t.Error("built-in hosts must be comments, not active entries")
 	}
 	// Editing a fresh file must not produce a parse error on the next run.
 	dir := t.TempDir()

@@ -237,7 +237,19 @@ func (s *Store) Revoke(scope *File, agentName string, hosts []string) ([]string,
 // Template returns a commented starter file, so `edit` on a project with
 // no configuration yet opens something that explains itself rather than an
 // empty buffer.
-func Template(projectDir, agentName string) string {
+//
+// The agent's built-in allowlist is included as comments. Without it the
+// user is editing blind: they cannot tell whether a destination is already
+// permitted, so they either duplicate an entry or add one never needed.
+func Template(projectDir, agentName string, builtinHosts []string) string {
+	var defaults strings.Builder
+	if len(builtinHosts) == 0 {
+		defaults.WriteString("#   (none)\n")
+	}
+	for _, h := range builtinHosts {
+		fmt.Fprintf(&defaults, "#   %s\n", h)
+	}
+
 	return fmt.Sprintf(`# Agent configuration for %s
 #
 # This file lives outside the project on purpose. Configuration inside a
@@ -246,6 +258,10 @@ func Template(projectDir, agentName string) string {
 #
 # The "default" key applies to every agent; a name like "%s" applies to
 # that one. Project values layer on top of ~/.dev-envs/agents.yaml.
+#
+# %s already permits these destinations, so there is no need to repeat them:
+%s#
+# Anything below is ADDED to that list.
 
 project: %s
 
@@ -269,7 +285,7 @@ agents:
 
     # Replace the agent's default arguments.
     # args: []
-`, projectDir, agentName, projectDir, agentName)
+`, projectDir, agentName, agentName, defaults.String(), projectDir, agentName)
 }
 
 // ProjectFiles lists every per-project configuration file under root.
