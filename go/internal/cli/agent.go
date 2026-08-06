@@ -307,15 +307,16 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			fmt.Fprintf(env.Stderr, "\nwarning: reading egress log: %v\n", err)
 			return
 		}
-		fmt.Fprintln(env.Stdout)
+		fmt.Fprint(env.Stderr, "\r\n")
 		if len(summary) == 0 {
-			fmt.Fprintln(env.Stdout, "Egress: nothing blocked.")
+			fmt.Fprintln(env.Stderr, "Egress: nothing blocked.")
 			return
 		}
-		fmt.Fprintln(env.Stdout, "Egress: blocked destinations this run:")
+		fmt.Fprintln(env.Stderr, "Egress: blocked destinations this run:")
 		for _, line := range summary {
-			fmt.Fprintf(env.Stdout, "  %s\n", line)
+			fmt.Fprintf(env.Stderr, "  %s\n", line)
 		}
+		fmt.Fprintf(env.Stderr, "To permit one of these, re-run with --allow-host HOST\n")
 	}()
 
 	// Live egress notices. A denial mid-run is actionable — the user can
@@ -325,7 +326,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	var watcher *netpolicy.Watcher
 	if notify != "off" {
 		watcher = netpolicy.NewWatcher(func(n netpolicy.Notice) {
-			fmt.Fprintf(env.Stderr, "\n  \u26d4 egress %s\n", n.String())
+			fmt.Fprintf(env.Stderr, "\r\n  \u26d4 egress %s\n", n.String())
 		})
 		pr, pw := io.Pipe()
 		go func() {

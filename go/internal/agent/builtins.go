@@ -24,6 +24,11 @@ func builtins() []Agent {
 			Install:   "npm install -g @anthropic-ai/claude-code",
 			AllowHosts: []string{
 				"api.anthropic.com",
+				// Login. Without these the OAuth flow fails on first run,
+				// which reads as a broken tool rather than a policy.
+				"platform.claude.com",
+				"console.anthropic.com",
+				"claude.ai",
 				"statsig.anthropic.com",
 				"registry.npmjs.org",
 				"github.com",
