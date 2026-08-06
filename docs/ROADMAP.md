@@ -318,12 +318,15 @@ topology, agent registry, overlay images, home volumes, live notices.
 the live container: uid 1000 (not root), no host credentials present, an
 allowlisted API reachable, a non-allowlisted host blocked and reported.
 
+Interactive sessions confirmed working from a real terminal: the TTY
+survives `orb -m <vm> sudo docker`, the login persists in the named volume
+across runs, and a normal session completes with no egress denials — the
+tightened default allowlist covers ordinary use rather than merely being
+strict.
+
 Remaining before the milestone closes: Codex exercised end to end (only
-Claude has been), the `--allow-push` grant, and a real task completed by an
-agent rather than probe commands. Interactive TTY through
-`orb -m <vm> sudo docker` is unverified — it could not be tested from a
-non-terminal harness; `--tty on|off` exists to override the detection if it
-guesses wrong.
+Claude has been), the `--allow-push` grant, and an agent completing a real
+task in the sandbox rather than probe commands and a session start.
 
 ### M2: Core loop parity
 
