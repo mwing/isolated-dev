@@ -36,8 +36,9 @@ in v2 (breaking changes are acceptable and expected).
 - Single static binary: fast startup (single-digit ms), trivial install
   (brew tap, curl), signable and checksummable, no interpreter surface.
 - Excellent standard library and ecosystem fit for this domain: os/exec,
-  net/http, encoding/json, x/crypto; cobra for the CLI, gopkg.in/yaml.v3 for
-  real YAML parsing (replaces three ad hoc bash parsers).
+  net/http, encoding/json, x/crypto; cobra for the CLI, goccy/go-yaml (or sigs.k8s.io/yaml; gopkg.in/yaml.v3
+  is effectively unmaintained) for real YAML parsing (replaces three ad hoc
+  bash parsers).
 - Correct argument arrays by construction; the whole class of quoting and
   word-splitting bugs in v1 cannot exist.
 - Testable: unit tests with a fake runner interface instead of 1400 lines of
@@ -95,8 +96,9 @@ Every project runs at one of three levels. The level is chosen automatically
 
 | | untrusted (default) | trusted | privileged |
 |---|---|---|---|
+| runtime identity | non-root, fixed UID (1000) mapped to the invoking user; workspace is the ONLY writable host path | same | same |
 | workspace mount | rw | rw | rw |
-| egress | allowlist via proxy (registries for the detected language) | open | open |
+| egress | enforced allowlist (see 4.3) | open | open |
 | pass_env_vars | ignored | honored | honored |
 | ssh | none | agent forwarding (socket only, never key files) | agent forwarding |
 | gitconfig | identity-only generated file | filtered host copy | filtered host copy |
@@ -105,19 +107,64 @@ Every project runs at one of three levels. The level is chosen automatically
 
 ### 4.2 Trust-on-first-use
 
-`dev` hashes the project's `.devenv.yaml` and Dockerfile on every run. First
-run in a project, or any time the hash changes, an interactive confirmation
-shows what the project config *asks for* (mounts, env patterns, ports) before
-honoring any of it. Decisions are recorded in
-`~/.dev-envs/trust.yaml` keyed by project path. `dev trust`, `dev trust list`,
-`dev trust revoke [path]` manage the store. `--yes` never auto-grants trust
-elevation; CI uses explicit flags instead.
+`dev` extracts the project config's *security-relevant asks* (mounts, env
+patterns and explicit names, docker socket, network mode, published ports),
+normalizes them, and hashes that grant set, not the raw files. First run in a
+project, or any time the grant set changes, an interactive confirmation shows
+exactly what is being requested before any of it is honored. Routine edits to
+the Dockerfile or to non-security config (container prefix, template choice)
+never re-prompt; prompting only on real surface changes is what keeps users
+reading the prompt instead of reflexively confirming it. Decisions are
+recorded in `~/.dev-envs/trust.yaml` keyed by project path. `dev trust`,
+`dev trust list`, `dev trust revoke [path]` manage the store. `--yes` never
+auto-grants trust elevation; CI uses explicit flags instead.
 
 This closes the v1 hole where cloning a malicious repo and typing `dev` would
 honor the repo's own config (env passthrough, mounts) against the repo's own
 Dockerfile.
 
-### 4.3 Suggested grants, not silent grants
+Scope honesty: TOFU covers what the project is *granted*, not what its code
+does. A malicious postinstall script runs regardless of any prompt; the
+sandbox (non-root, capability drop, egress control, no host paths beyond the
+workspace) is what contains it. TOFU must never be presented as protection
+against the code itself.
+
+### 4.3 Egress enforcement
+
+Egress control is enforced by network topology, not by environment variables:
+
+- The workload container attaches ONLY to a per-project internal Docker
+  network (`--internal`: no gateway, no default route out).
+- The proxy sidecar is dual-homed (internal network + egress) and is the
+  only path to the outside. A process that ignores proxy settings does not
+  fall through to the open internet; it has no route at all.
+- DNS resolves only through the proxy's resolver on the internal network,
+  so name resolution cannot be used as a side channel to bypass hostname
+  checks, and raw-IP connections fail for lack of a route.
+- The proxy allowlists by CONNECT target / SNI hostname only. It does NOT
+  terminate TLS: no injected CA, no MITM, certificate pinning keeps working,
+  and the proxy never sees LLM traffic plaintext. The cost is that filtering
+  is per-host, not per-path; that trade is accepted deliberately.
+- `HTTP(S)_PROXY`/`NO_PROXY` are injected as a convenience for well-behaved
+  clients (npm, pip, git, curl, the agent CLIs); they are not the security
+  boundary.
+- Denied connection attempts are logged and summarized at exit ("blocked:
+  evil.example.com x3").
+
+### 4.4 Threat model, stated honestly
+
+What the allowlist contains: accidental and undirected exfiltration, i.e.
+telemetry, typosquatted packages phoning home, an agent following a prompt
+injection to an arbitrary URL. What it does not contain: a determined
+adversary exfiltrating THROUGH an allowlisted host. If github.com and the
+npm registry are reachable, they are usable as data channels (a push to an
+attacker repo, a package publish). The stronger guarantee, and the one the
+M1 exit criteria actually test, is that there is nothing worth stealing in
+the container: credentials are absent unless explicitly granted, and grants
+are scoped. Documentation and marketing copy must make this distinction; v1
+overclaimed and v2 should not repeat that.
+
+### 4.5 Suggested grants, not silent grants
 
 When an operation fails in a way the tool recognizes (git push permission
 denied, AWS SDK credential error), it prints the one-line grant command that
@@ -150,22 +197,45 @@ real OrbStack.
   default allowlist hosts, config dir path inside home).
 - Image overlay: project image + agent layer built on demand (project
   Dockerfile untouched).
-- **Egress proxy sidecar** (`internal/netpolicy`): per-project internal
-  network, allowlisting CONNECT proxy (LLM API + language registries +
-  git hosts), HTTP(S)_PROXY/NO_PROXY injection, denied-connection log
-  surfaced at exit ("agent tried to reach X, blocked").
+- **Egress proxy sidecar** (`internal/netpolicy`), implementing section 4.3
+  exactly: internal network with no route out, dual-homed SNI-allowlisting
+  proxy (LLM API + language registries + git hosts), proxy-only DNS, no TLS
+  interception, denied-connection log surfaced at exit.
 - **Agent home volumes**: named volume per agent (configurable per-project),
   OAuth login persists across runs; `dev2 agent logout <name>` removes it.
 - Auth modes: `volume` (default) and `env` (API key by name, for CI).
 - Agent runs are always `untrusted` level + allowlist regardless of project
   trust; `--allow-host` adds destinations per run.
 - Safe YOLO: agents launched with their auto-approve flags inside the sandbox.
+- **Git-write story (explicit default)**: agents can commit inside the
+  container (identity-only gitconfig) but cannot push; the human reviews the
+  diff and pushes from the host. This is a feature, not a gap: it is the
+  review boundary. An optional `dev agent --allow-push` grant exists for
+  workflows that want it; it adds the git host to the allowlist and injects a
+  repo-scoped token by name, and it is never on by default.
 
 Exit criteria: Claude Code and Codex both complete a real task in a sample
 repo with egress logging showing only allowlisted hosts; credentials
 demonstrably absent from the container when not granted.
 
 ### M2: Core loop parity
+
+Scope honesty up front: this is the largest milestone, bigger than M0+M1
+combined. v1 is ~4k lines of bash plus 8 language plugins, interactive mode,
+scaffolding, and devcontainer generation. Two rules keep it from stranding
+the project in a permanent dev/dev2 split:
+
+1. The exit criterion is an explicit command-by-command parity checklist
+   against v1 (every command and flag in v1's usage output, each marked
+   ported / delegated / dropped-with-reason). No vague "core loop works".
+2. dev2 may DELEGATE long-tail commands (templates update/stats, interactive
+   mode, scaffolding) to a vendored copy of the v1 scripts during the
+   transition, so cutover is gated on the security-relevant path (run,
+   shell, build, trust, egress), not on the least interesting code. The
+   vendored scripts ship inside the release artifact with checksums; they
+   are an implementation detail, not a parallel install.
+
+Work items:
 
 - `run`, `shell`, `build`, `clean`, `new`, `list`, `config`, `devcontainer`
   ported onto RunSpec + Backend. `-c` command pass-through. Port/language
@@ -175,11 +245,12 @@ demonstrably absent from the container when not granted.
 - The egress proxy from M1 becomes available to normal runs:
   `network: allowlist|open|none` per project, `--offline` flag.
 - v1 config migration: `dev2 migrate` reads `~/.dev-envs/config.yaml`,
-  writes v2 config, reports dropped/renamed keys (network_mode and the other
-  v1 no-op keys are dropped loudly).
+  writes v2 config, reports dropped/renamed keys (v1 stopped emitting the
+  never-implemented keys in the pre-rewrite fix PR, so the stray-key
+  population is frozen at whatever users already have).
 
-Exit criteria: daily-drivable replacement for v1 on OrbStack; v1 marked
-maintenance-only in README.
+Exit criteria: parity checklist complete; daily-drivable replacement for v1
+on OrbStack; v1 marked maintenance-only in README.
 
 ### M3: Multi-backend + supply chain
 
