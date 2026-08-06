@@ -352,13 +352,6 @@ auto_start_vm: true
 # Prefix for container and image names
 container_prefix: dev
 
-# Network configuration
-network_mode: bridge                    # bridge, host, none, or custom network name
-auto_host_networking: false             # Auto-use host networking for single services
-port_range: "3000-9000"                 # Port range for auto-detection
-enable_port_health_check: true          # Check if ports are accessible
-port_health_timeout: 5                  # Timeout for port health checks (seconds)
-
 # Resource limits (applied at container runtime)
 memory_limit: ""                        # Memory limit (e.g., "512m", "1g")
 cpu_limit: ""                           # CPU limit (e.g., "0.5", "1.0")
@@ -479,12 +472,8 @@ function handle_config_command() {
 # Container prefix for this project (optional)
 # container_prefix: $project_name
 
-# Network configuration (optional)
-# network_mode: bridge              # bridge, host, none, or custom network
-# auto_host_networking: false       # Auto-use host networking
-# port_range: "3000-9000"           # Custom port range
-# enable_port_health_check: true    # Enable port health checks
-# port_health_timeout: 5            # Port check timeout (seconds)
+# Port forwarding (optional)
+# forward_ports: "8080,9000"        # Override auto-detected ports
 
 # Resource limits (optional)
 # memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
