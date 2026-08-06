@@ -1,12 +1,18 @@
 BINARY := dev2
+PROXY := dev2-proxy
 PKG := ./...
 
-.PHONY: all build test lint fmt vet check clean install
+.PHONY: all build build-proxy test lint fmt vet check clean install
 
 all: check build
 
-build:
+build: build-proxy
 	go build -o bin/$(BINARY) ./cmd/dev2
+
+# The sidecar is built for linux/amd64 and linux/arm64 because it runs
+# inside the container network, never on the host.
+build-proxy:
+	go build -o bin/$(PROXY) ./cmd/dev2-proxy
 
 test:
 	go test -race $(PKG)

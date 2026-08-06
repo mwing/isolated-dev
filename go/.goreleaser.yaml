@@ -20,6 +20,18 @@ builds:
       - -X github.com/mwing/isolated-dev/go/internal/cli.Commit={{.Commit}}
       - -X github.com/mwing/isolated-dev/go/internal/cli.Date={{.Date}}
 
+  # The egress sidecar runs inside the container network, so it is only
+  # ever built for Linux.
+  - id: dev2-proxy
+    main: ./cmd/dev2-proxy
+    binary: dev2-proxy
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
