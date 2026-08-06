@@ -49,6 +49,29 @@ in v2 (breaking changes are acceptable and expected).
 Non-goals of the rewrite: no daemon, no state database beyond flat files in
 `~/.dev-envs`, no Kubernetes, no reimplementation of docker compose.
 
+### 2.1 The alternative we are rejecting
+
+Harden v1 in place. This deserves stating because it is genuinely viable:
+the pre-rewrite fix PR left v1 at 158 passing tests and shellcheck-clean at
+error level, and neither headline feature is language-bound — the egress
+sidecar is mostly `docker network create --internal` plus a proxy image, and
+the trust store is a YAML file and a prompt. Both could ship in bash within
+weeks, against a tool users already have installed.
+
+It is rejected for one reason, and it is not aesthetics: v1's defect class
+is argument handling. The fix PR was almost entirely quoting and
+word-splitting repairs — env arrays, `-c` pass-through, project-name
+sanitization, three separate ad hoc YAML parsers — and each was found by a
+user or a failing test rather than by construction. A security tool whose
+central operation is assembling an argv cannot keep relitigating whether a
+value with a space survives. `RunSpec` plus typed argv makes those bugs
+unrepresentable; that is worth a rewrite in a way that "Go is nicer" is not.
+
+The honest cost of choosing this path is that the egress proxy and trust
+store, which users want now, arrive after M0 and M1 instead of next month.
+If that trade stops looking correct — if M1 slips badly — backporting the
+sidecar to v1 is the fallback, and it is a real one.
+
 ## 3. Architecture
 
 ```
@@ -96,7 +119,8 @@ Every project runs at one of three levels. The level is chosen automatically
 
 | | untrusted (default) | trusted | privileged |
 |---|---|---|---|
-| runtime identity | non-root, fixed UID (1000) mapped to the invoking user; workspace is the ONLY writable host path | same | same |
+| runtime identity | non-root, fixed UID (1000) mapped to the invoking user, enforced by the tool via `--user` | same | same |
+| host filesystem | workspace is the only writable host path | workspace + explicitly granted mounts | same, plus the docker socket if opted in |
 | workspace mount | rw | rw | rw |
 | egress | enforced allowlist (see 4.3) | open | open |
 | pass_env_vars | ignored | honored | honored |
@@ -104,6 +128,19 @@ Every project runs at one of three levels. The level is chosen automatically
 | gitconfig | identity-only generated file | filtered host copy | filtered host copy |
 | docker socket | never | never | opt-in per run |
 | caps | drop ALL + minimal adds, no-new-privileges, pids/mem limits | same | same, socket exception |
+
+Two v1 behaviors this table deliberately changes:
+
+- **Identity is set by the tool, not by the image.** v1 skips `--user` and
+  relies on the `USER` directive in the language template
+  (`scripts/lib/security.sh:52`). Since the project supplies its own
+  Dockerfile, an untrusted repo can simply declare `USER root` and get root,
+  at which point the retained `DAC_OVERRIDE`/`SETUID`/`SETGID` capabilities
+  become meaningful again. v2 passes `--user` explicitly on every run; the
+  image's `USER` is a default, never the control.
+- **No blanket `apparmor:unconfined`.** v1 sets it for all runs
+  (`security.sh:57`). v2 keeps the default profile and drops the confinement
+  only where a backend demonstrably requires it, per backend driver.
 
 ### 4.2 Trust-on-first-use
 
@@ -140,7 +177,17 @@ Egress control is enforced by network topology, not by environment variables:
   fall through to the open internet; it has no route at all.
 - DNS resolves only through the proxy's resolver on the internal network,
   so name resolution cannot be used as a side channel to bypass hostname
-  checks, and raw-IP connections fail for lack of a route.
+  checks, and raw-IP connections fail for lack of a route. The resolver
+  *allowlists*, it does not merely forward: non-allowlisted names get
+  NXDOMAIN and are logged alongside denied connections. Forwarding without
+  filtering would leave DNS tunnelling wide open. (With CONNECT proxying the
+  client does not strictly need working DNS at all — the proxy resolves — so
+  a filtering resolver is a compatibility affordance, not a requirement.)
+- The proxy has no runtime control plane reachable from the internal
+  network. Policy is fixed at sidecar start from the resolved trust state;
+  there is no admin socket, config endpoint, or reload API bound to the
+  interface the workload can see. Otherwise the workload rewrites its own
+  allowlist.
 - The proxy allowlists by CONNECT target / SNI hostname only. It does NOT
   terminate TLS: no injected CA, no MITM, certificate pinning keeps working,
   and the proxy never sees LLM traffic plaintext. The cost is that filtering
@@ -153,16 +200,41 @@ Egress control is enforced by network topology, not by environment variables:
 
 ### 4.4 Threat model, stated honestly
 
-What the allowlist contains: accidental and undirected exfiltration, i.e.
+**What is being promised.** The product guarantee is about defaults and
+visibility, not about a ceiling on what a container may hold. A user can
+expose anything they need — credentials, sockets, host paths, open egress —
+and complex setups will legitimately need most of it to run at all. Full
+access is a supported end state, not a failure mode. What v2 guarantees is
+that nothing sensitive gets there *by accident*: every exposure is the
+result of an explicit grant, the grant is visible (`dev trust list`), scoped
+to a project, and revocable in one command. The tool's job is to make the
+trusted configuration the deliberate one, not to keep the user poor.
+
+This is why "there is nothing worth stealing in the container" is a
+statement about the untrusted default, not an invariant of the tool. It is
+what M1's exit criteria test because agent runs are pinned to that level; at
+`trusted` and `privileged` the user has decided otherwise, and that decision
+is the feature.
+
+**What the allowlist contains:** accidental and undirected exfiltration —
 telemetry, typosquatted packages phoning home, an agent following a prompt
-injection to an arbitrary URL. What it does not contain: a determined
-adversary exfiltrating THROUGH an allowlisted host. If github.com and the
-npm registry are reachable, they are usable as data channels (a push to an
-attacker repo, a package publish). The stronger guarantee, and the one the
-M1 exit criteria actually test, is that there is nothing worth stealing in
-the container: credentials are absent unless explicitly granted, and grants
-are scoped. Documentation and marketing copy must make this distinction; v1
-overclaimed and v2 should not repeat that.
+injection to an arbitrary URL.
+
+**What it does not contain:** a determined adversary exfiltrating THROUGH an
+allowlisted host. If github.com and the npm registry are reachable, they are
+usable as data channels (a push to an attacker repo, a package publish).
+
+**Structural exception — the agent's own API channel.** Agent mode requires
+the LLM endpoint to be allowlisted or the agent cannot function. That
+endpoint is bidirectional by nature: an agent acting on injected
+instructions can encode repository contents into its own completions
+traffic. No hostname allowlist can close this, and no version of this design
+will. It is a property of running an agent on data at all, and it belongs in
+the docs rather than in a footnote.
+
+Documentation and marketing copy must preserve these distinctions. v1
+overclaimed; v2 should be precise about which promise is being made at which
+trust level.
 
 ### 4.5 Suggested grants, not silent grants
 
@@ -211,8 +283,16 @@ real OrbStack.
   container (identity-only gitconfig) but cannot push; the human reviews the
   diff and pushes from the host. This is a feature, not a gap: it is the
   review boundary. An optional `dev agent --allow-push` grant exists for
-  workflows that want it; it adds the git host to the allowlist and injects a
-  repo-scoped token by name, and it is never on by default.
+  workflows that want it — it adds the git host to the allowlist and
+  forwards the ssh agent socket (preferred: the key itself never enters the
+  container and the grant dies with the agent), falling back to a
+  repo-scoped token by name where ssh is not an option. Never on by default,
+  and the confirmation states plainly that the run no longer satisfies
+  section 4.4's untrusted-default posture.
+- **Agent versioning**: agent CLIs ship on their own weekly-ish cadence, so
+  `agents/<name>/agent.yaml` pins a version and the overlay layer is keyed
+  by it; `dev2 agent update <name>` re-resolves deliberately. Unpinned
+  "latest" would silently change what runs inside the sandbox between runs.
 
 Exit criteria: Claude Code and Codex both complete a real task in a sample
 repo with egress logging showing only allowlisted hosts; credentials
@@ -228,12 +308,20 @@ the project in a permanent dev/dev2 split:
 1. The exit criterion is an explicit command-by-command parity checklist
    against v1 (every command and flag in v1's usage output, each marked
    ported / delegated / dropped-with-reason). No vague "core loop works".
-2. dev2 may DELEGATE long-tail commands (templates update/stats, interactive
-   mode, scaffolding) to a vendored copy of the v1 scripts during the
-   transition, so cutover is gated on the security-relevant path (run,
-   shell, build, trust, egress), not on the least interesting code. The
-   vendored scripts ship inside the release artifact with checksums; they
-   are an implementation detail, not a parallel install.
+2. dev2 may DELEGATE long-tail commands to a vendored copy of the v1 scripts
+   during the transition, so cutover is gated on the security-relevant path
+   (run, shell, build, trust, egress), not on the least interesting code.
+   The vendored scripts ship inside the release artifact with checksums;
+   they are an implementation detail, not a parallel install.
+
+   **Bright line: a delegated command may never start a container.**
+   Delegation is permitted for commands that only read state or write files
+   — `templates update/stats/prune`, scaffolding, completions. It is
+   forbidden for anything that runs a workload, because a delegated workload
+   would run under v1 semantics (no trust store, no egress policy, image's
+   `USER` instead of `--user`) while the docs describe the v2 model. Note
+   that this puts `interactive` on the port-or-drop side of the line: it
+   launches containers.
 
 Work items:
 
@@ -310,6 +398,19 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
 ```
 M0 skeleton -> M1 agent mode -> M2 core parity + trust -> M3 backends/supply chain -> M4 team/policy
 ```
+
+Relative sizes, so the cut order below is actionable rather than a
+sentiment. These are ratios between milestones, not calendar estimates;
+whoever picks this up should replace them with real ones against their own
+capacity before committing to a date:
+
+| | size | notes |
+|---|---|---|
+| M0 | S | scaffolding, no product surface |
+| M1 | L | the proxy sidecar is the hard part and it is novel work |
+| M2 | XL | larger than M0+M1 combined; ~4k lines of bash, 8 language plugins |
+| M3 | M | mostly integration; the docker backend is well-understood |
+| M4 | M | policy file is small, devcontainer read-side is not |
 
 M1 before M2 is intentional: agent mode is the new value and it builds the
 primitives (proxy, volumes, trust) that M2 then reuses. If effort must be
