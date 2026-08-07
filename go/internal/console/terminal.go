@@ -17,6 +17,8 @@ import (
 // redraws; without a terminal emulator those escape sequences would land
 // in the middle of the console's layout and corrupt it.
 type Terminal struct {
+	// Rec captures output and sizes for later replay.
+	Rec  *Recorder
 	mu   sync.Mutex
 	vt   vt10x.Terminal
 	rows int
@@ -55,11 +57,13 @@ func (t *Terminal) Attach(f *os.File) {
 	cols, rows := t.cols, t.rows
 	t.mu.Unlock()
 
+	t.Rec.Resize(cols, rows, "attach")
 	_ = pty.Setsize(f, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 }
 
 // Write feeds workload output into the emulator.
 func (t *Terminal) Write(p []byte) (int, error) {
+	t.Rec.Output(p)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.vt.Write(p)
@@ -92,10 +96,14 @@ func (t *Terminal) Resize(cols, rows int) {
 	out := t.out
 	t.mu.Unlock()
 
+	t.Rec.Resize(cols, rows, "resize")
 	if out != nil {
 		_ = pty.Setsize(out, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 	}
 }
+
+// Note records an observation in the session recording.
+func (t *Terminal) Note(note string) { t.Rec.Note(note) }
 
 // Size reports the current dimensions.
 func (t *Terminal) Size() (cols, rows int) {

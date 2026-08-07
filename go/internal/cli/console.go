@@ -32,6 +32,8 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		extraHosts []string
 		shell      bool
 		agentName  string
+		record     string
+		replay     string
 	)
 
 	cmd := &cobra.Command{
@@ -43,8 +45,11 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			"run things — everything here has a non-interactive equivalent, so\n" +
 			"nothing becomes console-only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if replay != "" {
+				return replayRecording(env, replay)
+			}
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
-				rebuild, extraHosts, shell, agentName)
+				rebuild, extraHosts, shell, agentName, record)
 		},
 	}
 	cmd.Flags().StringVarP(&command, "command", "c", "", "command to run")
@@ -54,11 +59,38 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		"treat the command as interactive: give it a terminal and the keyboard")
 	cmd.Flags().StringVar(&agentName, "agent", "",
 		"run this agent in the console, using its stored login")
+	cmd.Flags().StringVar(&record, "record", "",
+		"record the workload's output and terminal sizes to a file")
+	cmd.Flags().StringVar(&replay, "replay", "",
+		"render a recording instead of running anything")
 	return cmd
 }
 
+// replayRecording renders a recorded session, showing the sizes the
+// workload was given alongside the screen it produced. A screenshot cannot
+// show the size, and the size is usually the question.
+func replayRecording(env *Env, path string) error {
+	screen, sizes, err := console.Replay(path)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(env.Stdout, "Terminal sizes given to the workload:\n")
+	for _, s := range sizes {
+		if s.Type == "note" {
+			fmt.Fprintf(env.Stdout, "  %6dms  %s\n", s.Millis, s.Note)
+			continue
+		}
+		fmt.Fprintf(env.Stdout, "  %6dms  %dx%d  %s\n", s.Millis, s.Cols, s.Rows, s.Note)
+	}
+	fmt.Fprintf(env.Stdout, "\nFinal screen (%d rows):\n", len(screen))
+	for i, line := range screen {
+		fmt.Fprintf(env.Stdout, "%3d |%s\n", i, line)
+	}
+	return nil
+}
+
 func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
-	extraHosts []string, interactive bool, agentName string) error {
+	extraHosts []string, interactive bool, agentName string, record string) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
@@ -139,6 +171,16 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		// window looks like a frozen console, not a mis-sized one.
 		cols, rows := paneSize()
 		term = console.NewTerminal(cols, rows)
+		if record != "" {
+			rec, err := console.NewRecorder(record)
+			if err != nil {
+				return err
+			}
+			defer rec.Close()
+			term.Rec = rec
+			rec.Resize(cols, rows, "startup estimate")
+			fmt.Fprintf(env.Stderr, "recording to %s\n", record)
+		}
 	}
 
 	model := console.New(

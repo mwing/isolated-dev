@@ -149,6 +149,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.height = msg.Height
 		}
 		if m.Term != nil {
+			m.Term.Note(fmt.Sprintf("window %dx%d reported (raw %dx%d)",
+				m.width, m.height, msg.Width, msg.Height))
 			m.Term.Resize(m.width, m.outputHeight())
 		}
 		return m, nil
