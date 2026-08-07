@@ -492,3 +492,53 @@ func TestHeldThenAllowedLeavesNoBlockInTheSummary(t *testing.T) {
 		t.Fatalf("summary = %v, want nothing: the request was allowed", got)
 	}
 }
+
+func TestRefusedDestinationFailsFastInsteadOfHoldingAgain(t *testing.T) {
+	// The bug this prevents: a declined destination was held for the full
+	// timeout on every retry while the console stayed silent, which is
+	// indistinguishable from a hang.
+	c := &collector{}
+	p := NewProxy(mustParse(t, "a.example.com"))
+	p.Emit = c.emit
+	p.AskTimeout = 30 * time.Second
+	p.AskPoll = 20 * time.Millisecond
+	ctl := NewControl(p, nil, []string{"a.example.com"})
+	addr := startProxy(t, p)
+
+	if resp := ctl.Apply(Request{Op: "refuse", Host: "no.example.com"}); !resp.OK {
+		t.Fatalf("refuse failed: %+v", resp)
+	}
+
+	start := time.Now()
+	status, conn, _ := connectThrough(t, addr, "no.example.com:443")
+	conn.Close()
+
+	if !strings.Contains(status, "403") {
+		t.Fatalf("status = %q", status)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("held for %s despite an answer already given", elapsed)
+	}
+	for _, e := range c.all() {
+		if e.Action == "pending" {
+			t.Error("asked again about a destination already declined")
+		}
+	}
+}
+
+func TestAllowingAfterRefusingWorks(t *testing.T) {
+	// Changing your mind must not be blocked by the earlier no.
+	p := NewProxy(mustParse(t, "a.example.com"))
+	ctl := NewControl(p, nil, []string{"a.example.com"})
+
+	ctl.Apply(Request{Op: "refuse", Host: "later.example.com"})
+	if resp := ctl.Apply(Request{Op: "allow", Host: "later.example.com"}); !resp.OK {
+		t.Fatalf("allow after refuse failed: %+v", resp)
+	}
+	if !p.Allowlist().Allows("later.example.com", 443) {
+		t.Fatal("policy did not change")
+	}
+	if p.isRefused("later.example.com") {
+		t.Fatal("refusal survived the grant and would still fail fast")
+	}
+}

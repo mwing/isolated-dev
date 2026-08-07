@@ -296,3 +296,49 @@ func TestTerminalIgnoresEscapeSequencesInLayout(t *testing.T) {
 		t.Errorf("screen content missing after a clear:\n%s", m.View())
 	}
 }
+
+func TestRepeatedAllowsCollapseIntoACount(t *testing.T) {
+	// An agent opens dozens of connections to the same host. A line each
+	// buries the decisions that matter and storms the redraw, which is
+	// what made the console look frozen.
+	m := newTestModel(nil)
+	for i := 0; i < 50; i++ {
+		send(m, EventMsg(netpolicy.Event{Action: "allow", Host: "mcp-proxy.anthropic.com", Port: 443}))
+	}
+	if len(m.events) != 1 {
+		t.Fatalf("events = %d, want one collapsed line", len(m.events))
+	}
+	if !strings.Contains(m.View(), "×50") {
+		t.Errorf("count not shown:\n%s", m.View())
+	}
+}
+
+func TestDistinctEventsStillAppear(t *testing.T) {
+	m := newTestModel(nil)
+	send(m, EventMsg(netpolicy.Event{Action: "allow", Host: "a.example.com", Port: 443}))
+	send(m, EventMsg(netpolicy.Event{Action: "allow", Host: "b.example.com", Port: 443}))
+	if len(m.events) != 2 {
+		t.Fatalf("events = %v", m.events)
+	}
+}
+
+func TestDenyReachesTheSidecar(t *testing.T) {
+	// A "no" answered only in the UI leaves the sidecar holding every
+	// retry for the full timeout.
+	var gotDecision Decision
+	var called bool
+	m := newTestModel(func(_ string, d Decision) error {
+		called, gotDecision = true, d
+		return nil
+	})
+	send(m, EventMsg(netpolicy.Event{Action: "pending", Host: "no.example.com", Port: 443}))
+
+	cmd := send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if cmd == nil {
+		t.Fatal("denying produced no action")
+	}
+	cmd()
+	if !called || gotDecision != DecideNo {
+		t.Fatalf("sidecar not told about the denial (called=%v, decision=%v)", called, gotDecision)
+	}
+}

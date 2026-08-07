@@ -95,6 +95,8 @@ type Model struct {
 	pending []question
 	asked   map[string]bool
 
+	// repeat counts consecutive identical events, collapsed into one line.
+	repeat   int
 	status   string
 	finished bool
 	exitCode int
@@ -154,7 +156,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grantedMsg:
 		if msg.err != nil {
-			m.events = append(m.events, "✗ could not allow "+msg.host+": "+msg.err.Error())
+			m.addEvent("✗ could not allow " + msg.host + ": " + msg.err.Error())
 		}
 		m.trim()
 		return m, nil
@@ -186,9 +188,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "p":
 			return m, m.decide(q, DecideProject, "allowed and recorded for this project")
 		case "n", "esc":
-			m.pending = m.pending[1:]
-			m.events = append(m.events, "✗ denied "+q.String())
-			return m, nil
+			return m, m.decide(q, DecideNo, "denied")
 		}
 		return m, nil
 	}
@@ -272,8 +272,11 @@ func keyBytes(msg tea.KeyMsg) string {
 
 func (m *Model) decide(q question, d Decision, note string) tea.Cmd {
 	m.pending = m.pending[1:]
-	m.events = append(m.events, "✓ "+note+": "+q.String())
-	m.trim()
+	mark := "✓ "
+	if d == DecideNo {
+		mark = "✗ "
+	}
+	m.addEvent(mark + note + ": " + q.String())
 
 	host := q.host
 	return func() tea.Msg {
@@ -296,25 +299,44 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 			m.pending = append(m.pending, question{host: e.Host, port: e.Port})
 		}
 	case "deny":
-		m.events = append(m.events, "⛔ blocked "+dest)
+		m.addEvent("⛔ blocked " + dest)
 	case "timeout":
-		m.events = append(m.events, "⏱ no answer, blocked "+dest)
+		m.addEvent("⏱ no answer, blocked " + dest)
 	case "error":
 		// Allowed, but unreachable. Calling this "blocked" would send the
 		// user to the allowlist to fix something it did not cause.
-		m.events = append(m.events, "✗ could not reach "+dest)
+		m.addEvent("✗ could not reach " + dest)
 	case "granted":
-		m.events = append(m.events, "→ proceeding "+dest)
+		m.addEvent("→ proceeding " + dest)
 	case "allow":
-		// Successful traffic is the common case; showing every connection
-		// would bury the decisions that matter.
+		// Successful traffic is the common case. An agent opens dozens of
+		// connections to the same host, and a line each buries the
+		// decisions that matter — and storms the redraw, which is what
+		// made the console look frozen. Repeats collapse into a count.
 		if e.Method == "DNS" {
 			return nil
 		}
-		m.events = append(m.events, "· "+dest)
+		m.addEvent("· " + dest)
+		return nil
 	}
 	m.trim()
 	return nil
+}
+
+// addEvent appends a line, collapsing an immediate repeat into a count
+// rather than filling the pane with identical entries.
+func (m *Model) addEvent(line string) {
+	if n := len(m.events); n > 0 {
+		if last := m.events[n-1]; last == line || strings.HasPrefix(last, line+" ×") {
+			m.repeat++
+			m.events[n-1] = fmt.Sprintf("%s ×%d", line, m.repeat+1)
+			m.trim()
+			return
+		}
+	}
+	m.repeat = 0
+	m.events = append(m.events, line)
+	m.trim()
 }
 
 // trim bounds the buffers so a long run cannot grow memory without limit.

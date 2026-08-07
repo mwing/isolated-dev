@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -126,6 +128,13 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		fmt.Sprintf("allowlist · %d destination(s)", len(allowed)),
 		console.Actions{
 			Grant: func(host string, d console.Decision) error {
+				// A "no" has to reach the sidecar too. Without it every
+				// retry is held for the full timeout again while the
+				// console stays silent, which is indistinguishable from a
+				// hang.
+				if d == console.DecideNo {
+					return side.Grant(runCtx, "refuse", host)
+				}
 				// Apply to the running sidecar first: that is what releases
 				// the held request. Recording it afterwards is bookkeeping
 				// and must not delay the connection.
@@ -277,7 +286,10 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 	spec.Env = append(spec.Env, "TERM=xterm-256color")
 	spec.Ports = nil
 
-	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, prog: prog}, &runner.PTY{
+	var dirty atomic.Bool
+	go repaint(ctx, prog, &dirty)
+
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
 		Rows: 24, Cols: 80, Ready: term.Attach,
 	})
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
@@ -297,25 +309,51 @@ func runInteractive(ctx context.Context, eng *container.Engine, p *project.Proje
 	spec.Env = append(spec.Env, "TERM=xterm-256color")
 	spec.Ports = nil
 
-	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, prog: prog}, &runner.PTY{
+	var dirty atomic.Bool
+	go repaint(ctx, prog, &dirty)
+
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
 		Rows: 24, Cols: 80,
 		Ready: term.Attach,
 	})
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }
 
-// redrawWriter feeds workload bytes into the emulator and asks the UI to
-// repaint. bubbletea only redraws on a message, so without this the screen
-// would update just when a key was pressed.
+// redrawWriter feeds workload bytes into the emulator and marks the screen
+// dirty. bubbletea only redraws on a message, so something has to ask.
+//
+// It does not ask per write. A chatty workload writes thousands of times a
+// second, and a message each floods the queue and starves key handling —
+// the console stops responding while it renders frames nobody sees. A
+// ticker repaints at a fixed rate instead, so render cost is bounded by
+// time rather than by how talkative the workload is.
 type redrawWriter struct {
-	term *console.Terminal
-	prog *tea.Program
+	term  *console.Terminal
+	dirty *atomic.Bool
 }
 
 func (w redrawWriter) Write(p []byte) (int, error) {
 	n, err := w.term.Write(p)
-	w.prog.Send(console.RedrawMsg{})
+	w.dirty.Store(true)
 	return n, err
+}
+
+// repaint sends a redraw at most once per interval while there is
+// something new to show.
+func repaint(ctx context.Context, prog *tea.Program, dirty *atomic.Bool) {
+	const frame = 33 * time.Millisecond
+	t := time.NewTicker(frame)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if dirty.Swap(false) {
+				prog.Send(console.RedrawMsg{})
+			}
+		}
+	}
 }
 
 // runWorkload runs the container, forwarding its output line by line.

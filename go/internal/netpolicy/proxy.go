@@ -67,6 +67,10 @@ type Proxy struct {
 
 	mu      sync.Mutex
 	denials map[string]int
+	// refused are destinations the user said no to. Without recording the
+	// answer, every retry would be held for the full timeout again while
+	// the console stayed silent, which reads as a hang.
+	refused map[string]bool
 }
 
 // NewProxy returns a proxy enforcing allow.
@@ -76,6 +80,7 @@ func NewProxy(allow *Allowlist) *Proxy {
 		Now:         time.Now,
 		IdleTimeout: 10 * time.Minute,
 		denials:     map[string]int{},
+		refused:     map[string]bool{},
 	}
 }
 
@@ -138,6 +143,30 @@ func (p *Proxy) Denials() map[string]int {
 		out[k] = v
 	}
 	return out
+}
+
+// Refuse records that the user declined a destination, so later attempts
+// fail at once instead of waiting for a decision already made.
+func (p *Proxy) Refuse(host string) {
+	p.mu.Lock()
+	if p.refused == nil {
+		p.refused = map[string]bool{}
+	}
+	p.refused[normalizeHost(host)] = true
+	p.mu.Unlock()
+}
+
+// Unrefuse forgets a refusal, so allowing a destination later works.
+func (p *Proxy) Unrefuse(host string) {
+	p.mu.Lock()
+	delete(p.refused, normalizeHost(host))
+	p.mu.Unlock()
+}
+
+func (p *Proxy) isRefused(host string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.refused[normalizeHost(host)]
 }
 
 // ServeHTTP implements the proxy. CONNECT is the interesting path; plain
@@ -264,6 +293,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 // client gives up, so a held connection cannot outlive its request.
 func (p *Proxy) awaitDecision(ctx context.Context, host string, port int, method string) bool {
 	if p.AskTimeout <= 0 {
+		return false
+	}
+	// An answer already given is not a question. Asking again — or worse,
+	// silently holding for the timeout — is what made a declined
+	// destination look like a hang.
+	if p.isRefused(host) {
 		return false
 	}
 	p.emit(Event{Action: "pending", Host: host, Port: port, Method: method,

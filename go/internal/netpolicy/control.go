@@ -52,7 +52,7 @@ func NewControl(p *Proxy, r *Resolver, entries []string) *Control {
 
 // Request is one control operation.
 type Request struct {
-	// Op is "allow", "revoke", "list" or "denials".
+	// Op is "allow", "revoke", "refuse", "list" or "denials".
 	Op   string `json:"op"`
 	Host string `json:"host,omitempty"`
 }
@@ -132,6 +132,18 @@ func (c *Control) Apply(req Request) Response {
 		return c.mutate("allow", req.Host, true)
 	case "revoke":
 		return c.mutate("revoke", req.Host, false)
+	case "refuse":
+		// A decision, not a policy change: the destination was never in
+		// the allowlist, and recording the "no" stops later attempts from
+		// waiting for an answer that has already been given.
+		if strings.TrimSpace(req.Host) == "" {
+			return Response{Error: "no host given"}
+		}
+		c.Proxy.Refuse(req.Host)
+		if c.OnChange != nil {
+			c.OnChange("refuse", req.Host, nil)
+		}
+		return Response{OK: true}
 	case "list":
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -177,6 +189,11 @@ func (c *Control) mutate(op, host string, add bool) Response {
 	rules := append([]string(nil), next...)
 	c.mu.Unlock()
 
+	if add {
+		// Allowing something previously declined must undo the refusal,
+		// or the grant would have no effect.
+		c.Proxy.Unrefuse(host)
+	}
 	c.Proxy.SetAllowlist(allow)
 	if c.Resolver != nil {
 		c.Resolver.SetAllowlist(allow)
