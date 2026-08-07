@@ -256,3 +256,82 @@ func (e *Engine) LogsFollow(ctx context.Context, name string, w io.Writer) error
 	})
 	return err
 }
+
+// Info is one container as the daemon reports it.
+type Info struct {
+	ID     string            `json:"ID"`
+	Names  string            `json:"Names"`
+	Image  string            `json:"Image"`
+	Status string            `json:"Status"`
+	State  string            `json:"State"`
+	Labels string            `json:"Labels"`
+	labels map[string]string `json:"-"`
+}
+
+// Label returns a label value, parsing the daemon's comma-separated form
+// on first use.
+func (i *Info) Label(key string) string {
+	if i.labels == nil {
+		i.labels = map[string]string{}
+		for _, pair := range strings.Split(i.Labels, ",") {
+			if k, v, ok := strings.Cut(pair, "="); ok {
+				i.labels[k] = v
+			}
+		}
+	}
+	return i.labels[key]
+}
+
+// List returns containers carrying a label, running or not.
+func (e *Engine) List(ctx context.Context, label string) ([]Info, error) {
+	res, err := e.docker(ctx, "ps", "--all", "--filter", "label="+label, "--format", "{{json .}}")
+	if err != nil {
+		return nil, err
+	}
+	if err := check(res, nil, "listing containers"); err != nil {
+		return nil, err
+	}
+	var out []Info
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var info Info
+		if err := json.Unmarshal([]byte(line), &info); err != nil {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
+// Networks returns network names matching a prefix.
+func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) {
+	res, err := e.docker(ctx, "network", "ls", "--format", "{{.Name}}")
+	if err != nil {
+		return nil, err
+	}
+	if err := check(res, nil, "listing networks"); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, name := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if name = strings.TrimSpace(name); name != "" && strings.HasPrefix(name, prefix) {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+// RemoveImage deletes an image, ignoring absence.
+func (e *Engine) RemoveImage(ctx context.Context, tag string) error {
+	res, err := e.docker(ctx, "image", "rm", tag)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 && (strings.Contains(res.Stderr, "No such image") ||
+		strings.Contains(res.Stderr, "not found")) {
+		return nil
+	}
+	return check(res, nil, "removing image "+tag)
+}

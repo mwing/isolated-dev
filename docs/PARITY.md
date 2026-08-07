@@ -21,8 +21,8 @@ dropped with a reason written down.
 | `dev shell` | keep | done |
 | `dev build` | keep | done |
 | `dev run -c '<cmd>'` | keep | done |
-| `dev clean` | keep | todo |
-| `dev list` | redesign | todo — see `status` below |
+| `dev clean` | keep | done |
+| `dev list` | redesign | done — `dev2 status` |
 | language detection | redesign | done — reads plugin data, deterministic |
 | language plugins | keep (format unchanged) | done — all 8 load |
 
@@ -47,7 +47,14 @@ port-or-drop rather than delegable to v1.
 
 **`dev list` → `dev2 status`.** v1 lists images. What a user needs is what
 is *running*, in which project, under which policy, and what it has been
-blocked from reaching.
+blocked from reaching. Done: it reports the resolved network mode with its
+origin, the destinations allowed and why (language registries vs. granted),
+running containers with their role, and — while a sidecar is up — what has
+been blocked so far in that run.
+
+**`dev env` → `dev2 vm`.** VM lifecycle, narrowed to what is actually
+needed: `start` and `status`. v1 called `orb start` and assumed it worked;
+v2 checks. Creating and destroying VMs is OrbStack's job, not this tool's.
 
 **`dev debug` → `dev2 doctor`.** Done. Diagnosis only; never repairs.
 
@@ -72,7 +79,6 @@ of output did not earn its place.
 | `dev templates *` | M2 late — same |
 | `dev devcontainer` (write) | M2 |
 | devcontainer.json (read) | M4 |
-| `dev env` (VM lifecycle) | M2 |
 | `dev security scan` | M3, with real exit codes as a CI gate |
 | `dev security check` | M3 |
 | `dev disk`, `dev troubleshoot` | M3 — candidates for folding into `doctor` |
