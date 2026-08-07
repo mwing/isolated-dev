@@ -11,9 +11,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/dev2-proxy ./cmd/dev2-proxy
+# scratch has no directories and no shell to make one. The control socket
+# needs a writable place owned by the unprivileged uid, so the directory is
+# created here and copied in.
+RUN mkdir -p /empty && chown 1000:1000 /empty
 
 FROM scratch
 COPY --from=build /out/dev2-proxy /dev2-proxy
+COPY --from=build --chown=1000:1000 /empty /run
 # Runs as the same unprivileged uid as the workload; it only moves bytes.
 USER 1000:1000
 EXPOSE 3128 53/udp 53/tcp

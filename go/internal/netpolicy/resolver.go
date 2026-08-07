@@ -20,7 +20,8 @@ import (
 // resolves on their behalf — so it exists as a compatibility affordance for
 // tools that resolve before they connect.
 type Resolver struct {
-	Allow *Allowlist
+	allow   *Allowlist
+	allowMu sync.RWMutex
 
 	// Upstream resolves an allowed name. Injected for tests.
 	Upstream func(ctx context.Context, name string) ([]net.IP, error)
@@ -35,7 +36,21 @@ type Resolver struct {
 
 // NewResolver returns a resolver enforcing allow.
 func NewResolver(allow *Allowlist) *Resolver {
-	return &Resolver{Allow: allow, denials: map[string]int{}}
+	return &Resolver{allow: allow, denials: map[string]int{}}
+}
+
+// Allowlist returns the policy in force.
+func (r *Resolver) Allowlist() *Allowlist {
+	r.allowMu.RLock()
+	defer r.allowMu.RUnlock()
+	return r.allow
+}
+
+// SetAllowlist replaces the policy for subsequent queries.
+func (r *Resolver) SetAllowlist(a *Allowlist) {
+	r.allowMu.Lock()
+	r.allow = a
+	r.allowMu.Unlock()
 }
 
 func (r *Resolver) now() time.Time {
@@ -59,7 +74,7 @@ func (r *Resolver) Resolve(ctx context.Context, name string) ([]net.IP, error) {
 		return nil, &ErrRefused{Name: name}
 	}
 
-	if !r.Allow.AllowsName(q) {
+	if !r.Allowlist().AllowsName(q) {
 		r.deny(q)
 		return nil, &ErrRefused{Name: q}
 	}

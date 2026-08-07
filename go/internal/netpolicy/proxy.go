@@ -36,7 +36,12 @@ type Event struct {
 // and the proxy never sees plaintext. The cost, accepted deliberately in
 // ROADMAP 4.3, is that filtering is per-host and not per-path.
 type Proxy struct {
-	Allow *Allowlist
+	// allow is replaceable at runtime so a live console can widen the
+	// policy without restarting the workload. It is unexported and guarded
+	// because the whole point of the sidecar is that the policy has one
+	// owner; see Control for who is permitted to change it.
+	allow   *Allowlist
+	allowMu sync.RWMutex
 
 	// Dial establishes the upstream connection. Injected for tests.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -55,11 +60,27 @@ type Proxy struct {
 // NewProxy returns a proxy enforcing allow.
 func NewProxy(allow *Allowlist) *Proxy {
 	return &Proxy{
-		Allow:       allow,
+		allow:       allow,
 		Now:         time.Now,
 		IdleTimeout: 10 * time.Minute,
 		denials:     map[string]int{},
 	}
+}
+
+// Allowlist returns the policy in force.
+func (p *Proxy) Allowlist() *Allowlist {
+	p.allowMu.RLock()
+	defer p.allowMu.RUnlock()
+	return p.allow
+}
+
+// SetAllowlist replaces the policy for subsequent connections. Connections
+// already established are not torn down: revoking a destination stops new
+// traffic, it does not kill a transfer in flight.
+func (p *Proxy) SetAllowlist(a *Allowlist) {
+	p.allowMu.Lock()
+	p.allow = a
+	p.allowMu.Unlock()
 }
 
 func (p *Proxy) now() time.Time {
@@ -126,7 +147,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !p.Allow.Allows(host, port) {
+	if !p.Allowlist().Allows(host, port) {
 		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
 			Reason: "not in allowlist"})
 		denyResponse(w, host, port)
@@ -177,7 +198,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid target", http.StatusBadRequest)
 		return
 	}
-	if !p.Allow.Allows(host, port) {
+	if !p.Allowlist().Allows(host, port) {
 		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
 			Reason: "not in allowlist"})
 		denyResponse(w, host, port)

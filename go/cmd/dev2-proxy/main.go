@@ -36,8 +36,18 @@ func run() error {
 		allowFlag = flag.String("allow", "", "comma-separated allowlist entries")
 		allowFile = flag.String("allow-file", "", "file with one allowlist entry per line")
 		noDNS     = flag.Bool("no-dns", false, "do not serve DNS")
+		ctlPath   = flag.String("control-socket", "/run/dev2-control.sock",
+			"unix socket for live policy changes; empty disables it")
 	)
 	flag.Parse()
+
+	// Control-client mode, invoked through `docker exec` into this same
+	// container: `dev2-proxy control allow example.com`. It exists here
+	// rather than as a second binary so the runtime image stays a single
+	// static file with no shell.
+	if args := flag.Args(); len(args) > 0 && args[0] == "control" {
+		return control(*ctlPath, args[1:])
+	}
 
 	entries, err := gatherEntries(*allowFlag, *allowFile)
 	if err != nil {
@@ -89,6 +99,21 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "dev2-proxy: resolver listening on %s\n", *dnsAddr)
 	}
 
+	if *ctlPath != "" {
+		ctl := netpolicy.NewControl(proxy, resolverFor(dnsSrv), entries)
+		ctl.OnChange = func(op, host string, rules []string) {
+			// Policy changes belong in the same log as the decisions they
+			// affect, or a later denial looks inexplicable.
+			fmt.Fprintf(os.Stderr, "dev2-proxy: %s %s; policy now: %s\n",
+				op, host, strings.Join(rules, " "))
+		}
+		if err := ctl.Listen(*ctlPath); err != nil {
+			return err
+		}
+		defer ctl.Close()
+		fmt.Fprintf(os.Stderr, "dev2-proxy: control socket at %s\n", *ctlPath)
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
@@ -107,6 +132,39 @@ func run() error {
 	// to reach that policy stopped?
 	for _, line := range netpolicy.Summary(proxy.Denials()) {
 		fmt.Fprintln(os.Stderr, "dev2-proxy:", line)
+	}
+	return nil
+}
+
+// resolverFor returns the DNS server's resolver, or nil when DNS is off,
+// so a policy change reaches name resolution as well as connections.
+func resolverFor(s *netpolicy.DNSServer) *netpolicy.Resolver {
+	if s == nil {
+		return nil
+	}
+	return s.Resolver
+}
+
+// control is the client half, run inside the sidecar via docker exec.
+func control(path string, args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: dev2-proxy control <allow|revoke|list|denials> [host]")
+	}
+	req := netpolicy.Request{Op: args[0]}
+	if len(args) > 1 {
+		req.Host = args[1]
+	}
+	resp, err := (netpolicy.Client{Path: path}).Do(req)
+	if err != nil {
+		return err
+	}
+	out, err := json.Marshal(resp)
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(out))
+	if !resp.OK {
+		return fmt.Errorf("%s", resp.Error)
 	}
 	return nil
 }
