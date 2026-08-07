@@ -212,11 +212,17 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid target", http.StatusBadRequest)
 		return
 	}
+	// Plain HTTP holds for a decision exactly as CONNECT does. Anything
+	// that asks for a host without a scheme lands here — `curl example.com`
+	// is http:// — so leaving this path out made the prompt look broken
+	// for the most ordinary command someone would type.
 	if !p.Allowlist().Allows(host, port) {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
-			Reason: "not in allowlist"})
-		denyResponse(w, host, port)
-		return
+		if !p.awaitDecision(r.Context(), host, port, r.Method) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+				Reason: "not in allowlist"})
+			denyResponse(w, host, port)
+			return
+		}
 	}
 
 	outreq := r.Clone(r.Context())

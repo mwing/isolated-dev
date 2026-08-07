@@ -3,7 +3,10 @@ package netpolicy
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -372,4 +375,45 @@ func TestHeldConnectionEndsWhenTheClientGivesUp(t *testing.T) {
 	// holding this at the end of the test; the race detector and the
 	// server's Close in cleanup surface that.
 	time.Sleep(80 * time.Millisecond)
+}
+
+func TestPlainHTTPAlsoHoldsForADecision(t *testing.T) {
+	// `curl example.com` is http://, not https://, so it takes the plain
+	// HTTP path. Holding only on CONNECT made the prompt look broken for
+	// the most ordinary command someone would type.
+	c, p, _ := newControl(t, "a.example.com")
+	p.AskTimeout = 10 * time.Second
+	p.AskPoll = 20 * time.Millisecond
+
+	var reached bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer upstream.Close()
+	p.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return net.Dial("tcp", strings.TrimPrefix(upstream.URL, "http://"))
+	}
+	addr := startProxy(t, p)
+
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		c.Apply(Request{Op: "allow", Host: "held-http.example.com"})
+	}()
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	fmt.Fprintf(conn, "GET http://held-http.example.com/ HTTP/1.1\r\nHost: held-http.example.com\r\nConnection: close\r\n\r\n")
+
+	body, _ := io.ReadAll(conn)
+	if strings.Contains(string(body), "403") {
+		t.Fatalf("plain HTTP was denied instead of held:\n%s", body)
+	}
+	if !reached {
+		t.Error("request never reached the upstream after the grant")
+	}
 }

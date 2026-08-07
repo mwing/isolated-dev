@@ -5,6 +5,7 @@ RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
 
 # Install system dependencies and PHP extensions
 RUN apk add --no-cache \
+    ca-certificates \
     bash \
     git \
     vim \

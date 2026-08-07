@@ -6,6 +6,7 @@ RUN (groupadd -g 1000 appuser 2>/dev/null || groupmod -n appuser $(getent group 
 
 # Install system dependencies and shell tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     bash \
     bash-completion \
     git \

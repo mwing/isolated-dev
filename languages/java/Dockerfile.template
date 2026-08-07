@@ -5,6 +5,7 @@ RUN groupadd -g 1000 appuser && useradd -u 1000 -g appuser -m -s /bin/bash appus
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     git \
     vim \
     curl \
