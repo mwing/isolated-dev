@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/go/internal/agent"
-	"github.com/mwing/isolated-dev/go/internal/backend/orbstack"
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
@@ -124,7 +123,7 @@ func newAgentLogoutCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			eng := container.New(orbstack.New(cfg.VMName, env.Runner))
+			eng := container.New(env.driver(cfg.VMName))
 			runner := &agent.Runner{Engine: eng, Out: env.Stdout}
 			if err := runner.Logout(cmd.Context(), a); err != nil {
 				return err
@@ -247,7 +246,7 @@ func resolveAuthEnv(a *agent.Agent, requested []string, environ []string) ([]str
 
 func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Options, rebuild, dryRun bool, notify string) error {
 	a := opts.Agent
-	eng := container.New(orbstack.New(cfg.VMName, env.Runner))
+	eng := container.New(env.driver(cfg.VMName))
 
 	store, err := trust.Load(env.Paths.Home, opts.Project)
 	if err != nil {

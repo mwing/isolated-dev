@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mwing/isolated-dev/go/internal/backend/orbstack"
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/runner"
 )
@@ -20,12 +21,25 @@ type Env struct {
 	Env    []string
 	Paths  config.Paths
 	Runner runner.Runner
+	// LookPath resolves a binary on PATH. Injected so tests do not depend
+	// on whether the host running them happens to have OrbStack.
+	LookPath func(string) (string, bool)
 
 	verbose bool
 }
 
 // Verbose reports whether --verbose was given.
 func (e *Env) Verbose() bool { return e.verbose }
+
+// driver builds the container backend for a VM, carrying the injected PATH
+// lookup so every command probes the host the same way.
+func (e *Env) driver(vmName string) *orbstack.Driver {
+	d := orbstack.New(vmName, e.Runner)
+	if e.LookPath != nil {
+		d.LookPath = e.LookPath
+	}
+	return d
+}
 
 // NewRootCmd builds the command tree against env.
 func NewRootCmd(env *Env) *cobra.Command {

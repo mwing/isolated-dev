@@ -304,6 +304,38 @@ func TestDenialTallyAggregatesRepeats(t *testing.T) {
 	}
 }
 
+// TestSummaryOrderIsStable pins the report order. Ranging over the denial
+// map produced a different order on every run, so the loop here is the
+// point: one call could come out sorted by luck, twenty will not.
+func TestSummaryOrderIsStable(t *testing.T) {
+	denials := map[string]int{
+		"c.example.com":    1,
+		"b.example.com":    5,
+		"evil.example.com": 3,
+		"a.example.com":    5,
+		"d.example.com":    1,
+	}
+	want := []string{
+		"blocked: a.example.com x5",
+		"blocked: b.example.com x5",
+		"blocked: evil.example.com x3",
+		"blocked: c.example.com",
+		"blocked: d.example.com",
+	}
+
+	for i := 0; i < 20; i++ {
+		got := Summary(denials)
+		if len(got) != len(want) {
+			t.Fatalf("Summary = %v, want %v", got, want)
+		}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("run %d: Summary = %v, want %v", i, got, want)
+			}
+		}
+	}
+}
+
 func TestSummaryEmptyWhenNothingBlocked(t *testing.T) {
 	if got := Summary(nil); got != nil {
 		t.Errorf("Summary(nil) = %v", got)

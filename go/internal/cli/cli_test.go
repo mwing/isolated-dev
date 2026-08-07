@@ -58,6 +58,28 @@ func (h *harness) writeProject(t *testing.T, body string) {
 	}
 }
 
+// readyBackend makes the fake runner look like a healthy OrbStack VM so a
+// test can reach the checks that come after the backend probe. The PATH
+// lookup is injected too: whether the host running the suite has orb
+// installed must not change the result.
+func (h *harness) readyBackend() {
+	h.env.LookPath = func(bin string) (string, bool) {
+		if bin == "orb" {
+			return "/usr/local/bin/orb", true
+		}
+		return "", false
+	}
+	h.fake.Response["orb list"] = runner.Result{
+		Stdout: "NAME                STATE    DISTRO  ARCH\n" +
+			"dev-vm-docker-host  running  ubuntu  arm64\n",
+	}
+	h.fake.Response["orb -m dev-vm-docker-host sudo docker version"] = runner.Result{
+		Stdout: "27.1.1\n",
+	}
+}
+
+const proxyInspect = "orb -m dev-vm-docker-host sudo docker image inspect dev2-proxy:latest"
+
 func TestVersionShort(t *testing.T) {
 	h := newHarness(t)
 	if err := h.run(t, "version", "--short"); err != nil {
@@ -136,6 +158,66 @@ func TestDoctorSurfacesMalformedConfig(t *testing.T) {
 	err := h.run(t, "doctor")
 	if err == nil {
 		t.Fatal("expected an error for malformed config")
+	}
+}
+
+func TestDoctorReportsProxyImagePresent(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.fake.Response[proxyInspect] = runner.Result{Stdout: "[]\n"}
+
+	if err := h.run(t, "doctor"); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "✓  image dev2-proxy:latest") {
+		t.Errorf("sidecar image not reported as present:\n%s", out)
+	}
+	if !strings.Contains(out, "Ready.") {
+		t.Errorf("expected a ready verdict:\n%s", out)
+	}
+}
+
+func TestDoctorReportsMissingProxyImageWithRemedy(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.fake.Response[proxyInspect] = runner.Result{
+		ExitCode: 1,
+		Stderr:   "Error: No such image: dev2-proxy:latest\n",
+	}
+
+	err := h.run(t, "doctor")
+	if err == nil {
+		t.Fatal("a missing sidecar image blocks every agent run; doctor should exit non-zero")
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "✗  image dev2-proxy:latest") {
+		t.Errorf("missing image not reported:\n%s", out)
+	}
+	if !strings.Contains(out, "make proxy-image") {
+		t.Errorf("remedy not offered:\n%s", out)
+	}
+}
+
+func TestDoctorChecksProxyImageWithoutBuilding(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.fake.Response[proxyInspect] = runner.Result{ExitCode: 1}
+	_ = h.run(t, "doctor")
+
+	inspected := false
+	for _, line := range h.fake.Lines() {
+		if line == proxyInspect {
+			inspected = true
+		}
+		// doctor diagnoses; repairing the image is `make proxy-image`.
+		if strings.Contains(line, "docker build") {
+			t.Errorf("doctor built something: %s", line)
+		}
+	}
+	if !inspected {
+		t.Errorf("image was not checked through the backend, calls:\n%s",
+			strings.Join(h.fake.Lines(), "\n"))
 	}
 }
 

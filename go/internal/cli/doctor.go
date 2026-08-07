@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -8,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/go/internal/backend"
-	"github.com/mwing/isolated-dev/go/internal/backend/orbstack"
 	"github.com/mwing/isolated-dev/go/internal/config"
+	"github.com/mwing/isolated-dev/go/internal/container"
 )
 
 func newDoctorCmd(env *Env) *cobra.Command {
@@ -64,13 +65,25 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 	}
 
 	fmt.Fprintf(out, "\nBackend\n")
-	drv := orbstack.New(cfg.VMName, env.Runner)
+	drv := env.driver(cfg.VMName)
+	backendUsable := false
 	st, err := drv.Probe(cmd.Context())
 	if err != nil {
 		fmt.Fprintf(out, "  ✗ probing %s: %v\n", drv.Name(), err)
 		ok = false
 	} else {
-		ok = reportStatus(out, st) && ok
+		backendUsable = reportStatus(out, st)
+		ok = backendUsable && ok
+	}
+
+	// A missing sidecar image blocks every agent run, and without this it
+	// only surfaced once a run had already built the overlay. Asking the
+	// daemon is a read: doctor never builds the image it reports on.
+	fmt.Fprintf(out, "\nEgress sidecar\n")
+	if backendUsable {
+		ok = reportProxyImage(cmd.Context(), out, container.New(drv)) && ok
+	} else {
+		fmt.Fprintf(out, "  ?  image %s (not checked: backend unavailable)\n", proxyImageTag)
 	}
 
 	fmt.Fprintln(out)
@@ -103,6 +116,22 @@ func reportStatus(out interface{ Write([]byte) (int, error) }, st backend.Status
 		fmt.Fprintf(out, "  →  %s\n", st.Detail)
 	}
 	return st.Ready()
+}
+
+// reportProxyImage reports whether the egress sidecar image is present,
+// naming the one command that fixes it. Building here would make doctor a
+// mutation, which is exactly the line this command does not cross.
+func reportProxyImage(ctx context.Context, out interface{ Write([]byte) (int, error) }, eng *container.Engine) bool {
+	exists, err := eng.ImageExists(ctx, proxyImageTag)
+	if err != nil {
+		fmt.Fprintf(out, "  ✗  image %s: %v\n", proxyImageTag, err)
+		return false
+	}
+	fmt.Fprintf(out, "  %s  image %s\n", mark(exists), proxyImageTag)
+	if !exists {
+		fmt.Fprintf(out, "  →  build it with `make proxy-image` from the go/ directory\n")
+	}
+	return exists
 }
 
 func mark(ok bool) string {

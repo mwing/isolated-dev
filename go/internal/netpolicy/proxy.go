@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -295,18 +296,33 @@ func relay(client net.Conn, buf *bufio.ReadWriter, upstream net.Conn, idle time.
 	return total
 }
 
-// Summary renders the denial tally for the exit report.
+// Summary renders the denial tally for the exit report, most-blocked
+// destination first and alphabetically within a tie. The order is part of
+// the contract: ranging over the map put the report in a different order on
+// every run, which made the summary unreadable across runs and impossible
+// to assert on.
 func Summary(denials map[string]int) []string {
 	if len(denials) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(denials))
-	for dest, n := range denials {
-		if n == 1 {
-			out = append(out, "blocked: "+dest)
+	dests := make([]string, 0, len(denials))
+	for dest := range denials {
+		dests = append(dests, dest)
+	}
+	sort.Slice(dests, func(i, j int) bool {
+		if denials[dests[i]] != denials[dests[j]] {
+			return denials[dests[i]] > denials[dests[j]]
+		}
+		return dests[i] < dests[j]
+	})
+
+	out := make([]string, 0, len(dests))
+	for _, dest := range dests {
+		if n := denials[dest]; n != 1 {
+			out = append(out, fmt.Sprintf("blocked: %s x%d", dest, n))
 			continue
 		}
-		out = append(out, fmt.Sprintf("blocked: %s x%d", dest, n))
+		out = append(out, "blocked: "+dest)
 	}
 	return out
 }
