@@ -34,6 +34,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		agentName  string
 		record     string
 		replay     string
+		replaySize string
 	)
 
 	cmd := &cobra.Command{
@@ -46,7 +47,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			"nothing becomes console-only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if replay != "" {
-				return replayRecording(env, replay)
+				return replayRecording(env, replay, replaySize)
 			}
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
 				rebuild, extraHosts, shell, agentName, record)
@@ -63,14 +64,29 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		"record the workload's output and terminal sizes to a file")
 	cmd.Flags().StringVar(&replay, "replay", "",
 		"render a recording instead of running anything")
+	cmd.Flags().StringVar(&replaySize, "replay-size", "",
+		"replay at a fixed WxH, ignoring the recorded resizes")
 	return cmd
 }
 
 // replayRecording renders a recorded session, showing the sizes the
 // workload was given alongside the screen it produced. A screenshot cannot
 // show the size, and the size is usually the question.
-func replayRecording(env *Env, path string) error {
-	screen, sizes, err := console.Replay(path)
+func replayRecording(env *Env, path, size string) error {
+	var (
+		screen []string
+		sizes  []console.Entry
+		err    error
+	)
+	if size != "" {
+		var cols, rows int
+		if _, serr := fmt.Sscanf(size, "%dx%d", &cols, &rows); serr != nil || cols <= 0 || rows <= 0 {
+			return fmt.Errorf("--replay-size wants WxH, e.g. 188x44")
+		}
+		screen, sizes, err = console.ReplayAt(path, cols, rows)
+	} else {
+		screen, sizes, err = console.Replay(path)
+	}
 	if err != nil {
 		return err
 	}
@@ -367,10 +383,12 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 	var dirty atomic.Bool
 	go repaint(ctx, prog, &dirty)
 
+	sink, drain := term.Feed()
 	cols, rows := term.Size()
-	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{sink: sink, dirty: &dirty}, &runner.PTY{
 		Rows: uint16(rows), Cols: uint16(cols), Ready: term.Attach,
 	})
+	drain()
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }
 
@@ -392,11 +410,13 @@ func runInteractive(ctx context.Context, eng *container.Engine, p *project.Proje
 	var dirty atomic.Bool
 	go repaint(ctx, prog, &dirty)
 
+	sink, drain := term.Feed()
 	cols, rows := term.Size()
-	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{sink: sink, dirty: &dirty}, &runner.PTY{
 		Rows: uint16(rows), Cols: uint16(cols),
 		Ready: term.Attach,
 	})
+	drain()
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }
 
@@ -409,12 +429,12 @@ func runInteractive(ctx context.Context, eng *container.Engine, p *project.Proje
 // ticker repaints at a fixed rate instead, so render cost is bounded by
 // time rather than by how talkative the workload is.
 type redrawWriter struct {
-	term  *console.Terminal
+	sink  io.Writer
 	dirty *atomic.Bool
 }
 
 func (w redrawWriter) Write(p []byte) (int, error) {
-	n, err := w.term.Write(p)
+	n, err := w.sink.Write(p)
 	w.dirty.Store(true)
 	return n, err
 }

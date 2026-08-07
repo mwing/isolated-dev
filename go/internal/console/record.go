@@ -87,9 +87,20 @@ func (r *Recorder) Close() error {
 	return r.f.Close()
 }
 
+// ReplayAt renders a recording at a fixed size, ignoring the sizes it
+// recorded. Comparing the two isolates a rendering fault in the emulator's
+// resize handling from one in its parsing.
+func ReplayAt(path string, cols, rows int) (screen []string, sizes []Entry, err error) {
+	return replay(path, cols, rows)
+}
+
 // Replay renders a recording through the emulator and returns the final
 // screen plus the size history, which is what a screenshot cannot show.
 func Replay(path string) (screen []string, sizes []Entry, err error) {
+	return replay(path, 0, 0)
+}
+
+func replay(path string, fixedCols, fixedRows int) (screen []string, sizes []Entry, err error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, err
@@ -106,6 +117,12 @@ func Replay(path string) (screen []string, sizes []Entry, err error) {
 		switch e.Type {
 		case "resize":
 			sizes = append(sizes, e)
+			if fixedCols > 0 {
+				if term == nil {
+					term = NewTerminal(fixedCols, fixedRows)
+				}
+				continue
+			}
 			if term == nil {
 				term = NewTerminal(e.Cols, e.Rows)
 			} else {
@@ -115,7 +132,11 @@ func Replay(path string) (screen []string, sizes []Entry, err error) {
 			sizes = append(sizes, e)
 		case "out":
 			if term == nil {
-				term = NewTerminal(80, 24)
+				if fixedCols > 0 {
+					term = NewTerminal(fixedCols, fixedRows)
+				} else {
+					term = NewTerminal(80, 24)
+				}
 			}
 			raw, decErr := base64.StdEncoding.DecodeString(e.Data)
 			if decErr != nil {

@@ -1,6 +1,7 @@
 package console
 
 import (
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -25,6 +26,71 @@ type Terminal struct {
 	cols int
 	// out is the master side of the pty, written to when keys are pressed.
 	out *os.File
+}
+
+// Feed decouples reading the workload's pty from rendering it.
+//
+// Whatever reads the pty must never stall, because the pty buffer is about
+// a kilobyte: once it fills, the workload's next write blocks and the
+// program stops mid-frame with no error anywhere. Rendering, styling and
+// writing frames to the user's terminal are all downstream of that read
+// and any of them can be slow, so the read hands bytes to a buffered
+// channel and returns immediately.
+func (t *Terminal) Feed() (io.Writer, func()) {
+	ch := make(chan []byte, 4096)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for b := range ch {
+			t.mu.Lock()
+			_, _ = t.vt.Write(b)
+			t.mu.Unlock()
+		}
+	}()
+
+	w := &feedWriter{ch: ch, rec: t}
+	return w, func() {
+		close(ch)
+		<-done
+	}
+}
+
+type feedWriter struct {
+	ch  chan []byte
+	rec *Terminal
+	// mu guards against a close racing a write on the way out.
+	mu     sync.Mutex
+	closed bool
+}
+
+func (w *feedWriter) Write(p []byte) (int, error) {
+	b := make([]byte, len(p))
+	copy(b, p)
+	w.rec.Rec.Output(b)
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return len(p), nil
+	}
+	select {
+	case w.ch <- b:
+	default:
+		// The buffer is full only if rendering has fallen far behind.
+		// Blocking here would stall the workload, so the oldest pending
+		// chunk is dropped instead: a briefly wrong screen redraws, a
+		// blocked workload does not recover.
+		select {
+		case <-w.ch:
+		default:
+		}
+		select {
+		case w.ch <- b:
+		default:
+		}
+	}
+	return len(p), nil
 }
 
 // NewTerminal returns an emulator of the given size.

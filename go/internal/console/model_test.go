@@ -512,3 +512,51 @@ func TestSizeSetBeforeAttachIsNotLost(t *testing.T) {
 			ws.Cols, ws.Rows, cols, rows)
 	}
 }
+
+func TestFeedNeverBlocksTheWorkload(t *testing.T) {
+	// The pty buffer is about a kilobyte. If whatever reads it stalls,
+	// the workload's next write blocks and the program stops mid-frame
+	// with no error anywhere — which is exactly how a wide terminal made
+	// an agent look hung while a narrow one worked.
+	term := NewTerminal(188, 44)
+	sink, drain := term.Feed()
+	defer drain()
+
+	// Far more than the buffer could hold, written as fast as possible.
+	chunk := []byte(strings.Repeat("x", 4096))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 2000; i++ {
+			if _, err := sink.Write(chunk); err != nil {
+				t.Errorf("write failed: %v", err)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("writing to the terminal blocked; a workload would stall here")
+	}
+}
+
+func TestFeedStillRenders(t *testing.T) {
+	term := NewTerminal(80, 24)
+	sink, drain := term.Feed()
+	if _, err := sink.Write([]byte("hello from the workload\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	drain() // waits for everything queued to be applied
+
+	var found bool
+	for _, l := range term.Lines() {
+		if strings.Contains(l, "hello from the workload") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("content never reached the screen: %q", term.Lines())
+	}
+}
