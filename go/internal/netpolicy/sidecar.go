@@ -66,6 +66,11 @@ type Sidecar struct {
 	// AskTimeout holds denied connections while someone decides. Zero
 	// fails them immediately.
 	AskTimeout time.Duration
+	// Forwards publish workload ports through the sidecar, since a
+	// workload on an internal network cannot publish them itself.
+	Forwards []string
+	// Ports are the host ports the sidecar publishes for those forwards.
+	Ports []int
 
 	Topology Topology
 }
@@ -111,6 +116,12 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 			"--dns-addr", fmt.Sprintf(":%d", t.DNSPort),
 			"--ask-timeout", s.AskTimeout.String(),
 		},
+	}
+	for _, f := range s.Forwards {
+		spec.Command = append(spec.Command, "--forward", f)
+	}
+	for _, port := range s.Ports {
+		spec.Ports = append(spec.Ports, container.PortMap{Host: port, Container: port})
 	}
 
 	if _, err := s.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {

@@ -91,6 +91,10 @@ func (w *Watcher) Run(r io.Reader) error {
 }
 
 // Observe processes one event, notifying when appropriate.
+//
+// Only policy denials count. An upstream failure is a network problem and
+// saying "blocked" about it would send the user to the allowlist to fix
+// something the allowlist did not do.
 func (w *Watcher) Observe(e Event) {
 	if e.Action != "deny" {
 		return

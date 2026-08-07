@@ -2,6 +2,7 @@ package netpolicy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -415,5 +416,79 @@ func TestPlainHTTPAlsoHoldsForADecision(t *testing.T) {
 	}
 	if !reached {
 		t.Error("request never reached the upstream after the grant")
+	}
+}
+
+func TestUpstreamFailureIsNotCountedAsABlock(t *testing.T) {
+	// A summary that reports blocks which did not happen undermines the
+	// one report people trust.
+	c := &collector{}
+	p := NewProxy(mustParse(t, "reachable.example.com"))
+	p.Emit = c.emit
+	p.Dial = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}
+	addr := startProxy(t, p)
+
+	status, conn, _ := connectThrough(t, addr, "reachable.example.com:443")
+	conn.Close()
+	if strings.Contains(status, "403") {
+		t.Fatalf("an allowed host was reported as forbidden: %q", status)
+	}
+
+	if got := p.Denials(); len(got) != 0 {
+		t.Fatalf("denial tally = %v, want empty: the host was allowed", got)
+	}
+	if len(Summary(p.Denials())) != 0 {
+		t.Error("summary claims a block that policy did not make")
+	}
+
+	var sawError bool
+	for _, e := range c.all() {
+		if e.Action == "error" {
+			sawError = true
+		}
+		if e.Action == "deny" {
+			t.Errorf("upstream failure emitted a deny: %+v", e)
+		}
+	}
+	if !sawError {
+		t.Error("upstream failure was not reported at all")
+	}
+}
+
+func TestHeldThenAllowedLeavesNoBlockInTheSummary(t *testing.T) {
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	go func() {
+		for {
+			conn, err := upstream.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	c, p, _ := newControl(t, "a.example.com")
+	p.AskTimeout = 5 * time.Second
+	p.AskPoll = 20 * time.Millisecond
+	p.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return net.Dial("tcp", upstream.Addr().String())
+	}
+	addr := startProxy(t, p)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		c.Apply(Request{Op: "allow", Host: "held.example.com"})
+	}()
+	_, conn, _ := connectThrough(t, addr, "held.example.com:443")
+	conn.Close()
+
+	if got := Summary(p.Denials()); len(got) != 0 {
+		t.Fatalf("summary = %v, want nothing: the request was allowed", got)
 	}
 }

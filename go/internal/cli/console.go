@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 
+	"github.com/mwing/isolated-dev/go/internal/agent"
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/console"
 	"github.com/mwing/isolated-dev/go/internal/container"
@@ -26,6 +27,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		rebuild    bool
 		extraHosts []string
 		shell      bool
+		agentName  string
 	)
 
 	cmd := &cobra.Command{
@@ -38,7 +40,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			"nothing becomes console-only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
-				rebuild, extraHosts, shell)
+				rebuild, extraHosts, shell, agentName)
 		},
 	}
 	cmd.Flags().StringVarP(&command, "command", "c", "", "command to run")
@@ -46,11 +48,13 @@ func newConsoleCmd(env *Env) *cobra.Command {
 	cmd.Flags().StringArrayVar(&extraHosts, "allow-host", nil, "add a destination for this run")
 	cmd.Flags().BoolVar(&shell, "shell", false,
 		"treat the command as interactive: give it a terminal and the keyboard")
+	cmd.Flags().StringVar(&agentName, "agent", "",
+		"run this agent in the console, using its stored login")
 	return cmd
 }
 
 func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
-	extraHosts []string, interactive bool) error {
+	extraHosts []string, interactive bool, agentName string) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
@@ -66,7 +70,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		return fmt.Errorf("console needs `network: allowlist`; this project is %q, "+
 			"and with nothing filtered there is nothing to decide", p.Network)
 	}
-	if len(command) == 0 {
+	if len(command) == 0 && agentName == "" {
 		command = []string{"/bin/bash"}
 		interactive = true
 	}
@@ -82,12 +86,26 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		}
 	}
 
-	image, err := ensureTools(ctx, env, eng, p, store)
-	if err != nil {
-		return err
+	var (
+		image     string
+		agentOpts *agent.Options
+		allowed   []string
+	)
+	if agentName != "" {
+		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command)
+		if err != nil {
+			return err
+		}
+		// An agent gets a terminal whether or not a command was given: its
+		// whole interface is interactive.
+		interactive = true
+	} else {
+		image, err = ensureTools(ctx, env, eng, p, store)
+		if err != nil {
+			return err
+		}
+		allowed = append(p.Registries(), store.Resolve("default").AllowHosts...)
 	}
-
-	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
 	allowed = append(allowed, extraHosts...)
 
 	side, topo, err := startSidecar(ctx, eng, p, allowed, EgressAsk)
@@ -127,7 +145,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	prog := tea.NewProgram(model, tea.WithContext(ctx))
 
 	go streamEvents(runCtx, eng, topo, prog)
-	if term != nil {
+	if term != nil && agentOpts != nil {
+		go runAgentInteractive(runCtx, eng, *agentOpts, topo, prog, term)
+	} else if term != nil {
 		go runInteractive(runCtx, eng, p, cfg, command, topo, prog, image, term)
 	} else {
 		go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
@@ -181,6 +201,86 @@ func streamEvents(ctx context.Context, eng *container.Engine,
 		}
 		prog.Send(console.EventMsg(e))
 	}
+}
+
+// prepareAgent builds the agent's image, volume and run options, reusing
+// exactly what `dev2 agent run` uses — the console is a view, not a second
+// way to run an agent. The stored login comes with it: the agent's home is
+// the same named volume, so a session started here is already
+// authenticated.
+func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
+	store *trust.Store, cfg config.Config, name string, command []string) (*agent.Options, string, []string, error) {
+	reg, err := registry(env)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	a, err := reg.Get(name)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// The project's request counts here exactly as it does for `dev2 agent
+	// run`. Resolving it differently would mean the same agent ran on a
+	// different image depending on which command started it.
+	request := projectRequest(cfg, a.Name)
+	if pending := store.Pending(a.Name, request); len(pending) > 0 {
+		return nil, "", nil, fmt.Errorf(
+			"%s requests egress you have not accepted: %s\nReview with: dev2 agent accept --agent %s",
+			env.Paths.Project, strings.Join(pending, " "), a.Name)
+	}
+
+	saved := store.Resolve(a.Name)
+	base := saved.Base
+	if base == "" {
+		base = request.Base
+	}
+	opts := agent.Options{
+		Agent:       a,
+		Project:     p.Dir,
+		Interactive: true,
+		Command:     command,
+		Image:       base,
+		Memory:      firstSet(saved.Memory, request.Memory),
+		CPUs:        firstSet(saved.CPUs, request.CPUs),
+	}
+
+	runner := &agent.Runner{Engine: eng, Out: env.Stdout}
+	image, err := runner.EnsureImage(ctx, opts, false)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err := runner.EnsureVolume(ctx, a); err != nil {
+		return nil, "", nil, err
+	}
+
+	allowed := append(opts.Allowlist(), saved.AllowHosts...)
+	allowed = append(allowed, store.AcceptedRequest(a.Name, request)...)
+	return &opts, image, allowed, nil
+}
+
+func firstSet(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// runAgentInteractive runs an agent on a pseudo-terminal inside the
+// console, so its blocked destinations become questions rather than
+// failures it has to work around.
+func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.Options,
+	topo netpolicy.Topology, prog *tea.Program, term *console.Terminal) {
+	spec := agent.Spec(opts, topo)
+	spec.TTY = true
+	spec.Env = append(spec.Env, "TERM=xterm-256color")
+	spec.Ports = nil
+
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, prog: prog}, &runner.PTY{
+		Rows: 24, Cols: 80, Ready: term.Attach,
+	})
+	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }
 
 // runInteractive runs the workload on a pseudo-terminal and feeds its

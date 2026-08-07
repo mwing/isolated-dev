@@ -299,6 +299,10 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 		m.events = append(m.events, "⛔ blocked "+dest)
 	case "timeout":
 		m.events = append(m.events, "⏱ no answer, blocked "+dest)
+	case "error":
+		// Allowed, but unreachable. Calling this "blocked" would send the
+		// user to the allowlist to fix something it did not cause.
+		m.events = append(m.events, "✗ could not reach "+dest)
 	case "granted":
 		m.events = append(m.events, "→ proceeding "+dest)
 	case "allow":

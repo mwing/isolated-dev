@@ -493,6 +493,21 @@ This is the natural home for things the CLI can only do awkwardly:
   the keyboard and routes it, a waiting question outranking the shell.
   Verified with a shell running: a curl blocked mid-command, the question
   appeared, one keystroke answered it, and the held request completed.
+- **Agents in the console.** Done: `dev2 console --agent claude` runs the
+  agent with its stored login — the OAuth token lives in the same named
+  volume either way — while its blocked destinations become questions
+  rather than failures it has to work around. The agent is resolved
+  through the same request/acceptance path `dev2 agent run` uses, so the
+  same agent cannot end up on a different image depending on which command
+  started it.
+- **Ports.** Done: a workload on an internal network cannot publish ports
+  itself, since docker needs a gateway and an internal network has none.
+  The sidecar publishes and relays instead — it already straddles both
+  networks, and one component owning the whole network boundary is easier
+  to reason about than two. Inbound is deliberately not subject to the
+  egress allowlist: that list answers what the workload may reach, while a
+  published port answers what may reach it, and the user answered that by
+  asking for the port.
 - **Live environment changes.** Done: `dev2 add <tool>` records the tool
   outside the repository and rebuilds the image with it, so the need is
   met when it appears rather than configured in advance. The record is a

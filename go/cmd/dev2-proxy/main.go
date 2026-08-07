@@ -40,7 +40,10 @@ func run() error {
 			"unix socket for live policy changes; empty disables it")
 		askTimeout = flag.Duration("ask-timeout", 0,
 			"hold a denied connection this long while someone decides; 0 fails immediately")
+		forwards multiFlag
 	)
+	flag.Var(&forwards, "forward",
+		"publish a workload port as listen:container:port (repeatable)")
 	flag.Parse()
 
 	// Control-client mode, invoked through `docker exec` into this same
@@ -121,6 +124,18 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "dev2-proxy: control socket at %s\n", *ctlPath)
 	}
 
+	for _, spec := range forwards {
+		fwd, err := netpolicy.ParseForward(spec)
+		if err != nil {
+			return err
+		}
+		if err := fwd.Listen(); err != nil {
+			return err
+		}
+		defer fwd.Close()
+		fmt.Fprintf(os.Stderr, "dev2-proxy: forwarding %s\n", fwd)
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 
@@ -175,6 +190,12 @@ func control(path string, args []string) error {
 	}
 	return nil
 }
+
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func gatherEntries(flagValue, file string) ([]string, error) {
 	var entries []string

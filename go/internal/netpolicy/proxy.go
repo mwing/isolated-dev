@@ -176,7 +176,10 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	upstream, err := p.dial(r.Context(), net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+		// An unreachable upstream is a network failure, not a policy
+		// decision. Recording it as a denial made the exit summary claim
+		// the allowlist blocked something it had just allowed.
+		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
 			Reason: "upstream dial failed: " + err.Error()})
 		http.Error(w, "proxy: upstream unreachable", http.StatusBadGateway)
 		return
@@ -234,7 +237,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}}
 	resp, err := transport.RoundTrip(outreq)
 	if err != nil {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
 			Reason: "upstream error: " + err.Error()})
 		http.Error(w, "proxy: upstream error", http.StatusBadGateway)
 		return

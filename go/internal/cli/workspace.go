@@ -267,7 +267,11 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		resolved = EgressReport
 	}
 
-	side, topo, err := startSidecar(ctx, eng, p, allowed, resolved)
+	// A workload on an internal network cannot publish ports itself, so
+	// the sidecar publishes them and relays to the workload by container
+	// name. The container therefore needs a stable name.
+	spec.Name = p.Container
+	side, topo, err := startSidecarWithPorts(ctx, eng, p, allowed, resolved, p.Ports)
 	if err != nil {
 		return err
 	}
@@ -276,13 +280,12 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
 	spec.Env = append(spec.Env, topo.Env()...)
-	// Ports cannot be published from an internal network: there is no
-	// gateway to publish through. Say so rather than failing obscurely.
 	if len(spec.Ports) > 0 {
-		fmt.Fprintf(env.Stderr,
-			"⚠  %d port(s) not published: allowlist mode uses an internal network.\n"+
-				"   Use `--network open` when you need to reach the container.\n",
-			len(spec.Ports))
+		for _, port := range spec.Ports {
+			fmt.Fprintf(env.Stderr, "  ↦ http://127.0.0.1:%d → container :%d\n",
+				port.Host, port.Container)
+		}
+		// Published by the sidecar, not by this container.
 		spec.Ports = nil
 	}
 
@@ -340,15 +343,26 @@ func missingCommand(stderr string) bool {
 // startSidecar brings up the egress proxy for a workspace run.
 func startSidecar(ctx context.Context, eng *container.Engine, p *project.Project,
 	allowed []string, mode EgressMode) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	return startSidecarWithPorts(ctx, eng, p, allowed, mode, nil)
+}
+
+func startSidecarWithPorts(ctx context.Context, eng *container.Engine, p *project.Project,
+	allowed []string, mode EgressMode, ports []int) (*netpolicy.Sidecar, netpolicy.Topology, error) {
 	var ask time.Duration
 	if mode == EgressAsk {
 		ask = AskTimeout
+	}
+	var forwards []string
+	for _, port := range ports {
+		forwards = append(forwards, fmt.Sprintf("%d:%s:%d", port, p.Container, port))
 	}
 	side := &netpolicy.Sidecar{
 		Engine:     eng,
 		Image:      proxyImageTag,
 		Allow:      allowed,
 		AskTimeout: ask,
+		Forwards:   forwards,
+		Ports:      ports,
 		Topology: netpolicy.Topology{
 			InternalNetwork: "dev2-" + p.Name + "-internal",
 			EgressNetwork:   "dev2-" + p.Name + "-egress",
