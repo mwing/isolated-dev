@@ -244,3 +244,33 @@ func TestBuildSpecArgs(t *testing.T) {
 		t.Errorf("context must come last: %q", args)
 	}
 }
+
+func TestMountPathWithSpacesIsFineButCommaIsRejected(t *testing.T) {
+	// A space survives because the argument vector carries it; agent
+	// sockets really do live under such paths (1Password keeps one under
+	// "Group Containers"). A comma cannot survive --mount's CSV syntax, so
+	// it must fail loudly rather than mount something else.
+	spaced := RunSpec{
+		Image:  "img",
+		Mounts: []Mount{{Source: "/Users/me/Library/Group Containers/x/agent.sock", Target: "/run/ssh-agent.sock"}},
+	}
+	if err := spaced.Validate(); err != nil {
+		t.Fatalf("path with spaces rejected: %v", err)
+	}
+	if !argsContain(spaced.Args(), "--mount",
+		"type=bind,source=/Users/me/Library/Group Containers/x/agent.sock,target=/run/ssh-agent.sock") {
+		t.Errorf("spaced path mangled: %q", spaced.Args())
+	}
+
+	comma := RunSpec{
+		Image:  "img",
+		Mounts: []Mount{{Source: "/tmp/weird,dir/agent.sock", Target: "/run/ssh-agent.sock"}},
+	}
+	err := comma.Validate()
+	if err == nil {
+		t.Fatal("comma in a mount path accepted")
+	}
+	if !strings.Contains(err.Error(), "comma") {
+		t.Errorf("unhelpful error: %v", err)
+	}
+}

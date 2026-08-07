@@ -233,6 +233,17 @@ func (s RunSpec) Validate() error {
 		if !strings.HasPrefix(m.Target, "/") {
 			return fmt.Errorf("container: mount target must be absolute: %q", m.Target)
 		}
+		// --mount takes comma-separated key=value pairs, so a comma in a
+		// path silently becomes a new field and docker misreads the mount.
+		// Spaces are fine — the argument vector carries them intact — but a
+		// comma cannot be escaped, so refuse rather than mount the wrong
+		// thing. Agent sockets live under paths the user did not choose
+		// (1Password keeps one under "Group Containers"), so this is not
+		// hypothetical.
+		if strings.ContainsRune(m.Source, ',') || strings.ContainsRune(m.Target, ',') {
+			return fmt.Errorf("container: mount path contains a comma, which "+
+				"docker --mount cannot express: %q", m.Source+" -> "+m.Target)
+		}
 	}
 	return nil
 }
