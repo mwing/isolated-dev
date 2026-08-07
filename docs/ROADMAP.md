@@ -197,11 +197,11 @@ The failure this design exists to prevent: honoring `allow_hosts` from a
 cloned repository, which would let a hostile project widen its own egress
 before anyone read a line of it.
 
-Status: the user file is implemented (`dev2 agent allow`, `dev2 agent
-config edit`). The project-file half and the accept flow land with the
-trust store in M2. Until then `.devenv.yaml` carries only v1's keys and
-its agent section is not read, so there is no window where a project grants
-itself anything.
+Status: implemented. `.devenv.yaml` may carry an `agents:` section; a run
+stops on anything requested but not accepted, and `dev2 agent accept`
+records the decision. Acceptance is an intersection, not a union: a host the
+project stops requesting stops applying, and a host added later is pending
+again, so consent is never a blank cheque for future edits.
 
 ### 4.3 Egress enforcement
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 	"github.com/mwing/isolated-dev/go/internal/trust"
 )
@@ -306,4 +307,96 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+func newAgentAcceptCmd(env *Env) *cobra.Command {
+	var all bool
+	var agentName string
+
+	cmd := &cobra.Command{
+		Use:   "accept [host...]",
+		Short: "Review and accept the egress this project's .devenv.yaml requests",
+		Long: "A project's .devenv.yaml states what the project needs. It is a\n" +
+			"request, not a grant: nothing in it applies until you accept it.\n" +
+			"Your decision is recorded outside the repository, so a clone of a\n" +
+			"hostile project cannot bring its own approval with it.",
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := config.Load(env.Paths, env.Env)
+			if err != nil {
+				return err
+			}
+			store, err := trust.Load(env.Paths.Home, env.Paths.ProjectDir)
+			if err != nil {
+				return err
+			}
+
+			requested := cfg.Agents[agentName]
+			if agentName != "default" {
+				requested.AllowHosts = append(
+					append([]string(nil), cfg.Agents["default"].AllowHosts...),
+					requested.AllowHosts...)
+			}
+			pending := store.Pending(agentName, requested)
+			if len(pending) == 0 {
+				fmt.Fprintln(env.Stdout, "Nothing pending: this project requests nothing you have not accepted.")
+				return nil
+			}
+
+			if !all && len(args) == 0 {
+				fmt.Fprintf(env.Stdout, "%s requests these destinations for %s:\n\n",
+					env.Paths.Project, agentName)
+				for _, h := range pending {
+					fmt.Fprintf(env.Stdout, "  %s\n", h)
+				}
+				fmt.Fprintf(env.Stdout, "\nEach one is a destination the agent may reach, and any host\n")
+				fmt.Fprintf(env.Stdout, "that accepts writes is a place data can go.\n\n")
+				fmt.Fprintf(env.Stdout, "Accept all:  dev2 agent accept --all\n")
+				fmt.Fprintf(env.Stdout, "Accept some: dev2 agent accept %s\n", pending[0])
+				return nil
+			}
+
+			toAccept := args
+			if all {
+				toAccept = pending
+			}
+			added, err := store.Accept(agentName, toAccept)
+			if err != nil {
+				return err
+			}
+			if len(added) == 0 {
+				fmt.Fprintln(env.Stdout, "Nothing new accepted.")
+				return nil
+			}
+			fmt.Fprintln(env.Stdout, "Accepted:")
+			for _, h := range added {
+				fmt.Fprintf(env.Stdout, "  + %s\n", h)
+			}
+			fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", store.Project.Path())
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "accept everything the project requests")
+	cmd.Flags().StringVar(&agentName, "agent", "default", "agent the request applies to")
+	return cmd
+}
+
+// projectRequest returns what the project's .devenv.yaml asks for on behalf
+// of an agent, combining its "default" section with the agent's own.
+func projectRequest(cfg config.Config, agentName string) trust.AgentConfig {
+	req := cfg.Agents[agentName]
+	if agentName != "default" {
+		req.AllowHosts = append(
+			append([]string(nil), cfg.Agents["default"].AllowHosts...),
+			req.AllowHosts...)
+		if req.Base == "" {
+			req.Base = cfg.Agents["default"].Base
+		}
+		if req.Memory == "" {
+			req.Memory = cfg.Agents["default"].Memory
+		}
+		if req.CPUs == "" {
+			req.CPUs = cfg.Agents["default"].CPUs
+		}
+	}
+	return req
 }

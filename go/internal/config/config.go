@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/mwing/isolated-dev/go/internal/trust"
 )
 
 // Origin identifies the layer a value came from.
@@ -67,6 +69,10 @@ type File struct {
 	MountDockerSocket *bool    `yaml:"mount_docker_socket"`
 	ForwardPorts      *string  `yaml:"forward_ports"`
 	PassEnvVars       *PassEnv `yaml:"pass_env_vars"`
+
+	// Agents is the project's agent request (ROADMAP 4.2.1). It states
+	// what the project needs; it grants nothing on its own.
+	Agents map[string]trust.AgentConfig `yaml:"agents"`
 }
 
 // Config is the resolved configuration.
@@ -85,6 +91,11 @@ type Config struct {
 	MountDockerSocket bool
 	ForwardPorts      string
 	PassEnvVars       PassEnv
+
+	// Agents carries the project's agent request, unresolved. It is read
+	// only from the project file: a global agent request would have no
+	// project to speak for.
+	Agents map[string]trust.AgentConfig
 
 	origins map[string]Origin
 	// Notes collects non-fatal observations made while loading: dead keys,
@@ -200,6 +211,12 @@ func (c *Config) merge(f File, o Origin) {
 		c.PassEnvVars = *f.PassEnvVars
 		c.origins["pass_env_vars"] = o
 	}
+	// Only the project speaks for a project. A request in the global file
+	// would be a policy without a subject.
+	if len(f.Agents) > 0 && o == OriginProject {
+		c.Agents = f.Agents
+		c.origins["agents"] = o
+	}
 }
 
 // deadKeys are v1 keys that were parsed and validated but never affected
@@ -229,6 +246,7 @@ var knownKeys = map[string]bool{
 	"mount_docker_socket": true,
 	"forward_ports":       true,
 	"pass_env_vars":       true,
+	"agents":              true,
 }
 
 // classify inspects raw top-level keys and returns notes for anything dead

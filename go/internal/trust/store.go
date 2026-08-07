@@ -72,6 +72,10 @@ type File struct {
 	// Agents maps an agent name to its configuration. The key "default"
 	// applies to every agent.
 	Agents map[string]AgentConfig `yaml:"agents,omitempty"`
+	// Accepted records what this user consented to from the project's own
+	// .devenv.yaml. Kept separate from Agents so it stays obvious which
+	// entries the user chose and which the project asked for.
+	Accepted map[string]AgentConfig `yaml:"accepted,omitempty"`
 
 	path string
 }
@@ -118,7 +122,7 @@ func Load(root, projectDir string) (*Store, error) {
 }
 
 func readFile(path string) (*File, error) {
-	f := &File{Agents: map[string]AgentConfig{}, path: path}
+	f := &File{Agents: map[string]AgentConfig{}, Accepted: map[string]AgentConfig{}, path: path}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -131,6 +135,9 @@ func readFile(path string) (*File, error) {
 	}
 	if f.Agents == nil {
 		f.Agents = map[string]AgentConfig{}
+	}
+	if f.Accepted == nil {
+		f.Accepted = map[string]AgentConfig{}
 	}
 	f.path = path
 	return f, nil
@@ -355,4 +362,105 @@ func appendUnique(dst []string, add ...string) []string {
 		}
 	}
 	return dst
+}
+
+// --- Project requests and user acceptances (ROADMAP 4.2.1) ---
+//
+// A project's .devenv.yaml states what the project NEEDS. It is committed
+// and shared, so a teammate does not rediscover the allowlist by trial and
+// error. It is a request, never a grant: nothing in it takes effect until
+// this user accepts it, and the acceptance is recorded here, outside the
+// repository.
+
+// Pending returns the destinations a project asks for that this user has
+// not yet accepted. An empty result means the run may proceed.
+func (s *Store) Pending(agentName string, requested AgentConfig) []string {
+	accepted := map[string]bool{}
+	for _, f := range []*File{s.Global, s.Project} {
+		if f == nil {
+			continue
+		}
+		for _, name := range []string{"default", agentName} {
+			for _, h := range f.Accepted[name].AllowHosts {
+				accepted[h] = true
+			}
+		}
+	}
+	// A destination the user granted directly is already their decision;
+	// asking again would be pedantry, not safety.
+	for _, h := range s.Resolve(agentName).AllowHosts {
+		accepted[h] = true
+	}
+
+	var pending []string
+	for _, h := range requested.AllowHosts {
+		if h = strings.TrimSpace(h); h != "" && !accepted[h] {
+			accepted[h] = true // dedupe within the request itself
+			pending = append(pending, h)
+		}
+	}
+	sort.Strings(pending)
+	return pending
+}
+
+// AcceptedRequest returns the destinations that are both requested by the
+// project and accepted by this user.
+//
+// The intersection, not the union: when the project drops a host from its
+// request, it stops applying immediately rather than lingering because it
+// was once accepted. Acceptance authorizes; the request still decides.
+func (s *Store) AcceptedRequest(agentName string, requested AgentConfig) []string {
+	if len(requested.AllowHosts) == 0 {
+		return nil
+	}
+	pending := map[string]bool{}
+	for _, h := range s.Pending(agentName, requested) {
+		pending[h] = true
+	}
+	var out []string
+	for _, h := range requested.AllowHosts {
+		if h = strings.TrimSpace(h); h != "" && !pending[h] {
+			out = append(out, h)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Accept records the user's consent to destinations a project requested,
+// in the per-project file. It returns what was newly accepted.
+func (s *Store) Accept(agentName string, hosts []string) ([]string, error) {
+	if agentName == "" {
+		agentName = "default"
+	}
+	if s.Project.Accepted == nil {
+		s.Project.Accepted = map[string]AgentConfig{}
+	}
+	cfg := s.Project.Accepted[agentName]
+
+	existing := map[string]bool{}
+	for _, h := range cfg.AllowHosts {
+		existing[h] = true
+	}
+	var added []string
+	for _, h := range hosts {
+		if h = strings.TrimSpace(h); h != "" && !existing[h] {
+			existing[h] = true
+			cfg.AllowHosts = append(cfg.AllowHosts, h)
+			added = append(added, h)
+		}
+	}
+	sort.Strings(cfg.AllowHosts)
+	s.Project.Accepted[agentName] = cfg
+	return added, s.Project.Save()
+}
+
+// AcceptedHosts returns what this user has accepted for an agent.
+func (s *Store) AcceptedHosts(agentName string) []string {
+	var out []string
+	for _, name := range []string{"default", agentName} {
+		out = appendUnique(out, s.Project.Accepted[name].AllowHosts...)
+	}
+	sort.Strings(out)
+	return out
 }

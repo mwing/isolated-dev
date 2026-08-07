@@ -33,6 +33,7 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentAllowCmd(env))
 	cmd.AddCommand(newAgentRevokeCmd(env))
 	cmd.AddCommand(newAgentConfigCmd(env))
+	cmd.AddCommand(newAgentAcceptCmd(env))
 	return cmd
 }
 
@@ -254,7 +255,37 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	}
 	saved := store.Resolve(a.Name)
 	granted := saved.AllowHosts
-	opts.ExtraHosts = append(append([]string(nil), granted...), opts.ExtraHosts...)
+
+	// The project's own request (ROADMAP 4.2.1). It grants nothing by
+	// itself: anything the user has not accepted stops the run, so a
+	// cloned repository cannot widen its egress by being run.
+	request := projectRequest(cfg, a.Name)
+	if pending := store.Pending(a.Name, request); len(pending) > 0 {
+		fmt.Fprintf(env.Stderr, "%s requests egress you have not accepted:\n\n", env.Paths.Project)
+		for _, h := range pending {
+			fmt.Fprintf(env.Stderr, "  %s\n", h)
+		}
+		fmt.Fprintf(env.Stderr, "\nReview with:  dev2 agent accept --agent %s\n", a.Name)
+		fmt.Fprintf(env.Stderr, "Accept all:   dev2 agent accept --all --agent %s\n", a.Name)
+		return fmt.Errorf("unaccepted egress request")
+	}
+	accepted := store.AcceptedRequest(a.Name, request)
+
+	opts.ExtraHosts = append(
+		append(append([]string(nil), granted...), accepted...),
+		opts.ExtraHosts...)
+
+	// Preferences from the project apply directly: they change how the
+	// sandbox is built, not what it may reach or read.
+	if opts.Image == "" && request.Base != "" {
+		opts.Image = request.Base
+	}
+	if opts.Memory == "" {
+		opts.Memory = request.Memory
+	}
+	if opts.CPUs == "" {
+		opts.CPUs = request.CPUs
+	}
 
 	// Command-line flags win over the stored file; the file wins over the
 	// agent's built-in defaults.
@@ -286,6 +317,10 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	fmt.Fprintf(env.Stdout, "Egress:    %s\n", strings.Join(a.AllowHosts, " "))
 	if len(granted) > 0 {
 		fmt.Fprintf(env.Stdout, "  granted: %s\n", strings.Join(granted, " "))
+	}
+	if len(accepted) > 0 {
+		fmt.Fprintf(env.Stdout, "  accepted from %s: %s\n",
+			filepath.Base(env.Paths.Project), strings.Join(accepted, " "))
 	}
 	fmt.Fprintf(env.Stdout, "Auth:      %s\n", authDescription(opts))
 	fmt.Fprintln(env.Stdout)

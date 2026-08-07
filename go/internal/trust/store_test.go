@@ -270,3 +270,113 @@ func TestMalformedFileIsAnError(t *testing.T) {
 		t.Fatal("expected an error rather than silently granting nothing")
 	}
 }
+
+func TestProjectRequestGrantsNothingUntilAccepted(t *testing.T) {
+	// The property the whole split exists for: a repository can ask, but
+	// only the user can authorize.
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	requested := AgentConfig{AllowHosts: []string{"internal.example.com", "mirror.example.com"}}
+
+	pending := s.Pending("claude", requested)
+	if len(pending) != 2 {
+		t.Fatalf("pending = %v, want both unaccepted", pending)
+	}
+	if got := s.AcceptedRequest("claude", requested); len(got) != 0 {
+		t.Fatalf("unaccepted request took effect: %v", got)
+	}
+}
+
+func TestAcceptRecordsConsentOutsideTheProject(t *testing.T) {
+	root := t.TempDir()
+	project := t.TempDir()
+	s := load(t, root, project)
+	requested := AgentConfig{AllowHosts: []string{"internal.example.com"}}
+
+	added, err := s.Accept("claude", s.Pending("claude", requested))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 1 {
+		t.Fatalf("added = %v", added)
+	}
+
+	reloaded := load(t, root, project)
+	if len(reloaded.Pending("claude", requested)) != 0 {
+		t.Error("acceptance did not persist")
+	}
+	if got := reloaded.AcceptedRequest("claude", requested); len(got) != 1 {
+		t.Fatalf("accepted request not applied: %v", got)
+	}
+
+	entries, err := os.ReadDir(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("consent was written into the project: %v", entries)
+	}
+}
+
+func TestPartialAcceptanceLeavesTheRestPending(t *testing.T) {
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	requested := AgentConfig{AllowHosts: []string{"one.example.com", "two.example.com"}}
+
+	if _, err := s.Accept("claude", []string{"one.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	pending := s.Pending("claude", requested)
+	if len(pending) != 1 || pending[0] != "two.example.com" {
+		t.Fatalf("pending = %v", pending)
+	}
+	if got := s.AcceptedRequest("claude", requested); len(got) != 1 || got[0] != "one.example.com" {
+		t.Fatalf("effective = %v, want only the accepted host", got)
+	}
+}
+
+func TestDroppingAHostFromTheRequestStopsApplyingIt(t *testing.T) {
+	// Acceptance authorizes; the request still decides. A host the project
+	// no longer asks for must not linger because it was once accepted.
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	if _, err := s.Accept("claude", []string{"old.example.com", "kept.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	narrowed := AgentConfig{AllowHosts: []string{"kept.example.com"}}
+	got := s.AcceptedRequest("claude", narrowed)
+	if len(got) != 1 || got[0] != "kept.example.com" {
+		t.Fatalf("effective = %v, want only what is still requested", got)
+	}
+}
+
+func TestNewRequestAfterAcceptanceIsPendingAgain(t *testing.T) {
+	// The project adding a host later must re-prompt, or acceptance would
+	// be a blank cheque for every future edit.
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	if _, err := s.Accept("claude", []string{"one.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	widened := AgentConfig{AllowHosts: []string{"one.example.com", "sneaky.example.com"}}
+	pending := s.Pending("claude", widened)
+	if len(pending) != 1 || pending[0] != "sneaky.example.com" {
+		t.Fatalf("pending = %v, want the newly added host", pending)
+	}
+}
+
+func TestDirectGrantSatisfiesARequest(t *testing.T) {
+	// If the user already granted a destination themselves, asking them to
+	// accept it again is pedantry rather than safety.
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	if _, err := s.Grant(s.Project, "claude", []string{"internal.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	requested := AgentConfig{AllowHosts: []string{"internal.example.com"}}
+	if pending := s.Pending("claude", requested); len(pending) != 0 {
+		t.Fatalf("pending = %v, want none", pending)
+	}
+}
