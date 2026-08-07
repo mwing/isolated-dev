@@ -424,3 +424,54 @@ func TestAcceptedSettingsPersistOutsideTheProject(t *testing.T) {
 		t.Fatalf("consent written into the project: %v", entries)
 	}
 }
+
+func TestToolsAreRecordedPerProjectAndPersist(t *testing.T) {
+	root := t.TempDir()
+	proj := t.TempDir()
+	s := load(t, root, proj)
+
+	added, err := s.AddTools([]string{"jq", "ripgrep", "jq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(added) != 2 {
+		t.Fatalf("added = %v, want the duplicate collapsed", added)
+	}
+
+	if got := load(t, root, proj).Tools(); len(got) != 2 || got[0] != "jq" {
+		t.Fatalf("after reload = %v", got)
+	}
+	// The declaration lives outside the repository, like every other
+	// per-project record.
+	entries, err := os.ReadDir(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("wrote into the project: %v", entries)
+	}
+	// And it does not follow the user into another project.
+	if got := load(t, root, t.TempDir()).Tools(); len(got) != 0 {
+		t.Fatalf("tools leaked to another project: %v", got)
+	}
+}
+
+func TestRemoveTools(t *testing.T) {
+	root := t.TempDir()
+	proj := t.TempDir()
+	s := load(t, root, proj)
+	if _, err := s.AddTools([]string{"jq", "ripgrep"}); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := s.RemoveTools([]string{"ripgrep", "never-added"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 1 || removed[0] != "ripgrep" {
+		t.Fatalf("removed = %v", removed)
+	}
+	if got := load(t, root, proj).Tools(); len(got) != 1 || got[0] != "jq" {
+		t.Fatalf("remaining = %v", got)
+	}
+}

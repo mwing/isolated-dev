@@ -235,6 +235,19 @@ Egress control is enforced by network topology, not by environment variables:
 - Denied connection attempts are logged and summarized at exit ("blocked:
   evil.example.com x3").
 
+### 4.3.1 What egress control does not cover: image builds
+
+The proxy governs what a *running* container reaches. It does not govern
+image builds: `docker build` runs on the daemon, outside the internal
+network, with whatever access the daemon has. So a Dockerfile, a language
+template, or a `dev2 add` install step downloads over an unfiltered path.
+
+This is worth stating rather than leaving to be discovered. It is also the
+right trade for now — a build that cannot reach a package index is not a
+build — but it means the allowlist is a runtime control, not a supply
+chain one. Digest pinning (M3) is the lever that addresses builds, and it
+addresses a different risk: what you get, rather than where you went.
+
 ### 4.4 Threat model, stated honestly
 
 **What is being promised.** The product guarantee is about defaults and
@@ -479,7 +492,14 @@ This is the natural home for things the CLI can only do awkwardly:
   today asking is available for commands that do not read input, and an
   interactive session reports instead. A console that owns the screen
   gives the prompt its own pane and the conflict disappears.
-- **Live environment changes.** Install a package or a tool, keep it.
+- **Live environment changes.** Done: `dev2 add <tool>` records the tool
+  outside the repository and rebuilds the image with it, so the need is
+  met when it appears rather than configured in advance. The record is a
+  declaration and the image is rebuilt from it, never `docker commit` —
+  the environment stays reproducible and a teammate given the same list
+  gets the same result. The derived tag carries a hash of the tool set, so
+  an unchanged list reuses the built image and any change produces a new
+  one; the tag cannot lie about its contents.
 - **Multiple panes for what is already collected**: the egress log, the
   agent's output, build progress, the resolved policy for this run.
 

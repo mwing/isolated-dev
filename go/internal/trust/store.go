@@ -80,6 +80,11 @@ type File struct {
 	// project requested, keyed by config key and holding the accepted
 	// value so a later change asks again.
 	AcceptedSettings map[string]string `yaml:"accepted_settings,omitempty"`
+	// Tools are extra packages layered onto the project image. They are a
+	// declaration, not a mutated container: the image is rebuilt from this
+	// list, so the environment stays reproducible and a teammate given the
+	// same list gets the same result.
+	Tools []string `yaml:"tools,omitempty"`
 
 	path string
 }
@@ -465,6 +470,54 @@ func (s *Store) Accept(agentName string, hosts []string) ([]string, error) {
 	sort.Strings(cfg.AllowHosts)
 	s.Project.Accepted[agentName] = cfg
 	return added, s.Project.Save()
+}
+
+// AddTools records tools for the project and saves, returning the ones
+// that were new.
+func (s *Store) AddTools(names []string) ([]string, error) {
+	existing := map[string]bool{}
+	for _, t := range s.Project.Tools {
+		existing[t] = true
+	}
+	var added []string
+	for _, n := range names {
+		if n = strings.TrimSpace(n); n != "" && !existing[n] {
+			existing[n] = true
+			s.Project.Tools = append(s.Project.Tools, n)
+			added = append(added, n)
+		}
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	sort.Strings(s.Project.Tools)
+	return added, s.Project.Save()
+}
+
+// RemoveTools drops tools and saves, returning the ones removed.
+func (s *Store) RemoveTools(names []string) ([]string, error) {
+	drop := map[string]bool{}
+	for _, n := range names {
+		drop[strings.TrimSpace(n)] = true
+	}
+	var kept, removed []string
+	for _, t := range s.Project.Tools {
+		if drop[t] {
+			removed = append(removed, t)
+			continue
+		}
+		kept = append(kept, t)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	s.Project.Tools = kept
+	return removed, s.Project.Save()
+}
+
+// Tools returns the project's declared tools.
+func (s *Store) Tools() []string {
+	return append([]string(nil), s.Project.Tools...)
 }
 
 // AcceptedHosts returns what this user has accepted for an agent.

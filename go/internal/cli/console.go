@@ -77,6 +77,11 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, e
 		}
 	}
 
+	image, err := ensureTools(ctx, env, eng, p, store)
+	if err != nil {
+		return err
+	}
+
 	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
 	allowed = append(allowed, extraHosts...)
 
@@ -111,7 +116,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, e
 	prog := tea.NewProgram(model, tea.WithContext(ctx))
 
 	go streamEvents(runCtx, eng, topo, prog)
-	go runWorkload(runCtx, eng, p, cfg, command, topo, prog)
+	go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
 
 	if _, err := prog.Run(); err != nil {
 		_, _ = side.Stop(context.WithoutCancel(ctx))
@@ -165,8 +170,10 @@ func streamEvents(ctx context.Context, eng *container.Engine,
 
 // runWorkload runs the container, forwarding its output line by line.
 func runWorkload(ctx context.Context, eng *container.Engine, p *project.Project,
-	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program) {
+	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program,
+	image string) {
 	spec := p.RunSpec(cfg, command, false)
+	spec.Image = image
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
 	spec.Env = append(spec.Env, topo.Env()...)

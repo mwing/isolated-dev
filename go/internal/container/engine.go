@@ -93,6 +93,20 @@ func (e *Engine) BuildWithDockerfile(ctx context.Context, spec BuildSpec, docker
 	return e.Build(ctx, spec, nil, w)
 }
 
+// BuildWithDockerfileStdin builds from a Dockerfile on stdin with no
+// context. Used for derived images that add only layers on top of an
+// existing tag and need no files from disk.
+func (e *Engine) BuildWithDockerfileStdin(ctx context.Context, spec BuildSpec,
+	dockerfile string, w io.Writer) error {
+	spec.Context = "-"
+	spec.Dockerfile = ""
+	args := append([]string{"build"}, spec.Args()...)
+	res, err := e.Backend.Docker(ctx, backend.Call{
+		Args: args, Stdin: strings.NewReader(dockerfile), Stdout: w, Stderr: w,
+	})
+	return check(res, err, "building "+spec.Tag)
+}
+
 // ImageExists reports whether a tag is present locally.
 func (e *Engine) ImageExists(ctx context.Context, tag string) (bool, error) {
 	res, err := e.docker(ctx, "image", "inspect", tag)

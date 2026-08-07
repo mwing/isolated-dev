@@ -225,7 +225,12 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		}
 	}
 
+	image, err := ensureTools(ctx, env, eng, p, store)
+	if err != nil {
+		return err
+	}
 	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, os.Stdin))
+	spec.Image = image
 
 	switch p.Network {
 	case project.NetworkOpen, project.NetworkNone:

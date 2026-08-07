@@ -3,9 +3,12 @@
 package project
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/mwing/isolated-dev/go/internal/config"
@@ -181,6 +184,65 @@ func (p *Project) RunSpec(cfg config.Config, command []string, tty bool) contain
 		spec.Network = "none"
 	}
 	return spec
+}
+
+// ToolsImage is the tag for this project's image plus a set of extra
+// tools. The hash means an unchanged list reuses the built image and any
+// change produces a new one, so the tag never lies about its contents.
+func (p *Project) ToolsImage(tools []string) string {
+	if len(tools) == 0 {
+		return p.Image
+	}
+	sorted := append([]string(nil), tools...)
+	sort.Strings(sorted)
+	sum := sha256.Sum256([]byte(strings.Join(sorted, "\x00")))
+	return fmt.Sprintf("%s-tools:%s", p.Image, hex.EncodeToString(sum[:4]))
+}
+
+// ToolsDockerfile layers tools onto the project image.
+//
+// A declaration rebuilt into an image, never a mutated container: `docker
+// commit` would give an image nobody can reproduce and an environment that
+// exists only on the machine where the command was typed.
+func ToolsDockerfile(base string, tools []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "FROM %s\n", base)
+	// Installing needs root; the runtime uid is set by the tool on every
+	// run, so the image's final USER does not decide who the workload is.
+	b.WriteString("USER root\n")
+	quoted := make([]string, 0, len(tools))
+	for _, t := range tools {
+		quoted = append(quoted, shellSafe(t))
+	}
+	list := strings.Join(quoted, " ")
+	fmt.Fprintf(&b, "RUN (command -v apt-get >/dev/null && apt-get update && "+
+		"DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends %s "+
+		"&& rm -rf /var/lib/apt/lists/*) || "+
+		"(command -v apk >/dev/null && apk add --no-cache %s) || "+
+		"(command -v dnf >/dev/null && dnf install -y %s) || "+
+		"(echo 'no supported package manager in this image' >&2; exit 1)\n",
+		list, list, list)
+	return b.String()
+}
+
+// shellSafe rejects anything that is not a plain package name. The list is
+// interpolated into a RUN line, so a name containing shell metacharacters
+// would execute during the build.
+func shellSafe(name string) string {
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == '+':
+		default:
+			return ""
+		}
+	}
+	return name
+}
+
+// ValidToolName reports whether a name is safe to install.
+func ValidToolName(name string) bool {
+	return name != "" && shellSafe(name) == name
 }
 
 // Registries returns the egress destinations a build or run of this
