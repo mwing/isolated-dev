@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mwing/isolated-dev/go/internal/backend"
@@ -61,6 +63,34 @@ func (e *Engine) Build(ctx context.Context, spec BuildSpec, stdin io.Reader, w i
 		Args: args, Stdin: stdin, Stdout: w, Stderr: w,
 	})
 	return check(res, err, "building "+spec.Tag)
+}
+
+// BuildWithDockerfile builds with the Dockerfile supplied as text and the
+// context taken from disk. Docker cannot read both from stdin, so the
+// Dockerfile is written into the context directory under a temporary name
+// and removed afterwards — a rendered language template must not leave a
+// file behind in the user's tree.
+func (e *Engine) BuildWithDockerfile(ctx context.Context, spec BuildSpec, dockerfile string, w io.Writer) error {
+	if spec.Context == "" || spec.Context == "-" {
+		return fmt.Errorf("container: BuildWithDockerfile needs a context directory")
+	}
+	f, err := os.CreateTemp(spec.Context, ".dev2-dockerfile-*")
+	if err != nil {
+		return fmt.Errorf("container: writing Dockerfile: %w", err)
+	}
+	tmp := f.Name()
+	defer os.Remove(tmp)
+
+	if _, err := f.WriteString(dockerfile); err != nil {
+		f.Close()
+		return fmt.Errorf("container: writing Dockerfile: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	spec.Dockerfile = filepath.Base(tmp)
+	return e.Build(ctx, spec, nil, w)
 }
 
 // ImageExists reports whether a tag is present locally.

@@ -5,6 +5,13 @@ versions: ["22.04", "20.04", "24.04"]
 detection:
   files: ["*.sh", "script.sh", "main.sh", "Makefile"]
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - archive.ubuntu.com
+  - security.ubuntu.com
+  - deb.debian.org
+
 ports: [8080]
 
 files:

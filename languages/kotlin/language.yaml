@@ -5,6 +5,16 @@ versions: ["1.9", "2.0"]
 detection:
   files: [build.gradle.kts, settings.gradle.kts, src/main/kotlin]
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - repo.maven.apache.org
+  - repo1.maven.org
+  - plugins.gradle.org
+  - services.gradle.org
+  - deb.debian.org
+  - security.debian.org
+
 ports: [8080, 8000]
 
 files:

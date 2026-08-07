@@ -8,6 +8,15 @@ detection:
     - file: go.mod
       extract: "go ([0-9]+\\.[0-9]+)"
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - proxy.golang.org
+  - sum.golang.org
+  - storage.googleapis.com
+  - deb.debian.org
+  - security.debian.org
+
 ports: [8080, 8000, 3000]
 
 files:

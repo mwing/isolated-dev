@@ -69,6 +69,8 @@ type File struct {
 	MountDockerSocket *bool    `yaml:"mount_docker_socket"`
 	ForwardPorts      *string  `yaml:"forward_ports"`
 	PassEnvVars       *PassEnv `yaml:"pass_env_vars"`
+	// Network is how a run reaches the outside: allowlist, open or none.
+	Network *string `yaml:"network"`
 
 	// Agents is the project's agent request (ROADMAP 4.2.1). It states
 	// what the project needs; it grants nothing on its own.
@@ -91,6 +93,7 @@ type Config struct {
 	MountDockerSocket bool
 	ForwardPorts      string
 	PassEnvVars       PassEnv
+	Network           string
 
 	// Agents carries the project's agent request, unresolved. It is read
 	// only from the project file: a global agent request would have no
@@ -138,7 +141,11 @@ func Defaults() Config {
 		MountDockerSocket: false,
 		ForwardPorts:      "",
 		PassEnvVars:       PassEnv{},
-		origins:           map[string]Origin{},
+		// Deny by default: a run that silently had the whole internet
+		// would not keep the tool's promise. `network: open` restores v1
+		// behavior per project.
+		Network: "allowlist",
+		origins: map[string]Origin{},
 	}
 }
 
@@ -211,6 +218,10 @@ func (c *Config) merge(f File, o Origin) {
 		c.PassEnvVars = *f.PassEnvVars
 		c.origins["pass_env_vars"] = o
 	}
+	if f.Network != nil {
+		c.Network = *f.Network
+		c.origins["network"] = o
+	}
 	// Only the project speaks for a project. A request in the global file
 	// would be a policy without a subject.
 	if len(f.Agents) > 0 && o == OriginProject {
@@ -247,6 +258,7 @@ var knownKeys = map[string]bool{
 	"forward_ports":       true,
 	"pass_env_vars":       true,
 	"agents":              true,
+	"network":             true,
 }
 
 // classify inspects raw top-level keys and returns notes for anything dead

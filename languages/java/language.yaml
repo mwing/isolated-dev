@@ -5,6 +5,14 @@ versions: ["17", "21"]
 detection:
   files: ["pom.xml", "build.gradle", "*.java"]
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - repo.maven.apache.org
+  - repo1.maven.org
+  - deb.debian.org
+  - security.debian.org
+
 ports: [8080]
 
 files:

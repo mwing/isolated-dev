@@ -10,6 +10,13 @@ detection:
     - file: package.json
       extract: '"node".*">=?\\s*([0-9]+)'
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - registry.npmjs.org
+  - deb.debian.org
+  - security.debian.org
+
 ports: [3000, 8080, 5000, 4000]
 
 files:

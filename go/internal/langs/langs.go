@@ -51,7 +51,12 @@ type Language struct {
 	Detection   Detection `yaml:"detection"`
 	// Ports are the ports a project of this language typically serves on.
 	Ports []int `yaml:"ports"`
-	Files Files `yaml:"files"`
+	// Registries are the egress destinations a build or dependency
+	// install of this language needs. They exist so allowlist mode has
+	// real data per language instead of one global list that is either
+	// too wide for everyone or too narrow for someone.
+	Registries []string `yaml:"registries"`
+	Files      Files    `yaml:"files"`
 
 	// Dir is where the plugin was loaded from.
 	Dir string `yaml:"-"`

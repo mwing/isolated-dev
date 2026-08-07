@@ -133,6 +133,7 @@ var envKeys = map[string]string{
 	"DEV_MOUNT_GIT_CONFIG":    "mount_git_config",
 	"DEV_MOUNT_DOCKER_SOCKET": "mount_docker_socket",
 	"DEV_FORWARD_PORTS":       "forward_ports",
+	"DEV_NETWORK":             "network",
 }
 
 // fromEnv builds a File layer from DEV_* variables.
@@ -197,6 +198,7 @@ func fromEnv(env []string) (File, []Note) {
 	f.MountGitConfig = boolean("DEV_MOUNT_GIT_CONFIG")
 	f.MountDockerSocket = boolean("DEV_MOUNT_DOCKER_SOCKET")
 	f.ForwardPorts = str("DEV_FORWARD_PORTS")
+	f.Network = str("DEV_NETWORK")
 
 	for name := range deadEnvKeys {
 		if _, ok := get(name); ok {

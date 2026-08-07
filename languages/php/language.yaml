@@ -5,6 +5,15 @@ versions: ["8.2", "8.3"]
 detection:
   files: ["composer.json", "index.php", "*.php"]
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - repo.packagist.org
+  - packagist.org
+  - getcomposer.org
+  - deb.debian.org
+  - security.debian.org
+
 ports: [8080]
 
 files:

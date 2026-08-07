@@ -5,6 +5,15 @@ versions: ["1.75", "1.82", "1.91"]
 detection:
   files: ["Cargo.toml", "src/main.rs"]
 
+# Egress destinations a build or dependency install needs, used by
+# `network: allowlist`.
+registries:
+  - static.crates.io
+  - index.crates.io
+  - crates.io
+  - deb.debian.org
+  - security.debian.org
+
 ports: [8000]
 
 files:
