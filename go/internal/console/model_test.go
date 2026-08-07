@@ -342,3 +342,34 @@ func TestDenyReachesTheSidecar(t *testing.T) {
 		t.Fatalf("sidecar not told about the denial (called=%v, decision=%v)", called, gotDecision)
 	}
 }
+
+func TestResizeReachesTheWorkloadsTerminal(t *testing.T) {
+	// Resizing only the emulator leaves the program drawing at its old
+	// size: a wide window then shows a narrow column of output and a large
+	// blank gap, which reads as a frozen console rather than a mis-sized
+	// one.
+	m := New("p", "allowlist", Actions{})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+
+	cols, rows := m.Term.Size()
+	if cols != 200 {
+		t.Errorf("terminal width = %d, want the pane width 200", cols)
+	}
+	if rows != m.outputHeight() {
+		t.Errorf("terminal height = %d, want the pane height %d", rows, m.outputHeight())
+	}
+	if rows <= 24 {
+		t.Errorf("height %d did not grow with the window", rows)
+	}
+}
+
+func TestNarrowWindowStillLeavesAUsablePane(t *testing.T) {
+	m := New("p", "allowlist", Actions{})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+
+	if _, rows := m.Term.Size(); rows < 3 {
+		t.Errorf("pane collapsed to %d rows", rows)
+	}
+}

@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/creack/pty"
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/go/internal/agent"
@@ -118,9 +120,22 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	runCtx, stopRun := context.WithCancel(ctx)
 	defer stopRun()
 
+	// Cancelling kills the docker CLIENT, not the container: `docker run`
+	// attaches, it does not own. Without an explicit removal, leaving the
+	// console leaves the workload running and the next run collides on the
+	// name. Named for exactly that reason.
+	workloadName := "dev2-" + p.Name + "-console"
+	defer func() {
+		_ = eng.Remove(context.WithoutCancel(ctx), workloadName)
+	}()
+
 	var term *console.Terminal
 	if interactive {
-		term = console.NewTerminal(0, 0)
+		// Start at the real pane size rather than a default. A workload
+		// that draws its own interface at 80x24 inside a much larger
+		// window looks like a frozen console, not a mis-sized one.
+		cols, rows := paneSize()
+		term = console.NewTerminal(cols, rows)
 	}
 
 	model := console.New(
@@ -155,9 +170,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 
 	go streamEvents(runCtx, eng, topo, prog)
 	if term != nil && agentOpts != nil {
-		go runAgentInteractive(runCtx, eng, *agentOpts, topo, prog, term)
+		go runAgentInteractive(runCtx, eng, *agentOpts, topo, prog, term, workloadName)
 	} else if term != nil {
-		go runInteractive(runCtx, eng, p, cfg, command, topo, prog, image, term)
+		go runInteractive(runCtx, eng, p, cfg, command, topo, prog, image, term, workloadName)
 	} else {
 		go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
 	}
@@ -210,6 +225,23 @@ func streamEvents(ctx context.Context, eng *container.Engine,
 		}
 		prog.Send(console.EventMsg(e))
 	}
+}
+
+// paneSize estimates the workload pane from the terminal, for the first
+// frame. The exact size arrives with the window-size message a moment
+// later and resizes both the emulator and the workload's own terminal.
+func paneSize() (cols, rows int) {
+	cols, rows = 80, 24
+	if ws, err := pty.GetsizeFull(os.Stdout); err == nil && ws.Cols > 0 {
+		cols = int(ws.Cols)
+		// Header, separator, event pane and footer come off the top and
+		// bottom; the same arithmetic the model uses.
+		rows = int(ws.Rows) - 12
+		if rows < 5 {
+			rows = 5
+		}
+	}
+	return cols, rows
 }
 
 // prepareAgent builds the agent's image, volume and run options, reusing
@@ -280,8 +312,9 @@ func firstSet(vals ...string) string {
 // console, so its blocked destinations become questions rather than
 // failures it has to work around.
 func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.Options,
-	topo netpolicy.Topology, prog *tea.Program, term *console.Terminal) {
+	topo netpolicy.Topology, prog *tea.Program, term *console.Terminal, name string) {
 	spec := agent.Spec(opts, topo)
+	spec.Name = name
 	spec.TTY = true
 	spec.Env = append(spec.Env, "TERM=xterm-256color")
 	spec.Ports = nil
@@ -289,8 +322,9 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 	var dirty atomic.Bool
 	go repaint(ctx, prog, &dirty)
 
+	cols, rows := term.Size()
 	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
-		Rows: 24, Cols: 80, Ready: term.Attach,
+		Rows: uint16(rows), Cols: uint16(cols), Ready: term.Attach,
 	})
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }
@@ -300,8 +334,9 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 // while the console keeps the surrounding layout.
 func runInteractive(ctx context.Context, eng *container.Engine, p *project.Project,
 	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program,
-	image string, term *console.Terminal) {
+	image string, term *console.Terminal, name string) {
 	spec := p.RunSpec(cfg, command, true)
+	spec.Name = name
 	spec.Image = image
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
@@ -312,8 +347,9 @@ func runInteractive(ctx context.Context, eng *container.Engine, p *project.Proje
 	var dirty atomic.Bool
 	go repaint(ctx, prog, &dirty)
 
+	cols, rows := term.Size()
 	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, dirty: &dirty}, &runner.PTY{
-		Rows: 24, Cols: 80,
+		Rows: uint16(rows), Cols: uint16(cols),
 		Ready: term.Attach,
 	})
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})

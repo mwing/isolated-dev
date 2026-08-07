@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/creack/pty"
 	"github.com/hinshun/vt10x"
 )
 
@@ -64,15 +65,32 @@ func (t *Terminal) Send(s string) {
 	_, _ = out.WriteString(s)
 }
 
-// Resize changes the emulated screen size.
+// Resize changes the emulated screen size and tells the workload about it.
+//
+// Both halves matter. Resizing only the emulator leaves the program
+// drawing at its old size, so a wide window shows a narrow column of
+// output and a large blank gap — which reads as a frozen console rather
+// than a mis-sized one.
 func (t *Terminal) Resize(cols, rows int) {
 	if cols <= 0 || rows <= 0 {
 		return
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.cols, t.rows = cols, rows
 	t.vt.Resize(cols, rows)
+	out := t.out
+	t.mu.Unlock()
+
+	if out != nil {
+		_ = pty.Setsize(out, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	}
+}
+
+// Size reports the current dimensions.
+func (t *Terminal) Size() (cols, rows int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.cols, t.rows
 }
 
 // Lines renders the emulated screen as plain text, one string per row.
