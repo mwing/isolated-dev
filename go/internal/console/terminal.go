@@ -40,11 +40,22 @@ func NewTerminal(cols, rows int) *Terminal {
 	}
 }
 
-// Attach records the pty to send keystrokes to.
+// Attach records the pty to send keystrokes to, and applies the size the
+// emulator already has.
+//
+// The container takes seconds to start, so the window size almost always
+// arrives before the pty exists. Without applying it here that resize is
+// lost: the emulator ends up at the real size while the workload keeps
+// drawing at whatever it was given at startup, filling part of a wider
+// screen and leaving the rest blank — which looks like a program producing
+// no output.
 func (t *Terminal) Attach(f *os.File) {
 	t.mu.Lock()
 	t.out = f
+	cols, rows := t.cols, t.rows
 	t.mu.Unlock()
+
+	_ = pty.Setsize(f, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
 }
 
 // Write feeds workload output into the emulator.

@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/creack/pty"
 
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 )
@@ -479,5 +480,35 @@ func TestFooterNamesAKeyThatExists(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	if !strings.Contains(m.View(), "ctrl+q") {
 		t.Errorf("footer does not name a usable escape:\n%s", m.View())
+	}
+}
+
+func TestSizeSetBeforeAttachIsNotLost(t *testing.T) {
+	// The container takes seconds to start, so the window size almost
+	// always arrives before the pty exists. Losing that resize leaves the
+	// workload drawing at the startup estimate inside a differently sized
+	// emulator, which looks like a program producing no output.
+	term := NewTerminal(80, 24)
+	m := New("p", "allowlist", Actions{})
+	m.Term = term
+	m.Update(tea.WindowSizeMsg{Width: 200, Height: 60})
+
+	// The pty appears only now.
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pty available: %v", err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	term.Attach(ptmx)
+
+	ws, err := pty.GetsizeFull(ptmx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, rows := term.Size()
+	if int(ws.Cols) != cols || int(ws.Rows) != rows {
+		t.Fatalf("pty is %dx%d, emulator is %dx%d: the resize was lost",
+			ws.Cols, ws.Rows, cols, rows)
 	}
 }

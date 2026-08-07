@@ -435,11 +435,18 @@ func (m *Model) outputHeight() int {
 	return h
 }
 
+// eventHeight keeps the event pane small. An agent draws its own
+// interface and behaves best with a terminal close to the real one, so
+// the workload gets the screen and the events get a strip — widened only
+// when there is a question waiting, which is when they matter.
 func (m *Model) eventHeight() int {
-	if m.height < 24 {
-		return 4
+	if len(m.pending) > 0 {
+		return 6
 	}
-	return 8
+	if m.height < 24 {
+		return 2
+	}
+	return 4
 }
 
 // pane renders the last n lines, padding so the layout does not jump as
