@@ -189,6 +189,12 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 	return check(res, nil, "removing "+name)
 }
 
+// Exec runs a command inside a running container.
+func (e *Engine) Exec(ctx context.Context, name string, cmd []string) (runner.Result, error) {
+	args := append([]string{"exec", name}, cmd...)
+	return e.Backend.Docker(ctx, backend.Call{Args: args})
+}
+
 // Logs returns a container's output.
 func (e *Engine) Logs(ctx context.Context, name string) (string, error) {
 	res, err := e.docker(ctx, "logs", name)

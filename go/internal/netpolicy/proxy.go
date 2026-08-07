@@ -53,6 +53,18 @@ type Proxy struct {
 	// IdleTimeout bounds a relayed connection's inactivity.
 	IdleTimeout time.Duration
 
+	// AskTimeout makes a denial block rather than fail immediately: the
+	// connection is held while someone decides, and proceeds if the policy
+	// gains the destination within the window. This is firewall behavior —
+	// the request waits for a verdict instead of failing and needing a
+	// retry the user may not be watching for.
+	//
+	// Zero reports and fails immediately, which is the right default where
+	// nobody is present to answer: blocking in CI is a hang.
+	AskTimeout time.Duration
+	// AskPoll is how often a held connection re-checks the policy.
+	AskPoll time.Duration
+
 	mu      sync.Mutex
 	denials map[string]int
 }
@@ -148,10 +160,12 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !p.Allowlist().Allows(host, port) {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
-			Reason: "not in allowlist"})
-		denyResponse(w, host, port)
-		return
+		if !p.awaitDecision(r.Context(), host, port, r.Method) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+				Reason: "not in allowlist"})
+			denyResponse(w, host, port)
+			return
+		}
 	}
 
 	hj, ok := w.(http.Hijacker)
@@ -230,6 +244,47 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	n, _ := io.Copy(w, resp.Body)
 	p.emit(Event{Action: "allow", Host: host, Port: port, Method: r.Method, Bytes: n})
+}
+
+// awaitDecision holds a denied connection while someone decides, and
+// reports whether the policy came to permit it.
+//
+// It polls rather than waiting on a signal: the decision arrives through
+// the control socket, which knows nothing about connections in flight, and
+// a poll keeps those two paths independent. The wait ends early when the
+// client gives up, so a held connection cannot outlive its request.
+func (p *Proxy) awaitDecision(ctx context.Context, host string, port int, method string) bool {
+	if p.AskTimeout <= 0 {
+		return false
+	}
+	p.emit(Event{Action: "pending", Host: host, Port: port, Method: method,
+		Reason: "waiting for a decision"})
+
+	poll := p.AskPoll
+	if poll <= 0 {
+		poll = 250 * time.Millisecond
+	}
+	deadline := p.now().Add(p.AskTimeout)
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			if p.Allowlist().Allows(host, port) {
+				p.emit(Event{Action: "granted", Host: host, Port: port, Method: method,
+					Reason: "allowed while waiting"})
+				return true
+			}
+			if p.now().After(deadline) {
+				p.emit(Event{Action: "timeout", Host: host, Port: port, Method: method,
+					Reason: "no decision within " + p.AskTimeout.String()})
+				return false
+			}
+		}
+	}
 }
 
 // denyResponse explains the block in a way that reaches the developer

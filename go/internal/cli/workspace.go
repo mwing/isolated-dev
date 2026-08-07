@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -80,12 +83,13 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 
 func newRunCmd(env *Env) *cobra.Command {
 	var (
-		command    string
-		tty        string
-		rebuild    bool
-		offline    bool
-		network    string
-		extraHosts []string
+		command      string
+		tty          string
+		rebuild      bool
+		offline      bool
+		network      string
+		extraHosts   []string
+		egressPrompt string
 	)
 
 	cmd := &cobra.Command{
@@ -93,27 +97,30 @@ func newRunCmd(env *Env) *cobra.Command {
 		Short: "Run a command in this project's container",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runWorkspace(cmd.Context(), env, workspaceOpts{
-				Command:    splitCommand(command, args),
-				TTY:        tty,
-				Rebuild:    rebuild,
-				Offline:    offline,
-				Network:    network,
-				ExtraHosts: extraHosts,
+				Command:      splitCommand(command, args),
+				TTY:          tty,
+				Rebuild:      rebuild,
+				Offline:      offline,
+				Network:      network,
+				ExtraHosts:   extraHosts,
+				EgressPrompt: egressPrompt,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts)
+	addEgressPromptFlag(cmd, &egressPrompt)
 	return cmd
 }
 
 func newShellCmd(env *Env) *cobra.Command {
 	var (
-		command    string
-		tty        string
-		rebuild    bool
-		offline    bool
-		network    string
-		extraHosts []string
+		command      string
+		tty          string
+		rebuild      bool
+		offline      bool
+		network      string
+		extraHosts   []string
+		egressPrompt string
 	)
 
 	cmd := &cobra.Command{
@@ -126,17 +133,19 @@ func newShellCmd(env *Env) *cobra.Command {
 				c = []string{"/bin/bash"}
 			}
 			return runWorkspace(cmd.Context(), env, workspaceOpts{
-				Command:    c,
-				TTY:        tty,
-				Rebuild:    rebuild,
-				Offline:    offline,
-				Network:    network,
-				ExtraHosts: extraHosts,
-				Fallback:   []string{"/bin/sh"},
+				Command:      c,
+				TTY:          tty,
+				Rebuild:      rebuild,
+				Offline:      offline,
+				Network:      network,
+				ExtraHosts:   extraHosts,
+				EgressPrompt: egressPrompt,
+				Fallback:     []string{"/bin/sh"},
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts)
+	addEgressPromptFlag(cmd, &egressPrompt)
 	return cmd
 }
 
@@ -150,6 +159,12 @@ func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offlin
 	cmd.Flags().StringArrayVar(extraHosts, "allow-host", nil, "add a destination for this run")
 }
 
+// egressPromptFlag is shared by run and shell.
+func addEgressPromptFlag(cmd *cobra.Command, mode *string) {
+	cmd.Flags().StringVar(mode, "egress-prompt", "auto",
+		"on a blocked destination: ask (hold the request), report (fail now), or auto")
+}
+
 // splitCommand turns -c and trailing args into an argv. -c takes a shell
 // string because that is what a user expects from -c; trailing args after
 // -- are already a vector and are not re-split.
@@ -161,12 +176,13 @@ func splitCommand(c string, args []string) []string {
 }
 
 type workspaceOpts struct {
-	Command    []string
-	TTY        string
-	Rebuild    bool
-	Offline    bool
-	Network    string
-	ExtraHosts []string
+	Command      []string
+	TTY          string
+	Rebuild      bool
+	Offline      bool
+	Network      string
+	ExtraHosts   []string
+	EgressPrompt string
 	// Fallback is tried when the primary command is missing from the
 	// image, so a distroless or alpine base still opens a shell.
 	Fallback []string
@@ -228,7 +244,25 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 				"   Use `--network open`, or grant destinations with `dev2 agent allow`.\n")
 	}
 
-	side, topo, err := startSidecar(ctx, eng, p, allowed)
+	// Asking needs a terminal to ask on AND stdin free to answer with. An
+	// interactive shell already owns stdin, so a prompt would fight the
+	// workload for the user's keystrokes. Until the console owns the
+	// screen (ROADMAP M5) that combination falls back to reporting, said
+	// out loud rather than silently.
+	mode, err := ParseEgressMode(o.EgressPrompt)
+	if err != nil {
+		return err
+	}
+	workloadOwnsStdin := len(o.Command) == 0 || spec.TTY
+	resolved := mode.Resolve(isTerminal(os.Stdin) && !workloadOwnsStdin)
+	if mode == EgressAsk && workloadOwnsStdin {
+		fmt.Fprintf(env.Stderr,
+			"⚠  --egress-prompt ask needs stdin, which this session gives to the\n"+
+				"   workload. Reporting instead; a blocked host will fail rather than wait.\n")
+		resolved = EgressReport
+	}
+
+	side, topo, err := startSidecar(ctx, eng, p, allowed, resolved)
 	if err != nil {
 		return err
 	}
@@ -247,20 +281,39 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		spec.Ports = nil
 	}
 
-	watchEgress(ctx, env, eng, topo)
-	return streamRun(ctx, env, eng, spec, o.Fallback)
+	var ask *prompter
+	if resolved == EgressAsk {
+		ask = newPrompter(env, side, store, p.Dir)
+		// Only one reader can own stdin. The prompt needs it to take an
+		// answer, so the workload does without: in ask mode the command is
+		// one that does not read input anyway, which is the same condition
+		// that made asking possible.
+		spec.Interactive = false
+	}
+	watchEgress(ctx, env, eng, topo, ask)
+
+	stdin := io.Reader(os.Stdin)
+	if ask != nil {
+		stdin = nil
+	}
+	return streamRunWith(ctx, env, eng, spec, o.Fallback, stdin)
 }
 
 func streamRun(ctx context.Context, env *Env, eng *container.Engine,
 	spec container.RunSpec, fallback []string) error {
+	return streamRunWith(ctx, env, eng, spec, fallback, os.Stdin)
+}
+
+func streamRunWith(ctx context.Context, env *Env, eng *container.Engine,
+	spec container.RunSpec, fallback []string, stdin io.Reader) error {
 	var errBuf strings.Builder
-	res, err := eng.Run(ctx, spec, os.Stdin, env.Stdout, io.MultiWriter(env.Stderr, &errBuf))
+	res, err := eng.Run(ctx, spec, stdin, env.Stdout, io.MultiWriter(env.Stderr, &errBuf))
 	if err != nil {
 		return err
 	}
 	if res.ExitCode != 0 && len(fallback) > 0 && missingCommand(errBuf.String()) {
 		spec.Command = fallback
-		res, err = eng.Run(ctx, spec, os.Stdin, env.Stdout, env.Stderr)
+		res, err = eng.Run(ctx, spec, stdin, env.Stdout, env.Stderr)
 		if err != nil {
 			return err
 		}
@@ -281,11 +334,16 @@ func missingCommand(stderr string) bool {
 
 // startSidecar brings up the egress proxy for a workspace run.
 func startSidecar(ctx context.Context, eng *container.Engine, p *project.Project,
-	allowed []string) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	allowed []string, mode EgressMode) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	var ask time.Duration
+	if mode == EgressAsk {
+		ask = AskTimeout
+	}
 	side := &netpolicy.Sidecar{
-		Engine: eng,
-		Image:  proxyImageTag,
-		Allow:  allowed,
+		Engine:     eng,
+		Image:      proxyImageTag,
+		Allow:      allowed,
+		AskTimeout: ask,
 		Topology: netpolicy.Topology{
 			InternalNetwork: "dev2-" + p.Name + "-internal",
 			EgressNetwork:   "dev2-" + p.Name + "-egress",
@@ -298,7 +356,11 @@ func startSidecar(ctx context.Context, eng *container.Engine, p *project.Project
 	return side, topo, err
 }
 
-func watchEgress(ctx context.Context, env *Env, eng *container.Engine, topo netpolicy.Topology) {
+// watchEgress streams sidecar events. When ask is non-nil, pending
+// decisions are put to the user; otherwise denials are reported as they
+// happen.
+func watchEgress(ctx context.Context, env *Env, eng *container.Engine,
+	topo netpolicy.Topology, ask *prompter) {
 	watcher := netpolicy.NewWatcher(func(n netpolicy.Notice) {
 		fmt.Fprintf(env.Stderr, "\r\n  ⛔ egress %s\n", n.String())
 	})
@@ -307,7 +369,25 @@ func watchEgress(ctx context.Context, env *Env, eng *container.Engine, topo netp
 		defer pw.Close()
 		_ = eng.LogsFollow(ctx, topo.SidecarName, pw)
 	}()
-	go func() { _ = watcher.Run(pr) }()
+	go func() {
+		sc := bufio.NewScanner(pr)
+		sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := strings.TrimSpace(sc.Text())
+			if !strings.HasPrefix(line, "{") {
+				continue
+			}
+			var e netpolicy.Event
+			if err := json.Unmarshal([]byte(line), &e); err != nil {
+				continue
+			}
+			if ask != nil {
+				ask.Handle(ctx, e)
+				continue
+			}
+			watcher.Observe(e)
+		}
+	}()
 }
 
 func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar) {

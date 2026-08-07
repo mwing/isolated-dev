@@ -38,6 +38,8 @@ func run() error {
 		noDNS     = flag.Bool("no-dns", false, "do not serve DNS")
 		ctlPath   = flag.String("control-socket", "/run/dev2-control.sock",
 			"unix socket for live policy changes; empty disables it")
+		askTimeout = flag.Duration("ask-timeout", 0,
+			"hold a denied connection this long while someone decides; 0 fails immediately")
 	)
 	flag.Parse()
 
@@ -75,6 +77,11 @@ func run() error {
 
 	proxy := netpolicy.NewProxy(allow)
 	proxy.Emit = emit
+	proxy.AskTimeout = *askTimeout
+	if *askTimeout > 0 {
+		fmt.Fprintf(os.Stderr, "dev2-proxy: holding denied connections up to %s for a decision\n",
+			*askTimeout)
+	}
 
 	srv := &http.Server{
 		Addr:              *proxyAddr,

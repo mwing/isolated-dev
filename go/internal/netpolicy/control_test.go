@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // shortTempDir returns a directory with a short path. t.TempDir() embeds
@@ -256,4 +257,119 @@ func TestConcurrentChangesAndRequests(t *testing.T) {
 		p.Allowlist().Allows("a.example.com", 443)
 	}
 	<-done
+}
+
+func TestBlockingModeHoldsUntilGranted(t *testing.T) {
+	// Firewall behavior: the request waits for a verdict instead of
+	// failing and needing a retry nobody is watching for.
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	go func() {
+		for {
+			conn, err := upstream.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	c, p, _ := newControl(t, "a.example.com")
+	p.AskTimeout = 10 * time.Second
+	p.AskPoll = 20 * time.Millisecond
+	p.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return net.Dial("tcp", upstream.Addr().String())
+	}
+	addr := startProxy(t, p)
+
+	// The grant arrives after the request is already waiting.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		c.Apply(Request{Op: "allow", Host: "held.example.com"})
+	}()
+
+	start := time.Now()
+	status, conn, _ := connectThrough(t, addr, "held.example.com:443")
+	conn.Close()
+
+	if !strings.Contains(status, "200") {
+		t.Fatalf("status = %q, want the held request to proceed", status)
+	}
+	if time.Since(start) < 100*time.Millisecond {
+		t.Error("request did not actually wait")
+	}
+}
+
+func TestBlockingModeTimesOutIntoADenial(t *testing.T) {
+	// Nobody answers: the request must fail rather than hang forever.
+	c := &collector{}
+	p := NewProxy(mustParse(t, "a.example.com"))
+	p.Emit = c.emit
+	p.AskTimeout = 120 * time.Millisecond
+	p.AskPoll = 20 * time.Millisecond
+	addr := startProxy(t, p)
+
+	status, conn, _ := connectThrough(t, addr, "nobody.example.com:443")
+	conn.Close()
+	if !strings.Contains(status, "403") {
+		t.Fatalf("status = %q, want a denial after the timeout", status)
+	}
+
+	var sawPending, sawTimeout bool
+	for _, e := range c.all() {
+		switch e.Action {
+		case "pending":
+			sawPending = true
+		case "timeout":
+			sawTimeout = true
+		}
+	}
+	if !sawPending {
+		t.Error("no pending event; the console would have nothing to prompt on")
+	}
+	if !sawTimeout {
+		t.Error("no timeout event")
+	}
+}
+
+func TestReportingModeFailsImmediately(t *testing.T) {
+	// The default where nobody is present to answer: blocking in CI is a
+	// hang, which is worse than a clear failure.
+	p := NewProxy(mustParse(t, "a.example.com"))
+	addr := startProxy(t, p)
+
+	start := time.Now()
+	status, conn, _ := connectThrough(t, addr, "nope.example.com:443")
+	conn.Close()
+
+	if !strings.Contains(status, "403") {
+		t.Fatalf("status = %q", status)
+	}
+	if time.Since(start) > time.Second {
+		t.Error("reporting mode waited; it should fail at once")
+	}
+}
+
+func TestHeldConnectionEndsWhenTheClientGivesUp(t *testing.T) {
+	// A held connection must not outlive the request that caused it.
+	p := NewProxy(mustParse(t, "a.example.com"))
+	p.AskTimeout = 30 * time.Second
+	p.AskPoll = 20 * time.Millisecond
+	addr := startProxy(t, p)
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(conn, "CONNECT gone.example.com:443 HTTP/1.1\r\nHost: gone.example.com\r\n\r\n")
+	time.Sleep(80 * time.Millisecond)
+	conn.Close()
+
+	// If the wait ignored the client going away, the proxy would still be
+	// holding this at the end of the test; the race detector and the
+	// server's Close in cleanup surface that.
+	time.Sleep(80 * time.Millisecond)
 }

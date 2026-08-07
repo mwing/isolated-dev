@@ -466,12 +466,19 @@ for a decision at the moment of need rather than reporting it afterwards.
 
 This is the natural home for things the CLI can only do awkwardly:
 
-- **Denials become questions.** Today a blocked destination prints a
-  notice and the user re-runs with a flag. In the console it is a prompt
-  while the process waits: allow once, allow for this project, or deny.
-  That is section 4.5's "suggested grants at the moment of need" actually
-  realized — the friction lands where the decision is, with the evidence
-  in view.
+- **Denials become questions.** Done ahead of the UI: `--egress-prompt
+  ask` holds the connection while the user answers "once", "this project
+  from now on", or "no", and the held request proceeds if the policy gains
+  the destination. Firewall semantics — the request waits for a verdict
+  rather than failing and needing a retry nobody is watching for. It falls
+  back to reporting where nobody can answer, because blocking with no one
+  present is a hang, which is worse than a clear failure.
+
+  The limit this exposed is the argument for the console: only one reader
+  can own stdin. A prompt and an interactive shell cannot both have it, so
+  today asking is available for commands that do not read input, and an
+  interactive session reports instead. A console that owns the screen
+  gives the prompt its own pane and the conflict disappears.
 - **Live environment changes.** Install a package or a tool, keep it.
 - **Multiple panes for what is already collected**: the egress log, the
   agent's output, build progress, the resolved policy for this run.

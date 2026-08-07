@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/mwing/isolated-dev/go/internal/container"
 )
@@ -58,9 +59,13 @@ type Sidecar struct {
 	Engine *container.Engine
 	// Image carries the dev2-proxy binary as its entrypoint.
 	Image string
-	// Allow is the policy handed to the sidecar at startup. It cannot be
-	// changed afterwards: there is no control plane to reach.
+	// Allow is the policy handed to the sidecar at startup. It can be
+	// changed afterwards only through the control socket, which is
+	// reachable from the host and not from the workload (see Control).
 	Allow []string
+	// AskTimeout holds denied connections while someone decides. Zero
+	// fails them immediately.
+	AskTimeout time.Duration
 
 	Topology Topology
 }
@@ -104,6 +109,7 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 			"--allow", strings.Join(s.Allow, ","),
 			"--proxy-addr", fmt.Sprintf(":%d", t.ProxyPort),
 			"--dns-addr", fmt.Sprintf(":%d", t.DNSPort),
+			"--ask-timeout", s.AskTimeout.String(),
 		},
 	}
 
@@ -124,6 +130,21 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 	t.SidecarIP = ip
 	s.Topology = t
 	return t, nil
+}
+
+// Grant changes the policy of a running sidecar through the control
+// socket, entering via docker exec because that is the only path in.
+func (s *Sidecar) Grant(ctx context.Context, op, host string) error {
+	res, err := s.Engine.Exec(ctx, s.Topology.SidecarName,
+		[]string{"/dev2-proxy", "control", op, host})
+	if err != nil {
+		return err
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("netpolicy: %s %s: %s", op, host,
+			strings.TrimSpace(res.Stderr+res.Stdout))
+	}
+	return nil
 }
 
 // Stop tears down the sidecar and its networks. It returns the denial
