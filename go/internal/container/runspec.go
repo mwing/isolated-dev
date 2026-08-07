@@ -93,6 +93,10 @@ type RunSpec struct {
 	Remove      bool
 	Detach      bool
 
+	// GroupAdd adds supplementary groups. Used to reach a forwarded socket
+	// whose group ownership the host's file sharing decided, without
+	// changing the uid the container runs as.
+	GroupAdd    []string
 	CapDrop     []string
 	CapAdd      []string
 	SecurityOpt []string
@@ -153,6 +157,9 @@ func (s RunSpec) Args() []string {
 	}
 	for _, d := range s.DNS {
 		add("--dns", d)
+	}
+	for _, g := range s.GroupAdd {
+		add("--group-add", g)
 	}
 	for _, c := range s.CapDrop {
 		add("--cap-drop", c)

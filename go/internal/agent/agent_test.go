@@ -466,3 +466,119 @@ func TestRuntimeImageIsPinnedNotFloating(t *testing.T) {
 		}
 	}
 }
+
+func TestGitIdentityWithoutPushGrant(t *testing.T) {
+	// Commit inside, review and push from the host: that is the default
+	// review boundary, not a gap. The identity must be present so commits
+	// are attributable, with no path to a remote.
+	a := &Agent{Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"}}
+	spec := Spec(Options{
+		Agent: a, Project: "/p",
+		GitIdentity: [2]string{"Ada", "ada@example.com"},
+	}, netpolicy.Topology{SidecarIP: "10.0.0.2"})
+
+	env := strings.Join(spec.Env, "\n")
+	if !strings.Contains(env, "GIT_AUTHOR_NAME=Ada") ||
+		!strings.Contains(env, "GIT_COMMITTER_EMAIL=ada@example.com") {
+		t.Errorf("git identity missing:\n%s", env)
+	}
+	if strings.Contains(env, "SSH_AUTH_SOCK") {
+		t.Error("ssh agent forwarded without --allow-push")
+	}
+	for _, m := range spec.Mounts {
+		if strings.Contains(m.Target, "ssh") {
+			t.Errorf("unexpected ssh mount: %+v", m)
+		}
+	}
+}
+
+func TestAllowPushForwardsTheSocketNotAKey(t *testing.T) {
+	// The socket lets the agent sign; it never exposes the key itself, so
+	// there is nothing in the container to exfiltrate, and revoking is
+	// killing the agent rather than rotating a credential.
+	a := &Agent{Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"}}
+	spec := Spec(Options{
+		Agent: a, Project: "/p", SSHAuthSock: "/tmp/ssh-agent.sock",
+	}, netpolicy.Topology{SidecarIP: "10.0.0.2"})
+
+	var forwarded bool
+	for _, m := range spec.Mounts {
+		if m.Source == "/tmp/ssh-agent.sock" {
+			forwarded = true
+			if m.Volume {
+				t.Error("socket mounted as a volume")
+			}
+		}
+		// A key file must never be mounted, however convenient.
+		if strings.Contains(m.Source, "id_rsa") || strings.Contains(m.Source, "id_ed25519") ||
+			strings.HasSuffix(m.Source, "/.ssh") {
+			t.Errorf("key material mounted: %+v", m)
+		}
+	}
+	if !forwarded {
+		t.Fatalf("socket not forwarded: %+v", spec.Mounts)
+	}
+	if !strings.Contains(strings.Join(spec.Env, "\n"), "SSH_AUTH_SOCK=/run/ssh-agent.sock") {
+		t.Errorf("SSH_AUTH_SOCK not pointed at the forwarded socket:\n%v", spec.Env)
+	}
+}
+
+func TestPushRoutesSSHThroughTheProxy(t *testing.T) {
+	// ssh does not speak HTTP proxying and the container has no other
+	// route out, so forwarding the agent socket alone yields "network
+	// unreachable". Routing ssh through the same CONNECT proxy keeps git
+	// subject to the allowlist rather than needing a hole punched for it.
+	a := &Agent{Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"}}
+	spec := Spec(Options{
+		Agent: a, Project: "/p", SSHAuthSock: "/tmp/agent.sock",
+	}, netpolicy.Topology{SidecarIP: "10.9.9.9", ProxyPort: 3128})
+
+	var cmd string
+	for _, e := range spec.Env {
+		if strings.HasPrefix(e, "GIT_SSH_COMMAND=") {
+			cmd = e
+		}
+	}
+	if cmd == "" {
+		t.Fatalf("no GIT_SSH_COMMAND:\n%v", spec.Env)
+	}
+	if !strings.Contains(cmd, "nc -X connect -x 10.9.9.9:3128") {
+		t.Errorf("ssh not routed through the sidecar: %q", cmd)
+	}
+	// StrictHostKeyChecking=no would accept a substituted key silently.
+	if !strings.Contains(cmd, "StrictHostKeyChecking=accept-new") {
+		t.Errorf("host key policy too weak: %q", cmd)
+	}
+	if strings.Contains(cmd, "StrictHostKeyChecking=no") {
+		t.Errorf("host key checking disabled: %q", cmd)
+	}
+}
+
+func TestNoSSHProxyRoutingWithoutPushGrant(t *testing.T) {
+	a := &Agent{Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"}}
+	spec := Spec(Options{Agent: a, Project: "/p"},
+		netpolicy.Topology{SidecarIP: "10.9.9.9", ProxyPort: 3128})
+
+	for _, e := range spec.Env {
+		if strings.HasPrefix(e, "GIT_SSH_COMMAND=") {
+			t.Errorf("ssh routing configured without a push grant: %q", e)
+		}
+	}
+}
+
+func TestForwardedSocketGroupIsAdded(t *testing.T) {
+	a := &Agent{Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"}}
+	spec := Spec(Options{
+		Agent: a, Project: "/p", SSHAuthSock: "/tmp/agent.sock", SSHSockGID: "67278",
+	}, netpolicy.Topology{SidecarIP: "10.0.0.2"})
+
+	args := strings.Join(spec.Args(), " ")
+	if !strings.Contains(args, "--group-add 67278") {
+		t.Errorf("socket group not added: %s", args)
+	}
+	// The uid must not change: running as the socket's owner would hand
+	// the container the host user's identity.
+	if !strings.Contains(args, "--user 1000:1000") {
+		t.Errorf("uid changed to reach the socket: %s", args)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
+	"github.com/mwing/isolated-dev/go/internal/runner"
 	"github.com/mwing/isolated-dev/go/internal/trust"
 )
 
@@ -147,6 +148,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		tty        string
 		notify     string
 		safe       bool
+		allowPush  bool
 	)
 
 	cmd := &cobra.Command{
@@ -183,6 +185,14 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				Command:     args[1:],
 			}
 
+			opts.GitIdentity = gitIdentity(env)
+
+			if allowPush {
+				if err := grantPush(env, &opts); err != nil {
+					return err
+				}
+			}
+
 			if authMode == "env" {
 				resolved, err := resolveAuthEnv(a, authEnv, env.Env)
 				if err != nil {
@@ -207,6 +217,8 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"print the policy and the exact docker invocation, then stop")
 	cmd.Flags().StringVar(&tty, "tty", "auto", "allocate a terminal: auto, on, or off")
+	cmd.Flags().BoolVar(&allowPush, "allow-push", false,
+		"forward your ssh-agent so the agent can push, and allow the git host")
 	cmd.Flags().BoolVar(&safe, "safe", false,
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
@@ -242,6 +254,49 @@ func resolveAuthEnv(a *agent.Agent, requested []string, environ []string) ([]str
 		out = append(out, n+"="+v)
 	}
 	return out, nil
+}
+
+// grantPush configures the one grant that lets an agent write to a remote.
+//
+// It forwards the ssh-agent SOCKET, never a key file: the key stays on the
+// host, the agent can sign but not read it, and revoking is killing the
+// agent rather than rotating a credential. A token would put an
+// exfiltratable secret inside the container, which is what the untrusted
+// default exists to avoid.
+// gitIdentity reads only user.name and user.email from the host git
+// config. The rest of a gitconfig is not identity: signing keys,
+// credential helpers and insteadOf rules that silently redirect remotes.
+func gitIdentity(env *Env) [2]string {
+	var out [2]string
+	for i, key := range []string{"user.name", "user.email"} {
+		res, err := env.Runner.Run(context.Background(), runner.Command{
+			Path: "git", Args: []string{"config", "--get", key},
+		})
+		if err == nil && res.ExitCode == 0 {
+			out[i] = strings.TrimSpace(res.Stdout)
+		}
+	}
+	return out
+}
+
+func grantPush(env *Env, opts *agent.Options) error {
+	sock := lookupEnv(env.Env, "SSH_AUTH_SOCK")
+	if sock == "" {
+		return fmt.Errorf("--allow-push needs a running ssh-agent (SSH_AUTH_SOCK is unset)")
+	}
+	if _, err := os.Stat(sock); err != nil {
+		return fmt.Errorf("--allow-push: ssh-agent socket %s: %w", sock, err)
+	}
+	opts.SSHAuthSock = sock
+	// Pushing over ssh needs the git host on port 22, which a bare
+	// hostname rule deliberately does not cover.
+	opts.ExtraHosts = append(opts.ExtraHosts, "github.com:22")
+
+	fmt.Fprintf(env.Stderr,
+		"⚠  --allow-push: forwarding your ssh-agent and allowing github.com:22.\n"+
+			"   The agent can push as you for this run. Section 4.4's\n"+
+			"   untrusted-default posture does not hold while it is on.\n\n")
+	return nil
 }
 
 func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Options, rebuild, dryRun bool, notify string) error {
@@ -345,12 +400,23 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return nil
 	}
 
-	if _, err := (&agent.Runner{Engine: eng, Out: env.Stdout}).EnsureImage(ctx, opts, rebuild); err != nil {
+	runner := &agent.Runner{Engine: eng, Out: env.Stdout}
+	image, err := runner.EnsureImage(ctx, opts, rebuild)
+	if err != nil {
 		return err
 	}
-	runner := &agent.Runner{Engine: eng, Out: env.Stdout}
 	if err := runner.EnsureVolume(ctx, a); err != nil {
 		return err
+	}
+
+	// Host file sharing decides the group that owns a forwarded socket, so
+	// it has to be read from inside a container rather than stat'ed here.
+	if opts.SSHAuthSock != "" {
+		gid, err := runner.SocketGID(ctx, image, opts.SSHAuthSock)
+		if err != nil {
+			return fmt.Errorf("--allow-push: %w", err)
+		}
+		opts.SSHSockGID = gid
 	}
 
 	proxyImage, err := ensureProxyImage(ctx, eng, env)

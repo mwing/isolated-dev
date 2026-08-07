@@ -36,6 +36,17 @@ type Options struct {
 	// Safe drops the agent's auto-approve arguments, restoring its own
 	// per-action prompts on top of the sandbox.
 	Safe bool
+	// SSHAuthSock is the host path of an ssh-agent socket to forward when
+	// push is granted. The socket only, never a key file: the key stays on
+	// the host, the grant dies when the agent does, and nothing
+	// exfiltratable enters the container.
+	SSHAuthSock string
+	// GitIdentity is the name and email for commits made in the container.
+	GitIdentity [2]string
+	// SSHSockGID is the group that owns the forwarded socket as the
+	// container sees it. The host's file sharing decides that group, so it
+	// is discovered rather than assumed.
+	SSHSockGID string
 	// Image is the project image to overlay. Empty uses the agent's base.
 	Image string
 	// Memory and CPUs bound the container.
@@ -58,6 +69,9 @@ func (o Options) BaseImage() string {
 	}
 	return o.Agent.Base
 }
+
+// SSHSockPath is where a forwarded ssh-agent socket appears.
+const SSHSockPath = "/run/ssh-agent.sock"
 
 // RuntimePath is where a copied runtime is installed. It is deliberately
 // not /usr/local: that would clobber toolchains the base image keeps there,
@@ -82,8 +96,8 @@ func Dockerfile(a *Agent, base string) string {
 	// verify TLS through the proxy, which does not terminate it.
 	b.WriteString("RUN (command -v apt-get >/dev/null && apt-get update && " +
 		"DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
-		"git curl ca-certificates && rm -rf /var/lib/apt/lists/*) || " +
-		"(command -v apk >/dev/null && apk add --no-cache git curl ca-certificates) || true\n")
+		"git curl ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*) || " +
+		"(command -v apk >/dev/null && apk add --no-cache git curl ca-certificates netcat-openbsd) || true\n")
 	b.WriteString("RUN (getent group 1000 || groupadd -g 1000 dev) >/dev/null 2>&1 || true\n")
 	b.WriteString("RUN (id -u 1000 >/dev/null 2>&1) || useradd -u 1000 -g 1000 -m -d " + HomePath + " -s /bin/bash dev\n")
 	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R 1000:1000 " + HomePath + "\n")
@@ -147,6 +161,51 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		"HOME="+HomePath,
 		"DEV2_SANDBOX=1",
 	)
+
+	// Commits are always possible; pushing is not. The identity is
+	// generated rather than copied from the host gitconfig, which carries
+	// more than a name (signing keys, credential helpers, insteadOf rules
+	// that redirect remotes).
+	if o.GitIdentity[0] != "" {
+		spec.Env = append(spec.Env,
+			"GIT_AUTHOR_NAME="+o.GitIdentity[0],
+			"GIT_COMMITTER_NAME="+o.GitIdentity[0])
+	}
+	if o.GitIdentity[1] != "" {
+		spec.Env = append(spec.Env,
+			"GIT_AUTHOR_EMAIL="+o.GitIdentity[1],
+			"GIT_COMMITTER_EMAIL="+o.GitIdentity[1])
+	}
+
+	if o.SSHAuthSock != "" {
+		spec.Mounts = append(spec.Mounts, container.Mount{
+			Source: o.SSHAuthSock, Target: SSHSockPath,
+		})
+		spec.Env = append(spec.Env, "SSH_AUTH_SOCK="+SSHSockPath)
+		// Reaching the socket through a supplementary group keeps the
+		// fixed uid intact. Running as the socket's owner instead would
+		// hand the container the host user's identity.
+		if o.SSHSockGID != "" {
+			spec.GroupAdd = append(spec.GroupAdd, o.SSHSockGID)
+		}
+		// ssh does not speak HTTP proxying, and the container has no other
+		// route out, so a forwarded agent alone gets "network unreachable".
+		// Routing ssh through the same CONNECT proxy keeps git subject to
+		// the allowlist instead of needing a hole punched for it — and a
+		// hole would be invisible to the policy, since traffic that never
+		// reaches the proxy is never reported as blocked.
+		if topo.SidecarIP != "" {
+			// accept-new records the host key on first use and refuses a
+			// CHANGED key thereafter, unlike StrictHostKeyChecking=no which
+			// would accept a substituted key silently. The key persists in
+			// the agent's home volume.
+			spec.Env = append(spec.Env, fmt.Sprintf(
+				`GIT_SSH_COMMAND=ssh -o StrictHostKeyChecking=accept-new `+
+					`-o UserKnownHostsFile=%s/.dev2_known_hosts `+
+					`-o ProxyCommand="nc -X connect -x %s:%d %%h %%p"`,
+				HomePath, topo.SidecarIP, proxyPortOr(topo.ProxyPort)))
+		}
+	}
 	if o.AuthMode == "env" {
 		spec.Env = append(spec.Env, o.AuthEnv...)
 	}
@@ -164,6 +223,13 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		}
 	}
 	return spec
+}
+
+func proxyPortOr(p int) int {
+	if p == 0 {
+		return 3128
+	}
+	return p
 }
 
 // runtimeImage returns the pinned image a runtime is copied from.
@@ -208,6 +274,28 @@ func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string
 		return "", err
 	}
 	return tag, nil
+}
+
+// SocketGID reports the group owning a forwarded socket as the container
+// sees it. Host file sharing remaps ownership, so the value cannot be
+// derived from a stat on the host.
+func (r *Runner) SocketGID(ctx context.Context, image, hostSock string) (string, error) {
+	spec := container.RunSpec{
+		Image:   image,
+		Remove:  true,
+		Network: "none",
+		Mounts:  []container.Mount{{Source: hostSock, Target: SSHSockPath}},
+		Command: []string{"stat", "-c", "%g", SSHSockPath},
+	}
+	var out strings.Builder
+	res, err := r.Engine.Run(ctx, spec, nil, &out, io.Discard)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("inspecting the forwarded socket failed")
+	}
+	return strings.TrimSpace(out.String()), nil
 }
 
 // EnsureVolume creates the agent's home volume if absent.

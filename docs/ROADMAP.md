@@ -361,9 +361,29 @@ across runs, and a normal session completes with no egress denials — the
 tightened default allowlist covers ordinary use rather than merely being
 strict.
 
-Remaining before the milestone closes: Codex exercised end to end (only
-Claude has been), the `--allow-push` grant, and an agent completing a real
-task in the sandbox rather than probe commands and a session start.
+`--allow-push` is implemented as ssh-agent forwarding: the socket only,
+never a key file, so nothing exfiltratable enters the container and
+revoking the grant is killing the agent rather than rotating a credential.
+Two things this surfaced that the design had not accounted for:
+
+- The socket arrives group-owned by whatever the host's file sharing
+  decided, so the container could not open it. Fixed with a supplementary
+  group discovered from inside a container, rather than by changing the uid
+  the container runs as — that would hand it the host user's identity.
+- ssh does not speak HTTP proxying, and the workload has no other route
+  out, so a forwarded agent alone produced "network unreachable". ssh is
+  now routed through the same CONNECT proxy, which means git is subject to
+  the allowlist like everything else: github.com:22 works under the grant,
+  gitlab.com:22 is blocked and reported. Punching a hole for ssh instead
+  would have been invisible to the policy, since traffic that never reaches
+  the proxy is never reported as blocked.
+
+An agent completed a real task in the sandbox (deterministic egress
+summary, doctor sidecar check) with no egress denials during the session.
+
+Remaining before the milestone closes: Codex exercised end to end. Only
+Claude has been; `--auth env` exists for orgs that disable device-code
+login, but it has not been run against a live key.
 
 ### M2: Core loop parity
 
