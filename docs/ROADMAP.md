@@ -487,11 +487,12 @@ This is the natural home for things the CLI can only do awkwardly:
   back to reporting where nobody can answer, because blocking with no one
   present is a hang, which is worse than a clear failure.
 
-  The limit this exposed is the argument for the console: only one reader
-  can own stdin. A prompt and an interactive shell cannot both have it, so
-  today asking is available for commands that do not read input, and an
-  interactive session reports instead. A console that owns the screen
-  gives the prompt its own pane and the conflict disappears.
+  The limit this exposed was the argument for the console: only one reader
+  can own stdin, so outside the console a prompt and an interactive shell
+  cannot both have it. Inside it the conflict is gone — the console owns
+  the keyboard and routes it, a waiting question outranking the shell.
+  Verified with a shell running: a curl blocked mid-command, the question
+  appeared, one keystroke answered it, and the held request completed.
 - **Live environment changes.** Done: `dev2 add <tool>` records the tool
   outside the repository and rebuilds the image with it, so the need is
   met when it appears rather than configured in advance. The record is a
@@ -502,6 +503,12 @@ This is the natural home for things the CLI can only do awkwardly:
   one; the tag cannot lie about its contents.
 - **Multiple panes for what is already collected**: the egress log, the
   agent's output, build progress, the resolved policy for this run.
+- **An interactive shell in the pane.** Done: the workload runs on a
+  pseudo-terminal and its screen is rendered through a VT emulator. The
+  console cannot pass bytes through, since it draws its own layout — a
+  shell's cursor movement and redraws would otherwise corrupt it. The
+  emulator interprets them instead. ctrl+] leaves, because every other key
+  belongs to the shell.
 
 Two design constraints that are not negotiable, because the whole point of
 the console is to relax something the current design deliberately froze.

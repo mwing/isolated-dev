@@ -214,3 +214,85 @@ func TestLayoutFitsTheTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestKeysGoToAnInteractiveWorkload(t *testing.T) {
+	// With a shell in the pane the keyboard belongs to it, or q would quit
+	// the console instead of typing a q.
+	quit := false
+	m := New("p", "allowlist", Actions{Quit: func() { quit = true }})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	if quit {
+		t.Fatal("q quit the console instead of reaching the shell")
+	}
+}
+
+func TestReservedKeyLeavesAnInteractiveWorkload(t *testing.T) {
+	quit := false
+	m := New("p", "allowlist", Actions{Quit: func() { quit = true }})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlCloseBracket})
+	if !quit {
+		t.Fatal("the reserved key did not leave the console")
+	}
+}
+
+func TestAQuestionOutranksTheShell(t *testing.T) {
+	// A blocked request is waiting; answering it must not be typed into
+	// the shell instead.
+	var granted bool
+	m := New("p", "allowlist", Actions{Grant: func(string, Decision) error {
+		granted = true
+		return nil
+	}})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	send(m, EventMsg(netpolicy.Event{Action: "pending", Host: "x.example.com", Port: 443}))
+
+	cmd := send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("the answer did not reach the question")
+	}
+	cmd()
+	if !granted {
+		t.Error("answer was typed into the shell instead of answering")
+	}
+}
+
+func TestTerminalRendersItsScreen(t *testing.T) {
+	m := New("p", "allowlist", Actions{})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	if _, err := m.Term.Write([]byte("user@box:/workspace$ echo hi\r\nhi\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	view := m.View()
+	if !strings.Contains(view, "user@box:/workspace$ echo hi") {
+		t.Errorf("terminal screen not rendered:\n%s", view)
+	}
+}
+
+func TestTerminalIgnoresEscapeSequencesInLayout(t *testing.T) {
+	// The emulator exists so cursor movement and colour do not land in the
+	// middle of the console's own layout.
+	m := New("p", "allowlist", Actions{})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	if _, err := m.Term.Write([]byte("\x1b[31mred\x1b[0m\x1b[2J\x1b[Hclean")); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(m.View(), "\n") {
+		if strings.Contains(line, "\x1b[2J") || strings.Contains(line, "\x1b[31m") {
+			t.Fatalf("raw escape sequence reached the layout: %q", line)
+		}
+	}
+	if !strings.Contains(m.View(), "clean") {
+		t.Errorf("screen content missing after a clear:\n%s", m.View())
+	}
+}

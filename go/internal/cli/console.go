@@ -16,6 +16,7 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 	"github.com/mwing/isolated-dev/go/internal/project"
+	"github.com/mwing/isolated-dev/go/internal/runner"
 	"github.com/mwing/isolated-dev/go/internal/trust"
 )
 
@@ -24,6 +25,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		command    string
 		rebuild    bool
 		extraHosts []string
+		shell      bool
 	)
 
 	cmd := &cobra.Command{
@@ -35,16 +37,20 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			"run things — everything here has a non-interactive equivalent, so\n" +
 			"nothing becomes console-only.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConsole(cmd.Context(), env, splitCommand(command, args), rebuild, extraHosts)
+			return runConsole(cmd.Context(), env, splitCommand(command, args),
+				rebuild, extraHosts, shell)
 		},
 	}
 	cmd.Flags().StringVarP(&command, "command", "c", "", "command to run")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "rebuild the image first")
 	cmd.Flags().StringArrayVar(&extraHosts, "allow-host", nil, "add a destination for this run")
+	cmd.Flags().BoolVar(&shell, "shell", false,
+		"treat the command as interactive: give it a terminal and the keyboard")
 	return cmd
 }
 
-func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, extraHosts []string) error {
+func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
+	extraHosts []string, interactive bool) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
@@ -61,9 +67,8 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, e
 			"and with nothing filtered there is nothing to decide", p.Network)
 	}
 	if len(command) == 0 {
-		return fmt.Errorf("console needs a command: -c '<cmd>' or -- <argv>\n" +
-			"(an interactive shell inside the console needs a pty per pane, " +
-			"which is not built yet)")
+		command = []string{"/bin/bash"}
+		interactive = true
 	}
 
 	eng := container.New(env.driver(cfg.VMName))
@@ -93,6 +98,11 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, e
 	runCtx, stopRun := context.WithCancel(ctx)
 	defer stopRun()
 
+	var term *console.Terminal
+	if interactive {
+		term = console.NewTerminal(0, 0)
+	}
+
 	model := console.New(
 		fmt.Sprintf("dev2 console — %s", p.Name),
 		fmt.Sprintf("allowlist · %d destination(s)", len(allowed)),
@@ -112,11 +122,16 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool, e
 			},
 			Quit: stopRun,
 		})
+	model.Term = term
 
 	prog := tea.NewProgram(model, tea.WithContext(ctx))
 
 	go streamEvents(runCtx, eng, topo, prog)
-	go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
+	if term != nil {
+		go runInteractive(runCtx, eng, p, cfg, command, topo, prog, image, term)
+	} else {
+		go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
+	}
 
 	if _, err := prog.Run(); err != nil {
 		_, _ = side.Stop(context.WithoutCancel(ctx))
@@ -166,6 +181,41 @@ func streamEvents(ctx context.Context, eng *container.Engine,
 		}
 		prog.Send(console.EventMsg(e))
 	}
+}
+
+// runInteractive runs the workload on a pseudo-terminal and feeds its
+// screen into the console's emulator, so a shell behaves like a shell
+// while the console keeps the surrounding layout.
+func runInteractive(ctx context.Context, eng *container.Engine, p *project.Project,
+	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program,
+	image string, term *console.Terminal) {
+	spec := p.RunSpec(cfg, command, true)
+	spec.Image = image
+	spec.Network = topo.InternalNetwork
+	spec.DNS = []string{topo.SidecarIP}
+	spec.Env = append(spec.Env, topo.Env()...)
+	spec.Env = append(spec.Env, "TERM=xterm-256color")
+	spec.Ports = nil
+
+	res, err := eng.RunPTY(ctx, spec, redrawWriter{term: term, prog: prog}, &runner.PTY{
+		Rows: 24, Cols: 80,
+		Ready: term.Attach,
+	})
+	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
+}
+
+// redrawWriter feeds workload bytes into the emulator and asks the UI to
+// repaint. bubbletea only redraws on a message, so without this the screen
+// would update just when a key was pressed.
+type redrawWriter struct {
+	term *console.Terminal
+	prog *tea.Program
+}
+
+func (w redrawWriter) Write(p []byte) (int, error) {
+	n, err := w.term.Write(p)
+	w.prog.Send(console.RedrawMsg{})
+	return n, err
 }
 
 // runWorkload runs the container, forwarding its output line by line.

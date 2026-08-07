@@ -44,6 +44,7 @@ func (d *Driver) Docker(ctx context.Context, call backend.Call) (runner.Result, 
 		Stdin:  call.Stdin,
 		Stdout: call.Stdout,
 		Stderr: call.Stderr,
+		PTY:    call.PTY,
 	})
 }
 

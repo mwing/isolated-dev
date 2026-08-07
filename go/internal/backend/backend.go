@@ -19,6 +19,9 @@ type Call struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// PTY attaches the call to a pseudo-terminal, for workloads that need
+	// to believe they are talking to a terminal.
+	PTY *runner.PTY
 }
 
 // Status is what `doctor` reports about a backend.

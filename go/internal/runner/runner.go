@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/creack/pty"
 )
 
 // Command is a fully-resolved external command. Args is an argument vector,
@@ -27,6 +29,21 @@ type Command struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// PTY attaches the command to a pseudo-terminal instead of pipes.
+	// Interactive programs behave differently without one: a shell will
+	// not draw a prompt, and anything that checks isatty takes its
+	// non-interactive path.
+	PTY *PTY
+}
+
+// PTY configures a pseudo-terminal for a command.
+type PTY struct {
+	Rows, Cols uint16
+	// Ready receives the master side once the command has started, so the
+	// caller can write keystrokes to it and resize it. It is called from
+	// the goroutine that started the process.
+	Ready func(*os.File)
 }
 
 // Result carries the outcome. Stdout/Stderr are populated only for streams
@@ -98,6 +115,10 @@ func (e *Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 		c.Env = cmd.Env
 	}
 
+	if cmd.PTY != nil {
+		return e.runPTY(ctx, c, cmd)
+	}
+
 	var outBuf, errBuf bytes.Buffer
 	if cmd.Stdout != nil {
 		c.Stdout = cmd.Stdout
@@ -123,6 +144,57 @@ func (e *Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 		return res, fmt.Errorf("runner: %s: %w", cmd.Path, err)
 	}
 	return res, nil
+}
+
+// runPTY runs the command attached to a pseudo-terminal. Output is copied
+// to Stdout; a pty has no separate error stream, which is exactly what an
+// interactive program expects.
+func (e *Exec) runPTY(ctx context.Context, c *exec.Cmd, cmd Command) (Result, error) {
+	size := &pty.Winsize{Rows: cmd.PTY.Rows, Cols: cmd.PTY.Cols}
+	if size.Rows == 0 {
+		size.Rows = 24
+	}
+	if size.Cols == 0 {
+		size.Cols = 80
+	}
+
+	ptmx, err := pty.StartWithSize(c, size)
+	if err != nil {
+		return Result{}, fmt.Errorf("runner: %s: pty: %w", cmd.Path, err)
+	}
+	defer ptmx.Close()
+
+	if cmd.PTY.Ready != nil {
+		cmd.PTY.Ready(ptmx)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if cmd.Stdout != nil {
+			_, _ = io.Copy(cmd.Stdout, ptmx)
+		}
+	}()
+
+	// Killing the process on cancellation is what makes a console able to
+	// stop a shell that is waiting for input.
+	go func() {
+		<-ctx.Done()
+		_ = ptmx.Close()
+	}()
+
+	err = c.Wait()
+	<-done
+
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return Result{}, nil
+	case errors.As(err, &exitErr):
+		return Result{ExitCode: exitErr.ExitCode()}, nil
+	default:
+		return Result{}, nil
+	}
 }
 
 // LookPath reports whether a binary is on PATH.

@@ -56,6 +56,15 @@ func (e *Engine) Run(ctx context.Context, spec RunSpec, stdin io.Reader, stdout,
 	})
 }
 
+// RunPTY starts a container attached to a pseudo-terminal.
+func (e *Engine) RunPTY(ctx context.Context, spec RunSpec, out io.Writer, tty *runner.PTY) (runner.Result, error) {
+	if err := spec.Validate(); err != nil {
+		return runner.Result{}, err
+	}
+	args := append([]string{"run"}, spec.Args()...)
+	return e.Backend.Docker(ctx, backend.Call{Args: args, Stdout: out, PTY: tty})
+}
+
 // Build builds an image, streaming output to w.
 func (e *Engine) Build(ctx context.Context, spec BuildSpec, stdin io.Reader, w io.Writer) error {
 	args := append([]string{"build"}, spec.Args()...)

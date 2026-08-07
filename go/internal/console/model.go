@@ -49,6 +49,9 @@ type OutputMsg string
 // EventMsg is a decision the sidecar made.
 type EventMsg netpolicy.Event
 
+// RedrawMsg asks for a repaint after the workload wrote to its terminal.
+type RedrawMsg struct{}
+
 // DoneMsg reports the workload finished.
 type DoneMsg struct {
 	Err      error
@@ -79,6 +82,9 @@ type Model struct {
 	Title   string
 	Policy  string
 	Actions Actions
+	// Term, when set, is an interactive workload: its screen replaces the
+	// line buffer and keystrokes are forwarded to it.
+	Term *Terminal
 
 	width, height int
 
@@ -127,10 +133,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Height > 0 {
 			m.height = msg.Height
 		}
+		if m.Term != nil {
+			m.Term.Resize(m.width, m.outputHeight())
+		}
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case RedrawMsg:
+		return m, nil
 
 	case OutputMsg:
 		m.output = append(m.output, string(msg))
@@ -181,6 +193,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// With an interactive workload the keyboard belongs to it, or the
+	// shell would be unusable: q would quit instead of typing a q. One
+	// key is reserved to leave, chosen because almost nothing binds it.
+	if m.Term != nil {
+		if key == "ctrl+]" {
+			if m.Actions.Quit != nil {
+				m.Actions.Quit()
+			}
+			return m, tea.Quit
+		}
+		m.Term.Send(keyBytes(msg))
+		return m, nil
+	}
+
 	switch key {
 	case "q", "ctrl+c":
 		if m.Actions.Quit != nil {
@@ -189,6 +215,59 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// keyBytes renders a key press as the bytes a terminal would send.
+func keyBytes(msg tea.KeyMsg) string {
+	switch msg.Type {
+	case tea.KeyRunes:
+		return string(msg.Runes)
+	case tea.KeySpace:
+		return " "
+	case tea.KeyEnter:
+		return "\r"
+	case tea.KeyBackspace:
+		return "\x7f"
+	case tea.KeyTab:
+		return "\t"
+	case tea.KeyEsc:
+		return "\x1b"
+	case tea.KeyUp:
+		return "\x1b[A"
+	case tea.KeyDown:
+		return "\x1b[B"
+	case tea.KeyRight:
+		return "\x1b[C"
+	case tea.KeyLeft:
+		return "\x1b[D"
+	case tea.KeyHome:
+		return "\x1b[H"
+	case tea.KeyEnd:
+		return "\x1b[F"
+	case tea.KeyDelete:
+		return "\x1b[3~"
+	case tea.KeyCtrlC:
+		return "\x03"
+	case tea.KeyCtrlD:
+		return "\x04"
+	case tea.KeyCtrlZ:
+		return "\x1a"
+	case tea.KeyCtrlL:
+		return "\x0c"
+	case tea.KeyCtrlA:
+		return "\x01"
+	case tea.KeyCtrlE:
+		return "\x05"
+	case tea.KeyCtrlU:
+		return "\x15"
+	case tea.KeyCtrlK:
+		return "\x0b"
+	case tea.KeyCtrlW:
+		return "\x17"
+	case tea.KeyCtrlR:
+		return "\x12"
+	}
+	return ""
 }
 
 func (m *Model) decide(q question, d Decision, note string) tea.Cmd {
@@ -273,22 +352,36 @@ func (m *Model) View() string {
 	}
 	b.WriteString("\n")
 
-	eventHeight := 8
-	if m.height < 24 {
-		eventHeight = 4
+	outputHeight := m.outputHeight()
+	lines := m.output
+	if m.Term != nil {
+		lines = m.Term.Lines()
 	}
-	outputHeight := m.height - eventHeight - 4
-	if outputHeight < 3 {
-		outputHeight = 3
-	}
-
-	b.WriteString(pane(m.output, outputHeight, m.width))
+	b.WriteString(pane(lines, outputHeight, m.width))
 	b.WriteString(dimStyle.Render(strings.Repeat("─", max(m.width, 0))))
 	b.WriteString("\n")
-	b.WriteString(pane(m.events, eventHeight, m.width))
+	b.WriteString(pane(m.events, m.eventHeight(), m.width))
 
 	b.WriteString(m.footer())
 	return b.String()
+}
+
+// outputHeight is the room left for the workload after the header, the
+// event pane and the footer.
+func (m *Model) outputHeight() int {
+	events := m.eventHeight()
+	h := m.height - events - 4
+	if h < 3 {
+		h = 3
+	}
+	return h
+}
+
+func (m *Model) eventHeight() int {
+	if m.height < 24 {
+		return 4
+	}
+	return 8
 }
 
 // pane renders the last n lines, padding so the layout does not jump as
@@ -344,8 +437,12 @@ func (m *Model) footer() string {
 			"⛔ %s blocked, waiting.  [o] once  [p] project  [n] no%s",
 			q.String(), extra), m.width))
 	}
-	if m.finished {
-		return dimStyle.Render(truncateWidth(m.status+" — press q to close", m.width))
+	quit := "q to stop"
+	if m.Term != nil {
+		quit = "ctrl+] to leave"
 	}
-	return dimStyle.Render(truncateWidth(m.status+" — q to stop", m.width))
+	if m.finished {
+		return dimStyle.Render(truncateWidth(m.status+" — press "+quit, m.width))
+	}
+	return dimStyle.Render(truncateWidth(m.status+" — "+quit, m.width))
 }
