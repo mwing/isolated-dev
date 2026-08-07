@@ -47,11 +47,16 @@ and keeping a timestamped backup.
 
 ## Redesigned
 
-**`dev interactive` → a live console.** v1's interactive mode is a menu
+**`dev interactive` → `dev2 console`.** v1's interactive mode is a menu
 that wraps commands. It is useful, and it is also the wrong shape for a
-tool whose interesting events happen *while* something runs. Redesigned as
-a full-screen console — see ROADMAP §M5. It starts containers, so it is
-port-or-drop rather than delegable to v1.
+tool whose interesting events happen *while* something runs. Replaced by a
+full-screen console: workload output in one pane, egress decisions in
+another, and a blocked destination asked as a question while the request
+waits. It is a separate command that delegates to the same code `run`
+uses, so nothing becomes console-only.
+
+Not yet: an interactive shell inside the console, which needs a pty per
+pane. `dev2 shell` covers that case today.
 
 **`dev list` → `dev2 status`.** v1 lists images. What a user needs is what
 is *running*, in which project, under which policy, and what it has been
