@@ -178,6 +178,15 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		return err
 	}
 
+	store, err := trust.Load(env.Paths.Home, p.Dir)
+	if err != nil {
+		return err
+	}
+	// A project file is a request; running the project is not consent.
+	if err := enforceConsent(env, cfg, store); err != nil {
+		return err
+	}
+
 	if o.Network != "" {
 		mode, err := project.ParseNetworkMode(o.Network)
 		if err != nil {
@@ -210,10 +219,6 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	// Allowlist mode: the same enforcement agents get. The project's
 	// language registries are permitted because a build that cannot reach
 	// its own package index is not a policy, it is a broken tool.
-	store, err := trust.Load(env.Paths.Home, p.Dir)
-	if err != nil {
-		return err
-	}
 	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
 	allowed = append(allowed, o.ExtraHosts...)
 

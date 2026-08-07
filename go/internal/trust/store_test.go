@@ -380,3 +380,47 @@ func TestDirectGrantSatisfiesARequest(t *testing.T) {
 		t.Fatalf("pending = %v, want none", pending)
 	}
 }
+
+func TestSettingsNeedConsentAndAreValueScoped(t *testing.T) {
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	ask := Ask{Key: "network", Value: "open", Effect: "turn off egress filtering"}
+
+	if len(s.PendingSettings([]Ask{ask})) != 1 {
+		t.Fatal("an unaccepted setting should be pending")
+	}
+	if _, err := s.AcceptSettings([]Ask{ask}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.PendingSettings([]Ask{ask})) != 0 {
+		t.Fatal("acceptance did not take")
+	}
+
+	// The VALUE is what was accepted. A project that later asks for
+	// something else must ask again rather than inherit an old yes.
+	other := Ask{Key: "network", Value: "host", Effect: "different"}
+	if len(s.PendingSettings([]Ask{other})) != 1 {
+		t.Fatal("a changed value should be pending again")
+	}
+}
+
+func TestAcceptedSettingsPersistOutsideTheProject(t *testing.T) {
+	root := t.TempDir()
+	proj := t.TempDir()
+	s := load(t, root, proj)
+	ask := Ask{Key: "mount_docker_socket", Value: "true"}
+
+	if _, err := s.AcceptSettings([]Ask{ask}); err != nil {
+		t.Fatal(err)
+	}
+	if len(load(t, root, proj).PendingSettings([]Ask{ask})) != 0 {
+		t.Error("acceptance did not persist")
+	}
+	entries, err := os.ReadDir(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("consent written into the project: %v", entries)
+	}
+}

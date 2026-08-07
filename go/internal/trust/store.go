@@ -76,6 +76,10 @@ type File struct {
 	// .devenv.yaml. Kept separate from Agents so it stays obvious which
 	// entries the user chose and which the project asked for.
 	Accepted map[string]AgentConfig `yaml:"accepted,omitempty"`
+	// AcceptedSettings records consent to security-relevant config the
+	// project requested, keyed by config key and holding the accepted
+	// value so a later change asks again.
+	AcceptedSettings map[string]string `yaml:"accepted_settings,omitempty"`
 
 	path string
 }
@@ -122,7 +126,12 @@ func Load(root, projectDir string) (*Store, error) {
 }
 
 func readFile(path string) (*File, error) {
-	f := &File{Agents: map[string]AgentConfig{}, Accepted: map[string]AgentConfig{}, path: path}
+	f := &File{
+		Agents:           map[string]AgentConfig{},
+		Accepted:         map[string]AgentConfig{},
+		AcceptedSettings: map[string]string{},
+		path:             path,
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -138,6 +147,9 @@ func readFile(path string) (*File, error) {
 	}
 	if f.Accepted == nil {
 		f.Accepted = map[string]AgentConfig{}
+	}
+	if f.AcceptedSettings == nil {
+		f.AcceptedSettings = map[string]string{}
 	}
 	f.path = path
 	return f, nil
@@ -462,5 +474,69 @@ func (s *Store) AcceptedHosts(agentName string) []string {
 		out = appendUnique(out, s.Project.Accepted[name].AllowHosts...)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// --- Project settings that need consent ---
+//
+// Hosts are not the only thing a project file can ask for. A project that
+// sets `network: open` is asking to switch egress enforcement off; one
+// that asks for a mount or environment passthrough is asking for host
+// access. Those are grants, so they go through the same request/accept
+// path rather than applying because the file said so.
+
+// Ask is one security-relevant setting a project requested.
+type Ask struct {
+	// Key is the config key, e.g. "network".
+	Key string
+	// Value is what the project asked for.
+	Value string
+	// Effect describes in plain words what accepting it does, because
+	// "network=open" is not self-explanatory at the moment of decision.
+	Effect string
+}
+
+// PendingSettings returns the asks this user has not accepted, in the
+// order given.
+func (s *Store) PendingSettings(asks []Ask) []Ask {
+	var pending []Ask
+	for _, a := range asks {
+		if s.Project.AcceptedSettings[a.Key] == a.Value {
+			continue
+		}
+		pending = append(pending, a)
+	}
+	return pending
+}
+
+// AcceptSettings records consent for the given asks and saves.
+//
+// The accepted VALUE is stored, not merely the key: a project that later
+// changes `network: open` to something else, or re-adds it after the user
+// switched it back, must ask again rather than inherit an old yes.
+func (s *Store) AcceptSettings(asks []Ask) ([]Ask, error) {
+	if s.Project.AcceptedSettings == nil {
+		s.Project.AcceptedSettings = map[string]string{}
+	}
+	var added []Ask
+	for _, a := range asks {
+		if s.Project.AcceptedSettings[a.Key] == a.Value {
+			continue
+		}
+		s.Project.AcceptedSettings[a.Key] = a.Value
+		added = append(added, a)
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	return added, s.Project.Save()
+}
+
+// AcceptedSettings returns what this user accepted for the project.
+func (s *Store) AcceptedSettings() map[string]string {
+	out := map[string]string{}
+	for k, v := range s.Project.AcceptedSettings {
+		out[k] = v
+	}
 	return out
 }

@@ -37,6 +37,14 @@ dropped with a reason written down.
 | agent sandbox | done |
 | `--allow-push` via ssh-agent | done |
 
+## Migration
+
+`dev2 migrate` reports what changes for an existing v1 setup. v2 reads
+v1's files, so nothing needs converting; what changes is what some
+settings MEAN, and which of them never did anything. With `--write` it
+strips the never-implemented keys, taking their comment headings with them
+and keeping a timestamped backup.
+
 ## Redesigned
 
 **`dev interactive` → a live console.** v1's interactive mode is a menu

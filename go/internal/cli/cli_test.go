@@ -233,3 +233,64 @@ func TestVerboseFlagEnablesCommandLogging(t *testing.T) {
 		t.Fatal("--verbose did not reach the Env")
 	}
 }
+
+func TestProjectAsksOnlyCountFromTheProjectFile(t *testing.T) {
+	// The global file is the user's own machine and needs no consent from
+	// them; a default is nobody's request. Only the project file asks.
+	h := newHarness(t)
+	h.writeProject(t, "network: open\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asks := projectAsks(cfg)
+	if len(asks) != 1 || asks[0].Key != "network" || asks[0].Value != "open" {
+		t.Fatalf("asks = %+v", asks)
+	}
+	if !strings.Contains(asks[0].Effect, "egress") {
+		t.Errorf("effect should say what accepting does: %q", asks[0].Effect)
+	}
+}
+
+func TestGlobalSettingIsNotAnAsk(t *testing.T) {
+	h := newHarness(t)
+	if err := os.MkdirAll(filepath.Dir(h.paths.Global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.paths.Global, []byte("network: open\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asks := projectAsks(cfg); len(asks) != 0 {
+		t.Fatalf("global config produced asks: %+v", asks)
+	}
+}
+
+func TestAskingForLessAccessNeedsNoConsent(t *testing.T) {
+	// `network: none` removes access. Prompting for it would train users
+	// to click through prompts that never mattered.
+	h := newHarness(t)
+	h.writeProject(t, "network: none\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asks := projectAsks(cfg); len(asks) != 0 {
+		t.Fatalf("restricting access prompted: %+v", asks)
+	}
+}
+
+func TestRunIsBlockedUntilSettingsAreAccepted(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "network: open\n")
+	err := h.run(t, "run", "-c", "echo hi")
+	if err == nil {
+		t.Fatal("run proceeded with unaccepted project settings")
+	}
+	if !strings.Contains(h.stderr.String(), "dev2 accept") {
+		t.Errorf("error should name the remedy:\n%s", h.stderr.String())
+	}
+}
