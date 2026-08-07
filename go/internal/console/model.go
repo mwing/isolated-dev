@@ -14,6 +14,7 @@ package console
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -96,7 +97,12 @@ type Model struct {
 	asked   map[string]bool
 
 	// repeat counts consecutive identical events, collapsed into one line.
-	repeat   int
+	repeat int
+	// lastInterrupt is when ctrl+c was last pressed, for the double-press
+	// escape.
+	lastInterrupt time.Time
+	// Now is the clock, injected for tests.
+	Now      func() time.Time
 	status   string
 	finished bool
 	exitCode int
@@ -116,6 +122,13 @@ func New(title, policy string, actions Actions) *Model {
 		width:  80,
 		height: 24,
 	}
+}
+
+func (m *Model) now() time.Time {
+	if m.Now != nil {
+		return m.Now()
+	}
+	return time.Now()
 }
 
 // Init implements tea.Model.
@@ -194,14 +207,33 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// With an interactive workload the keyboard belongs to it, or the
-	// shell would be unusable: q would quit instead of typing a q. One
-	// key is reserved to leave, chosen because almost nothing binds it.
+	// shell would be unusable: q would quit instead of typing a q. Leaving
+	// therefore needs a reserved key — and it has to be one every keyboard
+	// can actually produce. ctrl+] alone was a bug: on a Finnish layout ]
+	// is option+9, so the combination cannot be typed at all and the user
+	// had no way out.
 	if m.Term != nil {
-		if key == "ctrl+]" {
+		switch key {
+		case "ctrl+q", "ctrl+]":
 			if m.Actions.Quit != nil {
 				m.Actions.Quit()
 			}
 			return m, tea.Quit
+		case "ctrl+c":
+			// Single ctrl+c belongs to the workload: it is how an agent's
+			// turn or a running command is interrupted. Twice in quick
+			// succession means the user wants out, which is the reflex
+			// when something appears stuck.
+			now := m.now()
+			if !m.lastInterrupt.IsZero() && now.Sub(m.lastInterrupt) < 1500*time.Millisecond {
+				if m.Actions.Quit != nil {
+					m.Actions.Quit()
+				}
+				return m, tea.Quit
+			}
+			m.lastInterrupt = now
+			m.Term.Send("\x03")
+			return m, nil
 		}
 		m.Term.Send(keyBytes(msg))
 		return m, nil
@@ -465,7 +497,7 @@ func (m *Model) footer() string {
 	}
 	quit := "q to stop"
 	if m.Term != nil {
-		quit = "ctrl+] to leave"
+		quit = "ctrl+q or double ctrl+c to leave"
 	}
 	if m.finished {
 		return dimStyle.Render(truncateWidth(m.status+" — press "+quit, m.width))

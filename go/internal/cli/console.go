@@ -125,6 +125,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	// console leaves the workload running and the next run collides on the
 	// name. Named for exactly that reason.
 	workloadName := "dev2-" + p.Name + "-console"
+	// A previous console killed outright leaves its container behind, and
+	// the next run would fail on the name rather than explaining itself.
+	_ = eng.Remove(ctx, workloadName)
 	defer func() {
 		_ = eng.Remove(context.WithoutCancel(ctx), workloadName)
 	}()

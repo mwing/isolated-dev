@@ -2,8 +2,10 @@ package console
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -371,5 +373,111 @@ func TestNarrowWindowStillLeavesAUsablePane(t *testing.T) {
 
 	if _, rows := m.Term.Size(); rows < 3 {
 		t.Errorf("pane collapsed to %d rows", rows)
+	}
+}
+
+// pipeTerminal returns a terminal whose "pty" is a pipe we can read, so a
+// test can assert that keystrokes actually leave the model.
+func pipeTerminal(t *testing.T) (*Terminal, *os.File) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { r.Close(); w.Close() })
+	term := NewTerminal(80, 24)
+	term.Attach(w)
+	return term, r
+}
+
+func TestKeystrokesReachTheWorkload(t *testing.T) {
+	// The path that matters and was never asserted: a key pressed in the
+	// console has to arrive at the workload's terminal.
+	term, r := pipeTerminal(t)
+	m := New("p", "allowlist", Actions{})
+	m.Term = term
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	send(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
+	send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	buf := make([]byte, 16)
+	_ = r.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := r.Read(buf)
+	if err != nil {
+		t.Fatalf("nothing reached the workload: %v", err)
+	}
+	if got := string(buf[:n]); !strings.Contains(got, "hi") {
+		t.Fatalf("workload received %q", got)
+	}
+}
+
+func TestCtrlQLeaves(t *testing.T) {
+	// ctrl+] alone was untypeable on a Finnish layout, where ] is
+	// option+9 — the user had no way out at all.
+	quit := false
+	m := New("p", "allowlist", Actions{Quit: func() { quit = true }})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlQ})
+	if !quit {
+		t.Fatal("ctrl+q did not leave the console")
+	}
+}
+
+func TestSingleCtrlCInterruptsButDoubleLeaves(t *testing.T) {
+	term, r := pipeTerminal(t)
+	quit := false
+	m := New("p", "allowlist", Actions{Quit: func() { quit = true }})
+	m.Term = term
+	now := time.Unix(0, 0)
+	m.Now = func() time.Time { return now }
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	// One press interrupts the workload rather than leaving.
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if quit {
+		t.Fatal("a single ctrl+c left the console; it should interrupt the workload")
+	}
+	buf := make([]byte, 8)
+	_ = r.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err := r.Read(buf)
+	if err != nil || string(buf[:n]) != "\x03" {
+		t.Fatalf("interrupt not forwarded: %q %v", string(buf[:n]), err)
+	}
+
+	// Twice in quick succession is the reflex when something looks stuck.
+	now = now.Add(300 * time.Millisecond)
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if !quit {
+		t.Fatal("double ctrl+c did not leave the console")
+	}
+}
+
+func TestSlowDoubleCtrlCDoesNotLeave(t *testing.T) {
+	// Two interrupts a minute apart are two interrupts, not an escape.
+	term, _ := pipeTerminal(t)
+	quit := false
+	m := New("p", "allowlist", Actions{Quit: func() { quit = true }})
+	m.Term = term
+	now := time.Unix(0, 0)
+	m.Now = func() time.Time { return now }
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	now = now.Add(30 * time.Second)
+	send(m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	if quit {
+		t.Fatal("two unrelated interrupts left the console")
+	}
+}
+
+func TestFooterNamesAKeyThatExists(t *testing.T) {
+	m := New("p", "allowlist", Actions{})
+	m.Term = NewTerminal(80, 24)
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if !strings.Contains(m.View(), "ctrl+q") {
+		t.Errorf("footer does not name a usable escape:\n%s", m.View())
 	}
 }

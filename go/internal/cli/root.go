@@ -2,9 +2,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -86,7 +89,18 @@ func NewRootCmd(env *Env) *cobra.Command {
 
 // Main wires the real process environment and runs the tree. It returns a
 // process exit code.
+//
+// Interrupts cancel the context rather than killing the process outright,
+// so cleanup runs: a console leaves a container behind otherwise, since
+// `docker run` attaches to a container rather than owning it.
 func Main(args []string) int {
+	ctx, stop := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return run(ctx, args)
+}
+
+func run(ctx context.Context, args []string) int {
 	paths, err := config.Discover()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dev2:", err)
@@ -104,7 +118,7 @@ func Main(args []string) int {
 	root.SetOut(os.Stdout)
 	root.SetErr(os.Stderr)
 
-	if err := root.Execute(); err != nil {
+	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "dev2:", err)
 		return 1
 	}
