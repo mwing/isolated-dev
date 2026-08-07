@@ -392,9 +392,10 @@ combined. v1 is ~4k lines of bash plus 8 language plugins, interactive mode,
 scaffolding, and devcontainer generation. Two rules keep it from stranding
 the project in a permanent dev/dev2 split:
 
-1. The exit criterion is an explicit command-by-command parity checklist
-   against v1 (every command and flag in v1's usage output, each marked
-   ported / delegated / dropped-with-reason). No vague "core loop works".
+1. Every v1 command gets an explicit decision recorded in
+   docs/PARITY.md — keep, redesign, drop or defer, each with a reason. No
+   vague "core loop works", and equally no obligation to reproduce
+   something merely because v1 had it.
 2. dev2 may DELEGATE long-tail commands to a vendored copy of the v1 scripts
    during the transition, so cutover is gated on the security-relevant path
    (run, shell, build, trust, egress), not on the least interesting code.
@@ -424,8 +425,16 @@ Work items:
   never-implemented keys in the pre-rewrite fix PR, so the stray-key
   population is frozen at whatever users already have).
 
-Exit criteria: parity checklist complete; daily-drivable replacement for v1
-on OrbStack; v1 marked maintenance-only in README.
+Exit criteria: v2 is the tool the maintainer reaches for, with every v1
+capability present, deliberately redesigned, or dropped with a reason
+recorded in docs/PARITY.md; v1 marked maintenance-only in README.
+
+Note on framing: this milestone was originally specified as parity with a
+command-by-command checklist. That was the wrong target. v1 is a
+prototype, and parity would have forced v2 to reproduce behavior that was
+never good while making a deliberate removal look like a regression. The
+checklist survives as a disposition record — keep, redesign, drop, defer —
+rather than as a list of boxes that must all be ticked.
 
 ### M3: Multi-backend + supply chain
 
@@ -447,6 +456,57 @@ on OrbStack; v1 marked maintenance-only in README.
 - devcontainer.json interop: read (not just write) the essentials, so
   projects standardized on devcontainers work with `dev2` unmodified.
 - `dev2 status` / `dev2 ps` across projects.
+
+### M5: Live console
+
+The aspirational shape: a full-screen terminal UI that owns the session,
+with the workload in one pane and everything the tool knows in another —
+egress decisions as they happen, container events, and dialogs that ask
+for a decision at the moment of need rather than reporting it afterwards.
+
+This is the natural home for things the CLI can only do awkwardly:
+
+- **Denials become questions.** Today a blocked destination prints a
+  notice and the user re-runs with a flag. In the console it is a prompt
+  while the process waits: allow once, allow for this project, or deny.
+  That is section 4.5's "suggested grants at the moment of need" actually
+  realized — the friction lands where the decision is, with the evidence
+  in view.
+- **Live environment changes.** Install a package or a tool, keep it.
+- **Multiple panes for what is already collected**: the egress log, the
+  agent's output, build progress, the resolved policy for this run.
+
+Two design constraints that are not negotiable, because the whole point of
+the console is to relax something the current design deliberately froze.
+
+**A control plane must never be reachable from the workload.** Section 4.3
+fixes the sidecar's policy at startup precisely so a compromised workload
+cannot rewrite its own allowlist. A console that edits policy live needs a
+channel — and that channel must exist only on the host side: a unix socket
+bind-mounted into the sidecar from the host filesystem, or the sidecar
+holding a connection out to the console process, never a listener on the
+internal network. If the workload can reach the thing that changes the
+policy, the policy is advisory. This is the single highest-risk part of
+the feature and it should be built with that stated in the code.
+
+**Live changes must be recorded as declarations, not baked into a pet
+container.** The tempting implementation of "install it and keep it" is
+`docker commit`, which produces an image nobody can reproduce and a
+project that works only on the machine where the command was typed. The
+console should instead append to the project's configuration — a package
+list, a tool list — and rebuild the image from it. The user gets
+persistence; the project keeps a Dockerfile that explains itself and a
+teammate gets the same environment. If a change cannot be expressed as a
+declaration, it should be explicitly ephemeral and labelled as such.
+
+A third, softer constraint: the console must not become the only way to
+use the tool. Everything it does needs a non-interactive equivalent, or CI
+and scripted use fall off a cliff.
+
+Sequencing: this depends on M2's core loop existing (it wraps run, shell
+and build) and on M1's egress events (it renders them). It replaces v1's
+`dev interactive`, which is a menu wrapping commands rather than a live
+view, and which cannot be delegated to v1 because it starts containers.
 
 ### Deliberately out of scope
 
@@ -483,7 +543,7 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
 ## 8. Sequencing summary
 
 ```
-M0 skeleton -> M1 agent mode -> M2 core parity + trust -> M3 backends/supply chain -> M4 team/policy
+M0 skeleton -> M1 agent mode -> M2 core loop + trust -> M3 backends/supply chain -> M4 team/policy -> M5 live console
 ```
 
 Relative sizes, so the cut order below is actionable rather than a
