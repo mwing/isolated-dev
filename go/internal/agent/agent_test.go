@@ -389,3 +389,80 @@ func TestSafeModeDropsAutoApproveArgs(t *testing.T) {
 		t.Fatalf("--safe command = %v, want the bare binary", safe.Command)
 	}
 }
+
+func TestOverlayInstallsItsOwnRuntime(t *testing.T) {
+	// The agent must not require the base image to carry node. Assuming it
+	// rules out running the agent on the project's own image, and an agent
+	// that cannot run the project's tests cannot check its own work.
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude",
+		Runtime: "node", RuntimeImage: "node:22-bookworm-slim",
+		Install: "npm install -g x", AllowHosts: []string{"a.com"},
+	}
+	df := Dockerfile(a, "golang:1.26")
+
+	if !strings.Contains(df, "FROM node:22-bookworm-slim AS runtime") {
+		t.Errorf("no runtime stage:\n%s", df)
+	}
+	if !strings.Contains(df, "COPY --from=runtime /usr/local/bin/node") {
+		t.Errorf("node not copied in:\n%s", df)
+	}
+	if !strings.Contains(df, "FROM golang:1.26") {
+		t.Errorf("base image lost:\n%s", df)
+	}
+	// The runtime stage must come first, or the final image is node rather
+	// than the project's.
+	if strings.Index(df, "FROM node:22-bookworm-slim AS runtime") > strings.Index(df, "FROM golang:1.26") {
+		t.Errorf("runtime stage must precede the base:\n%s", df)
+	}
+}
+
+func TestRuntimeDoesNotClobberTheBaseToolchain(t *testing.T) {
+	// golang keeps its toolchain in /usr/local/go. Copying node into
+	// /usr/local would take the base's toolchain with it.
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/c",
+		Runtime: "node", AllowHosts: []string{"a.com"},
+	}
+	df := Dockerfile(a, "golang:1.26")
+
+	for _, line := range strings.Split(df, "\n") {
+		if !strings.HasPrefix(line, "COPY --from=runtime") {
+			continue
+		}
+		dest := line[strings.LastIndex(line, " ")+1:]
+		if !strings.HasPrefix(dest, RuntimePath+"/") {
+			t.Errorf("runtime copied outside %s: %q", RuntimePath, line)
+		}
+	}
+	if !strings.Contains(df, "ENV PATH="+RuntimePath+"/bin:$PATH") {
+		t.Errorf("runtime not on PATH:\n%s", df)
+	}
+}
+
+func TestNoRuntimeStageWhenNoneRequested(t *testing.T) {
+	a := &Agent{
+		Name: "x", Binary: "x", ConfigDir: "/c", AllowHosts: []string{"a.com"},
+	}
+	df := Dockerfile(a, "alpine:3")
+	if strings.Contains(df, "AS runtime") {
+		t.Errorf("unrequested runtime stage:\n%s", df)
+	}
+	if !strings.HasPrefix(df, "FROM alpine:3\n") {
+		t.Errorf("base should be the only stage:\n%s", df)
+	}
+}
+
+func TestRuntimeImageIsPinnedNotFloating(t *testing.T) {
+	// A floating runtime tag changes what runs in the sandbox between two
+	// builds of the same agent version.
+	for _, a := range NewRegistry().List() {
+		if a.Runtime == "" {
+			continue
+		}
+		img := a.runtimeImage()
+		if !strings.Contains(img, ":") || strings.HasSuffix(img, ":latest") {
+			t.Errorf("%s: runtime image %q is not pinned", a.Name, img)
+		}
+	}
+}

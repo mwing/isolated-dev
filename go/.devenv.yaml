@@ -1,0 +1,19 @@
+# Shared project configuration. Committed, reviewed like code.
+#
+# This states what the project NEEDS; it grants nothing on its own. Each
+# user accepts it once with `dev2 agent accept` and the decision is
+# recorded outside the repository (ROADMAP 4.2.1).
+
+agents:
+  default:
+    # Building and testing this module requires the Go module proxy and
+    # the checksum database. Without them `go test` fails on a cold cache
+    # inside the sandbox.
+    allow_hosts:
+      - proxy.golang.org
+      - sum.golang.org
+
+    # Run the agent on a Go image so it can build and test its own work.
+    # The agent's node runtime is installed into the overlay, so the base
+    # does not need to carry it.
+    base: golang:1.26

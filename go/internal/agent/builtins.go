@@ -17,11 +17,13 @@ func builtins() []Agent {
 			Binary:      "claude",
 			// The sandbox is the boundary, which is what makes skipping
 			// the per-action prompts reasonable here and nowhere else.
-			Args:      []string{"--dangerously-skip-permissions"},
-			ConfigDir: "/home/dev/.claude",
-			AuthEnv:   []string{"ANTHROPIC_API_KEY"},
-			Base:      "node:22-bookworm-slim",
-			Install:   "npm install -g @anthropic-ai/claude-code",
+			Args:         []string{"--dangerously-skip-permissions"},
+			ConfigDir:    "/home/dev/.claude",
+			AuthEnv:      []string{"ANTHROPIC_API_KEY"},
+			Base:         "debian:bookworm-slim",
+			Runtime:      "node",
+			RuntimeImage: "node:22-bookworm-slim",
+			Install:      "npm install -g @anthropic-ai/claude-code",
 			// Rather than allowlist the telemetry endpoints, turn the
 			// traffic off at the source: nothing to block, nothing to
 			// report, no noise in the notices.
@@ -56,15 +58,17 @@ func builtins() []Agent {
 			},
 		},
 		{
-			Name:        "codex",
-			Description: "OpenAI Codex CLI",
-			Version:     "latest",
-			Binary:      "codex",
-			Args:        []string{"--dangerously-bypass-approvals-and-sandbox"},
-			ConfigDir:   "/home/dev/.codex",
-			AuthEnv:     []string{"OPENAI_API_KEY"},
-			Base:        "node:22-bookworm-slim",
-			Install:     "npm install -g @openai/codex",
+			Name:         "codex",
+			Description:  "OpenAI Codex CLI",
+			Version:      "latest",
+			Binary:       "codex",
+			Args:         []string{"--dangerously-bypass-approvals-and-sandbox"},
+			ConfigDir:    "/home/dev/.codex",
+			AuthEnv:      []string{"OPENAI_API_KEY"},
+			Base:         "debian:bookworm-slim",
+			Runtime:      "node",
+			RuntimeImage: "node:22-bookworm-slim",
+			Install:      "npm install -g @openai/codex",
 			AllowHosts: []string{
 				"api.openai.com",
 				"auth.openai.com",

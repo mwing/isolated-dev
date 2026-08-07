@@ -59,11 +59,19 @@ func (o Options) BaseImage() string {
 	return o.Agent.Base
 }
 
+// RuntimePath is where a copied runtime is installed. It is deliberately
+// not /usr/local: that would clobber toolchains the base image keeps there,
+// notably Go.
+const RuntimePath = "/opt/dev2-runtime"
+
 // Dockerfile renders the overlay layer. The project's own Dockerfile is
 // never modified: the agent is added on top, so removing the agent is a
 // matter of not using the overlay tag.
 func Dockerfile(a *Agent, base string) string {
 	var b strings.Builder
+	if a.Runtime == "node" {
+		fmt.Fprintf(&b, "FROM %s AS runtime\n", a.runtimeImage())
+	}
 	fmt.Fprintf(&b, "FROM %s\n", base)
 	// A fixed uid/gid matching the --user the tool passes, so files the
 	// agent writes into the workspace belong to the invoking user.
@@ -79,6 +87,18 @@ func Dockerfile(a *Agent, base string) string {
 	b.WriteString("RUN (getent group 1000 || groupadd -g 1000 dev) >/dev/null 2>&1 || true\n")
 	b.WriteString("RUN (id -u 1000 >/dev/null 2>&1) || useradd -u 1000 -g 1000 -m -d " + HomePath + " -s /bin/bash dev\n")
 	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R 1000:1000 " + HomePath + "\n")
+	if a.Runtime == "node" {
+		// Copied into its own prefix rather than /usr/local, so a base
+		// image that keeps a toolchain there (golang) survives intact.
+		// npm derives its global prefix from node's location, so global
+		// installs land here too.
+		fmt.Fprintf(&b, "COPY --from=runtime /usr/local/bin/node %s/bin/node\n", RuntimePath)
+		fmt.Fprintf(&b, "COPY --from=runtime /usr/local/lib/node_modules/npm %s/lib/node_modules/npm\n", RuntimePath)
+		fmt.Fprintf(&b, "RUN ln -sf %s/lib/node_modules/npm/bin/npm-cli.js %s/bin/npm && "+
+			"ln -sf %s/lib/node_modules/npm/bin/npx-cli.js %s/bin/npx\n",
+			RuntimePath, RuntimePath, RuntimePath, RuntimePath)
+		fmt.Fprintf(&b, "ENV PATH=%s/bin:$PATH\n", RuntimePath)
+	}
 	if a.Install != "" {
 		fmt.Fprintf(&b, "RUN %s\n", a.Install)
 	}
@@ -144,6 +164,14 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		}
 	}
 	return spec
+}
+
+// runtimeImage returns the pinned image a runtime is copied from.
+func (a *Agent) runtimeImage() string {
+	if a.RuntimeImage != "" {
+		return a.RuntimeImage
+	}
+	return "node:22-bookworm-slim"
 }
 
 // Runner orchestrates a full agent run.

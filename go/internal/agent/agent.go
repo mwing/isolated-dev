@@ -51,6 +51,17 @@ type Agent struct {
 	// Base is the image to build the overlay on when no project image
 	// exists.
 	Base string `yaml:"base"`
+	// Runtime is the language runtime the agent needs, installed into the
+	// overlay rather than assumed present. Without this the agent only
+	// works on bases that already carry it, which rules out running the
+	// agent on the project's own image — and an agent that cannot run the
+	// project's tests cannot check its own work.
+	//
+	// "node" is currently the only value; "" installs nothing.
+	Runtime string `yaml:"runtime"`
+	// RuntimeImage is where the runtime is copied from. Pinned rather than
+	// floating so the overlay is reproducible.
+	RuntimeImage string `yaml:"runtime_image"`
 
 	// source records where the definition came from, for `agent list`.
 	source string
