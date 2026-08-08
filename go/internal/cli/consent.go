@@ -47,6 +47,14 @@ func projectAsks(cfg config.Config) []trust.Ask {
 			Effect: "mount the docker socket, which is root on the docker host",
 		})
 	}
+	if cfg.Origin("tools") == config.OriginProject && len(cfg.Tools) > 0 {
+		asks = append(asks, trust.Ask{
+			Key: "tools", Value: strings.Join(cfg.Tools, " "),
+			Effect: "install these packages into the project image: " +
+				strings.Join(cfg.Tools, ", ") + " (installed during a build, " +
+				"which runs unfiltered)",
+		})
+	}
 	if cfg.Origin("pass_env_vars") == config.OriginProject && !cfg.PassEnvVars.Empty() {
 		v := strings.Join(append(append([]string(nil), cfg.PassEnvVars.Patterns...),
 			cfg.PassEnvVars.Explicit...), " ")

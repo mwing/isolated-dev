@@ -75,6 +75,10 @@ type File struct {
 	// Agents is the project's agent request (ROADMAP 4.2.1). It states
 	// what the project needs; it grants nothing on its own.
 	Agents map[string]trust.AgentConfig `yaml:"agents"`
+	// Tools the project asks to have installed in its image. A request
+	// like any other: packages are installed during a build, which runs
+	// unfiltered, so a repository must not be able to add them silently.
+	Tools []string `yaml:"tools"`
 }
 
 // Config is the resolved configuration.
@@ -99,6 +103,8 @@ type Config struct {
 	// only from the project file: a global agent request would have no
 	// project to speak for.
 	Agents map[string]trust.AgentConfig
+	// Tools the project requests, unresolved.
+	Tools []string
 
 	origins map[string]Origin
 	// Notes collects non-fatal observations made while loading: dead keys,
@@ -228,6 +234,10 @@ func (c *Config) merge(f File, o Origin) {
 		c.Agents = f.Agents
 		c.origins["agents"] = o
 	}
+	if len(f.Tools) > 0 && o == OriginProject {
+		c.Tools = f.Tools
+		c.origins["tools"] = o
+	}
 }
 
 // deadKeys are v1 keys that were parsed and validated but never affected
@@ -259,6 +269,7 @@ var knownKeys = map[string]bool{
 	"pass_env_vars":       true,
 	"agents":              true,
 	"network":             true,
+	"tools":               true,
 }
 
 // classify inspects raw top-level keys and returns notes for anything dead

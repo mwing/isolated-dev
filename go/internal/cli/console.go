@@ -152,7 +152,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		// whole interface is interactive.
 		interactive = true
 	} else {
-		image, err = ensureTools(ctx, env, eng, p, store)
+		image, err = ensureTools(ctx, env, eng, p, store, cfg)
 		if err != nil {
 			return err
 		}

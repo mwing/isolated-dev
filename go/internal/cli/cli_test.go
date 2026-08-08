@@ -11,6 +11,7 @@ import (
 
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/runner"
+	"github.com/mwing/isolated-dev/go/internal/trust"
 )
 
 type harness struct {
@@ -350,5 +351,119 @@ func TestToolsCommandsAreGroupedUnderTools(t *testing.T) {
 		if !found {
 			t.Errorf("dev2 tools %s missing", name)
 		}
+	}
+}
+
+func TestSharedToolsAreARequestNotAGrant(t *testing.T) {
+	// A repository must not be able to add packages to an image silently:
+	// they install during a build, which runs unfiltered.
+	h := newHarness(t)
+	h.writeProject(t, "tools:\n  - jq\n  - ripgrep\n")
+
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	asks := projectAsks(cfg)
+	if len(asks) != 1 || asks[0].Key != "tools" {
+		t.Fatalf("asks = %+v", asks)
+	}
+	if !strings.Contains(asks[0].Effect, "jq") {
+		t.Errorf("effect should name the packages: %q", asks[0].Effect)
+	}
+}
+
+func TestProjectToolsApplyOnlyOnceAccepted(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "tools:\n  - jq\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := effectiveTools(cfg, store); len(got) != 0 {
+		t.Fatalf("unaccepted project tools applied: %v", got)
+	}
+	if _, err := store.AcceptSettings([]trust.Ask{{Key: "tools", Value: "jq"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveTools(cfg, store); len(got) != 1 || got[0] != "jq" {
+		t.Fatalf("accepted project tools = %v", got)
+	}
+}
+
+func TestChangingTheSharedListAsksAgain(t *testing.T) {
+	// Accepting one list is not accepting whatever it becomes later.
+	h := newHarness(t)
+	h.writeProject(t, "tools:\n  - jq\n")
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AcceptSettings([]trust.Ask{{Key: "tools", Value: "jq"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.writeProject(t, "tools:\n  - jq\n  - curl\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := effectiveTools(cfg, store); len(got) != 0 {
+		t.Fatalf("a widened list applied without a new acceptance: %v", got)
+	}
+	if len(store.PendingSettings(projectAsks(cfg))) != 1 {
+		t.Error("the widened list did not ask again")
+	}
+}
+
+func TestWriteProjectToolsPreservesTheRestOfTheFile(t *testing.T) {
+	// It is the team's file and may hold anything.
+	h := newHarness(t)
+	h.writeProject(t, "network: none\n\nagents:\n  default:\n    allow_hosts:\n      - example.com\n")
+
+	if err := writeProjectTools(h.paths.Project, []string{"jq"}); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(h.paths.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{"network: none", "allow_hosts", "example.com", "- jq"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lost %q:\n%s", want, got)
+		}
+	}
+
+	// And it must still parse.
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatalf("rewritten file does not parse: %v", err)
+	}
+	if len(cfg.Tools) != 1 || cfg.Tools[0] != "jq" {
+		t.Errorf("tools = %v", cfg.Tools)
+	}
+}
+
+func TestRewritingToolsTwiceDoesNotDuplicate(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "network: none\n")
+	if err := writeProjectTools(h.paths.Project, []string{"jq"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProjectTools(h.paths.Project, []string{"jq", "curl"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Tools) != 2 {
+		t.Fatalf("tools = %v, want the list replaced rather than appended", cfg.Tools)
 	}
 }

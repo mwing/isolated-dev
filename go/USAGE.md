@@ -200,6 +200,31 @@ may reach this" — and you answered that by asking for the port.
 
 ---
 
+## What persists and what does not
+
+A reasonable expectation is that installing something inside the container
+keeps it. It does not, for two independent reasons:
+
+```sh
+dev2 run -c 'apk add jq'      # ERROR: Permission denied
+```
+
+The container runs as an unprivileged uid the tool sets, so a package
+manager cannot write to the image in the first place. And containers run
+with `--rm`, so even a change made as root would be discarded when the
+command exits.
+
+| written to | survives? |
+|---|---|
+| `/workspace` | **yes** — it is your project directory, on your disk |
+| anywhere else | no — the container is discarded when it exits |
+
+That is why `dev2 tools add` exists: it records the tool and rebuilds the
+image from that record, which keeps the environment reproducible instead
+of turning it into a pet container that only works on one machine.
+
+---
+
 ## Adding tools that stick
 
 You are in a shell, and `jq` is not there. Look it up rather than
@@ -231,7 +256,27 @@ left behind for every later build to fail on, and the error points at
 `dev2 tools search`.
 
 The record lives in `~/.dev-envs/projects/…`, outside the repository, so
-it is yours until you choose to share it.
+it is yours until you choose to share it:
+
+```sh
+dev2 tools add --shared ripgrep
+```
+
+That writes it into the project's `.devenv.yaml` instead, where it becomes
+a request the team shares. Commit it, and a teammate sees:
+
+```
+.devenv.yaml requests settings you have not accepted:
+
+  tools: ripgrep
+      install these packages into the project image: ripgrep
+      (installed during a build, which runs unfiltered)
+```
+
+One `dev2 accept --all` and they have the same environment. Your own
+acceptance is recorded when you share it — you are the one asking, and
+making you accept your own edit would teach you to click through the
+prompt that protects everyone else.
 
 ---
 

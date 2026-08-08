@@ -242,7 +242,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		}
 	}
 
-	image, err := ensureTools(ctx, env, eng, p, store)
+	image, err := ensureTools(ctx, env, eng, p, store, cfg)
 	if err != nil {
 		return err
 	}

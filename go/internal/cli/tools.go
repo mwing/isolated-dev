@@ -3,10 +3,13 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/project"
 	"github.com/mwing/isolated-dev/go/internal/trust"
@@ -52,7 +55,7 @@ func listTools(ctx context.Context, env *Env) error {
 	if err != nil {
 		return err
 	}
-	tools := store.Tools()
+	tools := effectiveTools(cfg, store)
 	if len(tools) == 0 {
 		fmt.Fprintf(env.Stdout, "No tools added.\n\n")
 		fmt.Fprintf(env.Stdout, "  dev2 tools search <term>   find what is available\n")
@@ -74,7 +77,8 @@ func listTools(ctx context.Context, env *Env) error {
 }
 
 func newToolsAddCmd(env *Env) *cobra.Command {
-	return &cobra.Command{
+	var shared bool
+	cmd := &cobra.Command{
 		Use:   "add <tool>...",
 		Short: "Add a tool to this project's environment, persistently",
 		Long: "Records the tool and rebuilds the image with it. The record is a\n" +
@@ -85,9 +89,133 @@ func newToolsAddCmd(env *Env) *cobra.Command {
 			"choose to share it.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if shared {
+				return shareTools(cmd.Context(), env, args)
+			}
 			return addTools(cmd.Context(), env, args)
 		},
 	}
+	cmd.Flags().BoolVar(&shared, "shared", false,
+		"add to the project's .devenv.yaml so the team gets it too")
+	return cmd
+}
+
+// shareTools writes tools into the project's own file, where they become a
+// request the team shares rather than a record on one machine.
+//
+// The author's acceptance is recorded at the same time: they are the one
+// asking, and making them accept their own edit would teach them to click
+// through the prompt that protects everyone else.
+func shareTools(ctx context.Context, env *Env, names []string) error {
+	for _, n := range names {
+		if !project.ValidToolName(n) {
+			return fmt.Errorf("%q is not a plain package name; "+
+				"tool names may contain letters, digits, . - _ + only", n)
+		}
+	}
+	cfg, p, err := resolveProject(env)
+	if err != nil {
+		return err
+	}
+
+	merged := appendMissing(cfg.Tools, names)
+	if err := writeProjectTools(env.Paths.Project, merged); err != nil {
+		return err
+	}
+
+	store, err := trust.Load(env.Paths.Home, p.Dir)
+	if err != nil {
+		return err
+	}
+	if _, err := store.AcceptSettings([]trust.Ask{{
+		Key: "tools", Value: strings.Join(merged, " "),
+	}}); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(env.Stdout, "Added to %s:\n", env.Paths.Project)
+	for _, n := range names {
+		fmt.Fprintf(env.Stdout, "  + %s\n", n)
+	}
+	fmt.Fprintf(env.Stdout, "\nCommit it and your team gets the same environment;\n")
+	fmt.Fprintf(env.Stdout, "each of them accepts it once with `dev2 accept`.\n\n")
+
+	eng := container.New(env.driver(cfg.VMName))
+	return buildTools(ctx, env, eng, p, effectiveTools(cfg, store))
+}
+
+func appendMissing(have, add []string) []string {
+	seen := map[string]bool{}
+	for _, h := range have {
+		seen[h] = true
+	}
+	out := append([]string(nil), have...)
+	for _, a := range add {
+		if !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// effectiveTools combines this user's own tools with the project's, the
+// latter only once accepted.
+func effectiveTools(cfg config.Config, store *trust.Store) []string {
+	tools := store.Tools()
+	if len(cfg.Tools) == 0 {
+		return tools
+	}
+	if store.AcceptedSettings()["tools"] != strings.Join(cfg.Tools, " ") {
+		return tools
+	}
+	return appendMissing(tools, cfg.Tools)
+}
+
+// writeProjectTools updates the tools list in a project file, leaving the
+// rest of it alone: it is the team's file and may hold anything.
+func writeProjectTools(path string, tools []string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+
+	var out []string
+	skipping := false
+	for _, line := range lines {
+		if strings.HasPrefix(line, "tools:") {
+			skipping = true
+			continue
+		}
+		if skipping {
+			// The block continues while lines are indented list items.
+			if strings.HasPrefix(strings.TrimRight(line, " "), "  -") || strings.TrimSpace(line) == "" {
+				if strings.TrimSpace(line) == "" {
+					skipping = false
+					out = append(out, line)
+				}
+				continue
+			}
+			skipping = false
+		}
+		out = append(out, line)
+	}
+
+	body := strings.TrimRight(strings.Join(out, "\n"), "\n")
+	var b strings.Builder
+	if body != "" {
+		b.WriteString(body)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("# Tools the project needs. A request: each user accepts it once\n")
+	b.WriteString("# with `dev2 accept`, because packages install during a build.\n")
+	b.WriteString("tools:\n")
+	for _, t := range tools {
+		fmt.Fprintf(&b, "  - %s\n", t)
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
 func addTools(ctx context.Context, env *Env, names []string) error {
@@ -273,8 +401,8 @@ func buildTools(ctx context.Context, env *Env, eng *container.Engine,
 // configured in advance, so the build has to happen on the next run rather
 // than being demanded of the user.
 func ensureTools(ctx context.Context, env *Env, eng *container.Engine,
-	p *project.Project, store *trust.Store) (string, error) {
-	tools := store.Tools()
+	p *project.Project, store *trust.Store, cfg config.Config) (string, error) {
+	tools := effectiveTools(cfg, store)
 	if len(tools) == 0 {
 		return p.Image, nil
 	}

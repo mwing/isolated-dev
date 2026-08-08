@@ -73,6 +73,7 @@ first.
 | `dev2 clean` | remove containers, networks and the sidecar |
 | `dev2 tools search TERM` | find what the image's package index has |
 | `dev2 tools add TOOL` | add a tool to this project's environment, permanently |
+| `dev2 tools add --shared TOOL` | add it to `.devenv.yaml` so the team gets it too |
 | `dev2 tools list` / `remove` | list and remove those tools |
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
