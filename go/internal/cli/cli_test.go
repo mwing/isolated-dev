@@ -524,3 +524,82 @@ func TestPinningNeedsNoAcceptance(t *testing.T) {
 		t.Fatalf("pinning asked for consent: %+v", asks)
 	}
 }
+
+func TestCompletionCoversEveryCommand(t *testing.T) {
+	// v1 shipped completions for its whole command set; a completion that
+	// knows half the commands teaches the wrong half.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	names := map[string]bool{}
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	for _, want := range []string{
+		"run", "shell", "build", "console", "status", "clean", "tools",
+		"pin", "scan", "agent", "accept", "doctor", "migrate", "vm", "version",
+		"completion",
+	} {
+		if !names[want] {
+			t.Errorf("%q is not in the command tree, so it cannot be completed", want)
+		}
+	}
+}
+
+func TestCompletionInstallIsAvailable(t *testing.T) {
+	// Printing a script is not installing it, which was the complaint.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+	c, _, err := root.Find([]string{"completion", "install"})
+	if err != nil || c == nil || c.Name() != "install" {
+		t.Fatalf("no `completion install` subcommand: %v", err)
+	}
+}
+
+func TestCompletionTargets(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		got, err := targetFor(shell, "/home/u")
+		if err != nil {
+			t.Fatalf("%s: %v", shell, err)
+		}
+		if !strings.HasPrefix(got.Path, "/home/u/") {
+			t.Errorf("%s writes outside home: %s", shell, got.Path)
+		}
+		if got.Note == "" {
+			t.Errorf("%s: no note saying what the user may still need to do", shell)
+		}
+	}
+	if _, err := targetFor("csh", "/home/u"); err == nil {
+		t.Error("unsupported shell accepted")
+	}
+}
+
+func TestDetectShellUsesTheChosenShell(t *testing.T) {
+	if got := detectShell([]string{"SHELL=/bin/zsh"}); got != "zsh" {
+		t.Errorf("detectShell = %q", got)
+	}
+	if got := detectShell(nil); got != "." && got != "" {
+		t.Logf("no SHELL set resolves to %q, which targetFor rejects", got)
+	}
+}
+
+func TestImageCompletionIsShortAndNotFiles(t *testing.T) {
+	// Every image on the daemon would be noise; the working directory's
+	// files would be wrong.
+	got, directive := completeImage(nil, nil, "")
+	if len(got) == 0 || len(got) > 10 {
+		t.Fatalf("offered %d images, want a short curated list", len(got))
+	}
+	if directive&cobra.ShellCompDirectiveNoFileComp == 0 {
+		t.Error("image completion offers files")
+	}
+	var hasPlainBase bool
+	for _, c := range got {
+		if strings.HasPrefix(string(c), "debian:") {
+			hasPlainBase = true
+		}
+	}
+	if !hasPlainBase {
+		t.Error("no plain distribution offered, which is the sandboxing starting point")
+	}
+}

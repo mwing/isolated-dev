@@ -21,6 +21,12 @@ make proxy-image    # builds the egress sidecar image into the OrbStack VM
 dev2 doctor         # checks everything above
 ```
 
+Shell completions, covering every command:
+
+```sh
+dev2 completion install     # uses $SHELL; or name bash, zsh or fish
+```
+
 Requires Go 1.26+ and OrbStack. `doctor` never changes anything — it
 reports what it can see and what would block a run.
 

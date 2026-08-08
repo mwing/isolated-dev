@@ -467,11 +467,17 @@ rather than as a list of boxes that must all be ticked.
   failure, not a pass: "no findings" and "no scan" are different answers.
   SBOM emission is still open.
 - Signed releases: goreleaser + cosign, checksums in release notes,
-  brew tap.
+  brew tap. Deferred until there is a release to sign — signing is a
+  release-time concern and building it early means maintaining it before
+  it protects anyone.
 
 ### M3.1: Requested during dogfooding
 
-**Shell completions.** v1 shipped bash and zsh completions and v2 has
+**Shell completions.** Done. `dev2 completion install` writes the script
+where the shell will find it, since printing a script is not installing
+it, and --image completes to a short curated list. Original note follows.
+
+v1 shipped bash and zsh completions and v2 had
 none. cobra generates most of it, but the valuable part is completing
 `--image` with a short curated list — the general language images and a
 slim debian — because the sandboxing case starts with someone who does not

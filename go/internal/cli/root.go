@@ -82,6 +82,16 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newToolsCmd(env))
 	root.AddCommand(newPinCmd(env))
 	root.AddCommand(newScanCmd(env))
+
+	// Completion covers every command in the tree, so this has to run
+	// after the tree is built.
+	registerCompletions(root)
+	// cobra creates the completion command during Execute, which is too
+	// late to hang a subcommand off it.
+	root.InitDefaultCompletionCmd()
+	if c, _, err := root.Find([]string{"completion"}); err == nil && c != nil {
+		c.AddCommand(newCompletionInstallCmd(env))
+	}
 	root.AddCommand(newCleanCmd(env))
 	root.AddCommand(newEnvCmd(env))
 	return root
