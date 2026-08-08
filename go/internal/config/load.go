@@ -116,26 +116,6 @@ func readFile(path string) (File, []Note, error) {
 	return f, notes, nil
 }
 
-// envKeys maps DEV_* variables to their config keys, matching v1's
-// get_env_var_name. Dead keys are deliberately absent: v1 honored
-// DEV_NETWORK_MODE by setting a variable nothing read.
-var envKeys = map[string]string{
-	"DEV_VM_NAME":             "vm_name",
-	"DEV_DEFAULT_TEMPLATE":    "default_template",
-	"DEV_CONTAINER_PREFIX":    "container_prefix",
-	"DEV_AUTO_START_VM":       "auto_start_vm",
-	"DEV_MEMORY_LIMIT":        "memory_limit",
-	"DEV_CPU_LIMIT":           "cpu_limit",
-	"DEV_CACHE_TTL":           "cache_ttl",
-	"DEV_CACHE_MAX_SIZE":      "cache_max_size",
-	"DEV_MIN_DISK_SPACE":      "min_disk_space",
-	"DEV_MOUNT_SSH_KEYS":      "mount_ssh_keys",
-	"DEV_MOUNT_GIT_CONFIG":    "mount_git_config",
-	"DEV_MOUNT_DOCKER_SOCKET": "mount_docker_socket",
-	"DEV_FORWARD_PORTS":       "forward_ports",
-	"DEV_NETWORK":             "network",
-}
-
 // fromEnv builds a File layer from DEV_* variables.
 func fromEnv(env []string) (File, []Note) {
 	var f File

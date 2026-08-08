@@ -128,6 +128,14 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 		return t, fmt.Errorf("starting egress sidecar: %w", err)
 	}
 
+	// A sidecar that died on startup produces confusing errors downstream
+	// ("marked for removal", "no address on network"). The usual cause is
+	// an image older than the binary, which does not know a flag it was
+	// just given — worth naming, since the fix is one command.
+	if err := s.waitReady(ctx, t.SidecarName); err != nil {
+		return t, err
+	}
+
 	if err := s.Engine.NetworkConnect(ctx, t.EgressNetwork, t.SidecarName); err != nil {
 		_ = s.Engine.Remove(ctx, t.SidecarName)
 		return t, fmt.Errorf("connecting sidecar to egress: %w", err)
@@ -141,6 +149,69 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 	t.SidecarIP = ip
 	s.Topology = t
 	return t, nil
+}
+
+// ReadyLine is what the sidecar prints once it is listening. Keep it in
+// step with cmd/dev2-proxy.
+const ReadyLine = "dev2-proxy: ready"
+
+// waitReady waits for the sidecar to report itself listening, and explains
+// the failure when it does not.
+//
+// Waiting for a positive signal rather than sampling "is it still alive"
+// avoids two mistakes at once: a container that dies moments after the
+// first check looks healthy, and attaching to a proxy that has not bound
+// its port yet is a race that shows up only under load.
+func (s *Sidecar) waitReady(ctx context.Context, name string) error {
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if logs, err := s.Engine.Logs(ctx, name); err == nil &&
+			strings.Contains(logs, ReadyLine) {
+			return nil
+		}
+		if exists, running, err := s.Engine.Running(ctx, name); err == nil &&
+			(!exists || !running) {
+			return s.explainExit(ctx, name)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("the egress sidecar did not report itself ready within 15s")
+}
+
+// explainExit turns a dead sidecar into a message naming the likely cause.
+// The usual one is an image older than the binary, which does not know a
+// flag it was just given — worth saying, since the fix is one command.
+func (s *Sidecar) explainExit(ctx context.Context, name string) error {
+	logs, err := s.Engine.Logs(ctx, name)
+	_ = s.Engine.Remove(ctx, name)
+	// The sidecar runs with --rm, so a container that exits is often gone
+	// before its output can be read. Quoting the daemon's "No such
+	// container" as the reason points at the wrong problem entirely.
+	if err != nil || strings.Contains(logs, "No such container") {
+		logs = ""
+	}
+
+	const hint = "Rebuild the sidecar image:\n  make proxy-image   (from the go/ directory)"
+	if strings.Contains(logs, "flag provided but not defined") ||
+		strings.Contains(logs, "flag needs an argument") {
+		return fmt.Errorf("the egress sidecar image is older than dev2 and does not "+
+			"understand a flag it was given:\n  %s\n%s", firstLine(logs), hint)
+	}
+	if msg := firstLine(logs); msg != "" {
+		return fmt.Errorf("the egress sidecar exited immediately:\n  %s\n%s", msg, hint)
+	}
+	return fmt.Errorf("the egress sidecar exited immediately with no output.\n%s", hint)
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 // Grant changes the policy of a running sidecar through the control

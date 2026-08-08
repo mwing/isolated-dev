@@ -199,7 +199,10 @@ func TestProxyDoesNotTerminateTLS(t *testing.T) {
 
 	// The handshake is what is under test; the echo server speaks no HTTP,
 	// so a protocol error afterwards is fine. A certificate error is not.
-	_, err = client.Get("https://allowed.example.com/")
+	resp, err := client.Get("https://allowed.example.com/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil && strings.Contains(err.Error(), "x509") {
 		t.Fatalf("TLS was intercepted: %v", err)
 	}

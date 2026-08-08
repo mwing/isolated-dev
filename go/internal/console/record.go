@@ -105,7 +105,7 @@ func replay(path string, fixedCols, fixedRows int) (screen []string, sizes []Ent
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	dec := json.NewDecoder(f)
 	var term *Terminal

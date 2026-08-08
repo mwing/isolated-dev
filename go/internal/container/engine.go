@@ -88,10 +88,10 @@ func (e *Engine) BuildWithDockerfile(ctx context.Context, spec BuildSpec, docker
 		return fmt.Errorf("container: writing Dockerfile: %w", err)
 	}
 	tmp := f.Name()
-	defer os.Remove(tmp)
+	defer func() { _ = os.Remove(tmp) }()
 
 	if _, err := f.WriteString(dockerfile); err != nil {
-		f.Close()
+		_ = f.Close()
 		return fmt.Errorf("container: writing Dockerfile: %w", err)
 	}
 	if err := f.Close(); err != nil {
@@ -216,6 +216,18 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 func (e *Engine) Exec(ctx context.Context, name string, cmd []string) (runner.Result, error) {
 	args := append([]string{"exec", name}, cmd...)
 	return e.Backend.Docker(ctx, backend.Call{Args: args})
+}
+
+// Running reports whether a container exists and is running.
+func (e *Engine) Running(ctx context.Context, name string) (exists, running bool, err error) {
+	res, err := e.docker(ctx, "inspect", "--format", "{{.State.Running}}", name)
+	if err != nil {
+		return false, false, err
+	}
+	if res.ExitCode != 0 {
+		return false, false, nil
+	}
+	return true, strings.TrimSpace(res.Stdout) == "true", nil
 }
 
 // Logs returns a container's output.

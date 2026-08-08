@@ -12,6 +12,14 @@ linters:
     - revive
 
   settings:
+    errcheck:
+      # Writing to a terminal or a buffer we own cannot fail in a way the
+      # caller can act on, and `_, _ =` on every line of user-facing output
+      # costs more readability than it buys. Everything else stays checked.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     revive:
       rules:
         - name: exported

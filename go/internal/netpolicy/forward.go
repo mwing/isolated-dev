@@ -86,7 +86,7 @@ func (f *Forward) accept() {
 }
 
 func (f *Forward) handle(client net.Conn) {
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	target := net.JoinHostPort(f.TargetHost, strconv.Itoa(f.TargetPort))
 	// The workload may not be listening yet — a server takes a moment to
@@ -96,7 +96,7 @@ func (f *Forward) handle(client net.Conn) {
 	if err != nil {
 		return
 	}
-	defer upstream.Close()
+	defer func() { _ = upstream.Close() }()
 
 	var wg sync.WaitGroup
 	wg.Add(2)

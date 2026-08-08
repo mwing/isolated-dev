@@ -385,7 +385,7 @@ func watchEgress(ctx context.Context, env *Env, eng *container.Engine,
 	})
 	pr, pw := io.Pipe()
 	go func() {
-		defer pw.Close()
+		defer func() { _ = pw.Close() }()
 		_ = eng.LogsFollow(ctx, topo.SidecarName, pw)
 	}()
 	go func() {

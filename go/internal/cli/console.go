@@ -192,7 +192,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 			if err != nil {
 				return err
 			}
-			defer rec.Close()
+			defer func() { _ = rec.Close() }()
 			term.Rec = rec
 			rec.Resize(cols, rows, "startup estimate")
 			fmt.Fprintf(env.Stderr, "recording to %s\n", record)
@@ -241,9 +241,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if _, err := prog.Run(); err != nil {
 		_, _ = side.Stop(context.WithoutCancel(ctx))
 		if strings.Contains(err.Error(), "/dev/tty") {
-			return fmt.Errorf("the console needs a terminal, and this session has none.\n" +
-				"Use `dev2 run --egress-prompt ask` for the same blocking prompts\n" +
-				"without the full-screen view.")
+			return fmt.Errorf("the console needs a terminal and this session has none; " +
+				"use `dev2 run --egress-prompt ask` for the same blocking prompts " +
+				"without the full-screen view")
 		}
 		return err
 	}
@@ -269,7 +269,7 @@ func streamEvents(ctx context.Context, eng *container.Engine,
 	topo netpolicy.Topology, prog *tea.Program) {
 	pr, pw := io.Pipe()
 	go func() {
-		defer pw.Close()
+		defer func() { _ = pw.Close() }()
 		_ = eng.LogsFollow(ctx, topo.SidecarName, pw)
 	}()
 
@@ -481,6 +481,6 @@ func runWorkload(ctx context.Context, eng *container.Engine, p *project.Project,
 	}()
 
 	res, err := eng.Run(ctx, spec, nil, pw, pw)
-	pw.Close()
+	_ = pw.Close()
 	prog.Send(console.DoneMsg{Err: err, ExitCode: res.ExitCode})
 }

@@ -95,6 +95,10 @@ func run() error {
 	errs := make(chan error, 3)
 	go func() { errs <- srv.ListenAndServe() }()
 	fmt.Fprintf(os.Stderr, "dev2-proxy: proxy listening on %s\n", *proxyAddr)
+	// A single line the parent can wait for. Without a readiness signal it
+	// has to guess when the sidecar is up, and a guess is either a race or
+	// a fixed delay on every run.
+	fmt.Fprintln(os.Stderr, readyLine)
 
 	var dnsSrv *netpolicy.DNSServer
 	if !*noDNS {
@@ -120,7 +124,7 @@ func run() error {
 		if err := ctl.Listen(*ctlPath); err != nil {
 			return err
 		}
-		defer ctl.Close()
+		defer func() { _ = ctl.Close() }()
 		fmt.Fprintf(os.Stderr, "dev2-proxy: control socket at %s\n", *ctlPath)
 	}
 
@@ -132,7 +136,7 @@ func run() error {
 		if err := fwd.Listen(); err != nil {
 			return err
 		}
-		defer fwd.Close()
+		defer func() { _ = fwd.Close() }()
 		fmt.Fprintf(os.Stderr, "dev2-proxy: forwarding %s\n", fwd)
 	}
 
@@ -190,6 +194,10 @@ func control(path string, args []string) error {
 	}
 	return nil
 }
+
+// readyLine is printed once everything is listening. netpolicy waits for
+// it; keep the two in step.
+const readyLine = "dev2-proxy: ready"
 
 // multiFlag collects a repeatable string flag.
 type multiFlag []string

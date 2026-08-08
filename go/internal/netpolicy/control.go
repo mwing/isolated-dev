@@ -109,7 +109,7 @@ func (c *Control) serve(ln net.Listener) {
 }
 
 func (c *Control) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	dec := json.NewDecoder(bufio.NewReader(conn))
 	enc := json.NewEncoder(conn)
 
@@ -214,7 +214,7 @@ func (c Client) Do(req Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("netpolicy: control: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		return Response{}, err

@@ -162,7 +162,7 @@ func (e *Exec) runPTY(ctx context.Context, c *exec.Cmd, cmd Command) (Result, er
 	if err != nil {
 		return Result{}, fmt.Errorf("runner: %s: pty: %w", cmd.Path, err)
 	}
-	defer ptmx.Close()
+	defer func() { _ = ptmx.Close() }()
 
 	if cmd.PTY.Ready != nil {
 		cmd.PTY.Ready(ptmx)

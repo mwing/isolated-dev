@@ -465,7 +465,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		})
 		pr, pw := io.Pipe()
 		go func() {
-			defer pw.Close()
+			defer func() { _ = pw.Close() }()
 			_ = eng.LogsFollow(watchCtx, live.SidecarName, pw)
 		}()
 		go func() { _ = watcher.Run(pr) }()
