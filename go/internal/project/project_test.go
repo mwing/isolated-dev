@@ -290,3 +290,68 @@ func TestDangerousToolNameNeverReachesTheDockerfile(t *testing.T) {
 		t.Fatalf("injection reached the build:\n%s", df)
 	}
 }
+
+func TestBaseImagesFindsWhatWillRun(t *testing.T) {
+	df := `FROM golang:1.26-alpine AS build
+RUN go build ./...
+
+FROM node:22-bookworm-slim AS runtime
+COPY --from=build /out /out
+
+FROM build
+FROM scratch
+FROM debian@sha256:abc123
+`
+	got := BaseImages(df)
+	want := []string{"golang:1.26-alpine", "node:22-bookworm-slim"}
+	if len(got) != len(want) {
+		t.Fatalf("BaseImages = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("BaseImages = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestBaseImagesSkipsWhatCannotBePinned(t *testing.T) {
+	// A stage name is not an image; scratch is not fetched; an existing
+	// digest is already pinned.
+	for _, df := range []string{
+		"FROM build\n",
+		"FROM scratch\n",
+		"FROM debian@sha256:deadbeef\n",
+	} {
+		if got := BaseImages("FROM alpine AS build\n" + df); len(got) != 1 {
+			t.Errorf("BaseImages(%q) = %v, want only alpine", df, got)
+		}
+	}
+}
+
+func TestApplyPinsRewritesAndExplains(t *testing.T) {
+	df := "FROM golang:1.26-alpine AS build\nRUN go build ./...\n"
+	pins := map[string]string{"golang:1.26-alpine": "golang@sha256:abc"}
+
+	got := ApplyPins(df, pins)
+	if !strings.Contains(got, "FROM golang@sha256:abc AS build") {
+		t.Fatalf("digest not applied:\n%s", got)
+	}
+	// A bare digest tells a reader nothing about what it was meant to be.
+	if !strings.Contains(got, "# pinned from golang:1.26-alpine") {
+		t.Errorf("no note of the original tag:\n%s", got)
+	}
+	if strings.Contains(got, "FROM golang:1.26-alpine AS build") {
+		t.Errorf("original FROM survived:\n%s", got)
+	}
+}
+
+func TestApplyPinsLeavesUnpinnedAlone(t *testing.T) {
+	df := "FROM alpine:3\nFROM golang:1.26\n"
+	got := ApplyPins(df, map[string]string{"golang:1.26": "golang@sha256:x"})
+	if !strings.Contains(got, "FROM alpine:3") {
+		t.Errorf("unpinned image was altered:\n%s", got)
+	}
+	if ApplyPins(df, nil) != df {
+		t.Error("empty pin set changed the Dockerfile")
+	}
+}

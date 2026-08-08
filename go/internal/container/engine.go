@@ -116,6 +116,33 @@ func (e *Engine) BuildWithDockerfileStdin(ctx context.Context, spec BuildSpec,
 	return check(res, err, "building "+spec.Tag)
 }
 
+// Pull fetches an image so its digest can be read.
+func (e *Engine) Pull(ctx context.Context, image string, w io.Writer) error {
+	res, err := e.Backend.Docker(ctx, backend.Call{
+		Args: []string{"pull", image}, Stdout: w, Stderr: w,
+	})
+	return check(res, err, "pulling "+image)
+}
+
+// Digest returns the repository digest of a local image: the identity the
+// registry gave it, rather than the tag someone pointed at it.
+func (e *Engine) Digest(ctx context.Context, image string) (string, error) {
+	res, err := e.docker(ctx, "inspect", "--format", "{{join .RepoDigests \"\\n\"}}", image)
+	if err != nil {
+		return "", err
+	}
+	if err := check(res, nil, "inspecting "+image); err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if d := strings.TrimSpace(line); d != "" {
+			return d, nil
+		}
+	}
+	return "", fmt.Errorf("container: %s has no repository digest; "+
+		"it was built locally rather than pulled, so there is nothing to pin to", image)
+}
+
 // ImageExists reports whether a tag is present locally.
 func (e *Engine) ImageExists(ctx context.Context, tag string) (bool, error) {
 	res, err := e.docker(ctx, "image", "inspect", tag)

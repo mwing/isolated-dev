@@ -60,6 +60,10 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 	if err != nil {
 		return err
 	}
+	// A pinned digest is what makes two builds of the same project produce
+	// the same image, here and on a teammate's machine.
+	pinned := project.ApplyPins(dockerfile, cfg.Pins)
+	unpinned := project.BaseImages(pinned)
 
 	source := p.Dockerfile
 	if p.FromTemplate {
@@ -68,7 +72,14 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 	fmt.Fprintf(env.Stdout, "Project:    %s\n", p.Name)
 	fmt.Fprintf(env.Stdout, "Detected:   %s\n", p.Detected.Explain())
 	fmt.Fprintf(env.Stdout, "Dockerfile: %s\n", source)
-	fmt.Fprintf(env.Stdout, "Image:      %s\n\n", p.Image)
+	fmt.Fprintf(env.Stdout, "Image:      %s\n", p.Image)
+	if len(cfg.Pins) > 0 {
+		fmt.Fprintf(env.Stdout, "Pinned:     %d base image(s)\n", len(cfg.Pins))
+	}
+	if len(unpinned) > 0 {
+		fmt.Fprintf(env.Stdout, "Unpinned:   %s  (dev2 pin)\n", strings.Join(unpinned, " "))
+	}
+	fmt.Fprintln(env.Stdout)
 
 	eng := container.New(env.driver(cfg.VMName))
 	// The build context is the project directory, but the Dockerfile comes
@@ -78,7 +89,7 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 		Tag:      p.Image,
 		Context:  p.Dir,
 		Platform: platform,
-	}, dockerfile, env.Stdout)
+	}, pinned, env.Stdout)
 }
 
 func newRunCmd(env *Env) *cobra.Command {

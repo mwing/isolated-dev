@@ -158,6 +158,11 @@ func (p *Project) RenderedDockerfile() (string, error) {
 	}), nil
 }
 
+// Pinned returns the Dockerfile with any recorded digests applied.
+func (p *Project) Pinned(dockerfile string, pins map[string]string) string {
+	return ApplyPins(dockerfile, pins)
+}
+
 // RunSpec builds the container specification for a run.
 //
 // The posture is the hardened baseline: the tool sets the uid rather than
@@ -243,6 +248,63 @@ func shellSafe(name string) string {
 // ValidToolName reports whether a name is safe to install.
 func ValidToolName(name string) bool {
 	return name != "" && shellSafe(name) == name
+}
+
+// BaseImages returns the images a Dockerfile builds FROM, in order.
+//
+// Every one of them is code that will run, fetched over an unfiltered
+// path, chosen by a tag that can point somewhere else tomorrow.
+func BaseImages(dockerfile string) []string {
+	var out []string
+	seen := map[string]bool{}
+	stages := map[string]bool{}
+
+	for _, line := range strings.Split(dockerfile, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		ref := fields[1]
+		// A later stage building FROM an earlier one names a stage, not an
+		// image, and there is nothing to pin.
+		if stages[ref] {
+			continue
+		}
+		if len(fields) >= 4 && strings.EqualFold(fields[2], "AS") {
+			stages[strings.ToLower(fields[3])] = true
+		}
+		if ref == "scratch" || strings.Contains(ref, "@sha256:") || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		out = append(out, ref)
+	}
+	return out
+}
+
+// ApplyPins rewrites FROM lines to the digests they were pinned to. A tag
+// says which image you meant; a digest says which image you got.
+func ApplyPins(dockerfile string, pins map[string]string) string {
+	if len(pins) == 0 {
+		return dockerfile
+	}
+	lines := strings.Split(dockerfile, "\n")
+	for i, line := range lines {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) < 2 || !strings.EqualFold(fields[0], "FROM") {
+			continue
+		}
+		digest, ok := pins[fields[1]]
+		if !ok || digest == "" {
+			continue
+		}
+		// Keep the original as a comment: a bare digest tells a reader
+		// nothing about what it was meant to be.
+		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		lines[i] = fmt.Sprintf("%s# pinned from %s\n%sFROM %s%s",
+			indent, fields[1], indent, digest, strings.Join(append([]string{""}, fields[2:]...), " "))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Registries returns the egress destinations a build or run of this

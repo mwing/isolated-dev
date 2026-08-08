@@ -453,8 +453,14 @@ rather than as a list of boxes that must all be ticked.
 
 - Plain docker backend (Linux, colima, Docker Desktop); backend auto-detect
   with config override.
-- Digest pinning: `dev2 new` resolves the base tag to a sha256 digest and
-  records it in the Dockerfile; `dev2 update` re-resolves deliberately.
+- Digest pinning: done, as `dev2 pin`. It resolves every image the
+  Dockerfile builds FROM and records the digests in the project file
+  rather than rewriting the Dockerfile — a language template is shared by
+  every project using that language, so the pin belongs to the project.
+  `dev2 pin --update` re-resolves deliberately, and `dev2 build` reports
+  what is still unpinned so the gap is visible rather than assumed.
+  This is the answer to 4.3.1: egress control governs a running container,
+  and pinning governs what a build fetches.
 - `dev2 scan` with real exit codes as the CI gate; SBOM emission (syft or
   `docker sbom`) as an option.
 - Signed releases: goreleaser + cosign, checksums in release notes,

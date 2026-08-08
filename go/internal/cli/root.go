@@ -80,6 +80,7 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newMigrateCmd(env))
 	root.AddCommand(newConsoleCmd(env))
 	root.AddCommand(newToolsCmd(env))
+	root.AddCommand(newPinCmd(env))
 	root.AddCommand(newCleanCmd(env))
 	root.AddCommand(newEnvCmd(env))
 	return root

@@ -467,3 +467,60 @@ func TestRewritingToolsTwiceDoesNotDuplicate(t *testing.T) {
 		t.Fatalf("tools = %v, want the list replaced rather than appended", cfg.Tools)
 	}
 }
+
+func TestPinsSurviveAndParse(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "network: none\n\ntools:\n  - jq\n")
+
+	if err := writeProjectPins(h.paths.Project, map[string]string{
+		"golang:1.26-alpine": "golang@sha256:abc",
+		"node:22":            "node@sha256:def",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatalf("rewritten file does not parse: %v", err)
+	}
+	if len(cfg.Pins) != 2 || cfg.Pins["node:22"] != "node@sha256:def" {
+		t.Fatalf("pins = %v", cfg.Pins)
+	}
+	// The rest of the team's file must survive.
+	if cfg.Network != "none" || len(cfg.Tools) != 1 {
+		t.Errorf("other config lost: network=%q tools=%v", cfg.Network, cfg.Tools)
+	}
+}
+
+func TestRewritingPinsTwiceDoesNotDuplicate(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "network: none\n")
+	for i := 0; i < 3; i++ {
+		if err := writeProjectPins(h.paths.Project, map[string]string{"a:1": "a@sha256:x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body, err := os.ReadFile(h.paths.Project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(body), "pins:"); n != 1 {
+		t.Fatalf("pins block appears %d times:\n%s", n, body)
+	}
+}
+
+func TestPinningNeedsNoAcceptance(t *testing.T) {
+	// A digest narrows what a build fetches rather than widening it, and
+	// the project already chooses its own base images. Prompting here
+	// would be a prompt that always deserves yes, which is how prompts
+	// stop being read.
+	h := newHarness(t)
+	h.writeProject(t, "pins:\n  \"golang:1.26\": \"golang@sha256:abc\"\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asks := projectAsks(cfg); len(asks) != 0 {
+		t.Fatalf("pinning asked for consent: %+v", asks)
+	}
+}

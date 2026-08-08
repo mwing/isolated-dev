@@ -79,6 +79,11 @@ type File struct {
 	// like any other: packages are installed during a build, which runs
 	// unfiltered, so a repository must not be able to add them silently.
 	Tools []string `yaml:"tools"`
+	// Pins maps a base image reference to the digest it resolved to. This
+	// narrows what a build fetches rather than widening it, so unlike the
+	// other project-supplied values it needs no acceptance: the project
+	// already chooses its own base images.
+	Pins map[string]string `yaml:"pins"`
 }
 
 // Config is the resolved configuration.
@@ -105,6 +110,8 @@ type Config struct {
 	Agents map[string]trust.AgentConfig
 	// Tools the project requests, unresolved.
 	Tools []string
+	// Pins maps a base image reference to a digest.
+	Pins map[string]string
 
 	origins map[string]Origin
 	// Notes collects non-fatal observations made while loading: dead keys,
@@ -238,6 +245,10 @@ func (c *Config) merge(f File, o Origin) {
 		c.Tools = f.Tools
 		c.origins["tools"] = o
 	}
+	if len(f.Pins) > 0 && o == OriginProject {
+		c.Pins = f.Pins
+		c.origins["pins"] = o
+	}
 }
 
 // deadKeys are v1 keys that were parsed and validated but never affected
@@ -270,6 +281,7 @@ var knownKeys = map[string]bool{
 	"agents":              true,
 	"network":             true,
 	"tools":               true,
+	"pins":                true,
 }
 
 // classify inspects raw top-level keys and returns notes for anything dead

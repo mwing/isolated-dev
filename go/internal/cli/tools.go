@@ -100,6 +100,53 @@ func newToolsAddCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
+// addTools records tools for this machine and rebuilds the image.
+func addTools(ctx context.Context, env *Env, names []string) error {
+	for _, n := range names {
+		if !project.ValidToolName(n) {
+			// The list is interpolated into a RUN line during the build.
+			return fmt.Errorf("%q is not a plain package name; "+
+				"tool names may contain letters, digits, . - _ + only", n)
+		}
+	}
+
+	cfg, p, err := resolveProject(env)
+	if err != nil {
+		return err
+	}
+	store, err := trust.Load(env.Paths.Home, p.Dir)
+	if err != nil {
+		return err
+	}
+
+	added, err := store.AddTools(names)
+	if err != nil {
+		return err
+	}
+	if len(added) == 0 {
+		fmt.Fprintln(env.Stdout, "Already present.")
+		return nil
+	}
+	for _, n := range added {
+		fmt.Fprintf(env.Stdout, "  + %s\n", n)
+	}
+	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n\n", store.Project.Path())
+
+	eng := container.New(env.driver(cfg.VMName))
+	if err := buildTools(ctx, env, eng, p, effectiveTools(cfg, store)); err != nil {
+		// A name that does not exist in the index fails here, deep in a
+		// build log. Undo the record and point at search rather than
+		// leaving the project with a tool that can never install.
+		if _, rerr := store.RemoveTools(added); rerr == nil {
+			fmt.Fprintf(env.Stderr, "\nBacked out: %s\n", strings.Join(added, " "))
+			fmt.Fprintf(env.Stderr, "If the name is wrong, look it up:\n")
+			fmt.Fprintf(env.Stderr, "  dev2 tools search %s\n", added[0])
+		}
+		return err
+	}
+	return nil
+}
+
 // shareTools writes tools into the project's own file, where they become a
 // request the team shares rather than a record on one machine.
 //
@@ -173,9 +220,25 @@ func effectiveTools(cfg config.Config, store *trust.Store) []string {
 	return appendMissing(tools, cfg.Tools)
 }
 
-// writeProjectTools updates the tools list in a project file, leaving the
-// rest of it alone: it is the team's file and may hold anything.
+// writeProjectTools updates the tools list in a project file.
 func writeProjectTools(path string, tools []string) error {
+	var b strings.Builder
+	b.WriteString("# Tools the project needs. A request: each user accepts it once\n")
+	b.WriteString("# with `dev2 accept`, because packages install during a build.\n")
+	b.WriteString("tools:\n")
+	for _, t := range tools {
+		fmt.Fprintf(&b, "  - %s\n", t)
+	}
+	return replaceBlock(path, "tools:", b.String())
+}
+
+// replaceBlock rewrites one top-level block of a YAML file and leaves
+// everything else untouched, comments included. It is the team's file and
+// may hold anything, so rewriting it wholesale would discard work.
+//
+// Comment lines directly above the block go with it: a heading left over a
+// block that moved reads as a description of whatever follows it.
+func replaceBlock(path, key, block string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -183,25 +246,35 @@ func writeProjectTools(path string, tools []string) error {
 	lines := strings.Split(string(raw), "\n")
 
 	var out []string
+	var pendingComments []string
 	skipping := false
+
 	for _, line := range lines {
-		if strings.HasPrefix(line, "tools:") {
-			skipping = true
-			continue
-		}
+		trimmed := strings.TrimSpace(line)
 		if skipping {
-			// The block continues while lines are indented list items.
-			if strings.HasPrefix(strings.TrimRight(line, " "), "  -") || strings.TrimSpace(line) == "" {
-				if strings.TrimSpace(line) == "" {
-					skipping = false
-					out = append(out, line)
-				}
+			// The block continues through indented lines and blanks.
+			if line != trimmed && trimmed != "" {
+				continue
+			}
+			if trimmed == "" {
 				continue
 			}
 			skipping = false
 		}
+		if strings.HasPrefix(line, key) {
+			skipping = true
+			pendingComments = nil
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			pendingComments = append(pendingComments, line)
+			continue
+		}
+		out = append(out, pendingComments...)
+		pendingComments = nil
 		out = append(out, line)
 	}
+	out = append(out, pendingComments...)
 
 	body := strings.TrimRight(strings.Join(out, "\n"), "\n")
 	var b strings.Builder
@@ -209,59 +282,8 @@ func writeProjectTools(path string, tools []string) error {
 		b.WriteString(body)
 		b.WriteString("\n\n")
 	}
-	b.WriteString("# Tools the project needs. A request: each user accepts it once\n")
-	b.WriteString("# with `dev2 accept`, because packages install during a build.\n")
-	b.WriteString("tools:\n")
-	for _, t := range tools {
-		fmt.Fprintf(&b, "  - %s\n", t)
-	}
+	b.WriteString(block)
 	return os.WriteFile(path, []byte(b.String()), 0o644)
-}
-
-func addTools(ctx context.Context, env *Env, names []string) error {
-	for _, n := range names {
-		if !project.ValidToolName(n) {
-			// The list is interpolated into a RUN line during the build.
-			return fmt.Errorf("%q is not a plain package name; "+
-				"tool names may contain letters, digits, . - _ + only", n)
-		}
-	}
-
-	cfg, p, err := resolveProject(env)
-	if err != nil {
-		return err
-	}
-	store, err := trust.Load(env.Paths.Home, p.Dir)
-	if err != nil {
-		return err
-	}
-
-	added, err := store.AddTools(names)
-	if err != nil {
-		return err
-	}
-	if len(added) == 0 {
-		fmt.Fprintln(env.Stdout, "Already present.")
-		return nil
-	}
-	for _, n := range added {
-		fmt.Fprintf(env.Stdout, "  + %s\n", n)
-	}
-	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n\n", store.Project.Path())
-
-	eng := container.New(env.driver(cfg.VMName))
-	if err := buildTools(ctx, env, eng, p, store.Tools()); err != nil {
-		// A name that does not exist in the index fails here, deep in a
-		// build log. Undo the record and point at search rather than
-		// leaving the project with a tool that can never install.
-		if _, rerr := store.RemoveTools(added); rerr == nil {
-			fmt.Fprintf(env.Stderr, "\nBacked out: %s\n", strings.Join(added, " "))
-			fmt.Fprintf(env.Stderr, "If the name is wrong, look it up:\n")
-			fmt.Fprintf(env.Stderr, "  dev2 tools search %s\n", added[0])
-		}
-		return err
-	}
-	return nil
 }
 
 func newToolsRemoveCmd(env *Env) *cobra.Command {

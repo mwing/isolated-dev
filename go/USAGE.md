@@ -280,6 +280,50 @@ prompt that protects everyone else.
 
 ---
 
+## Pinning what a build fetches
+
+Egress control governs a *running* container. A build is different: it
+runs on the daemon, outside the sandbox, and fetches whatever the tag
+points at today. `golang:1.26-alpine` is a moving target — the same
+command a month from now can produce a different image with no edit to
+anything.
+
+```sh
+dev2 pin
+```
+
+```
+  + golang:1.26-alpine
+      golang@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
+
+Recorded in .devenv.yaml
+```
+
+Builds then use the digest:
+
+```
+Step 1/9 : FROM golang@sha256:0178a641…
+```
+
+Commit it and a teammate builds the *same image*, not merely the same
+tag. The original tag is kept as a comment above each pinned line, since a
+bare digest tells a reader nothing about what it was meant to be.
+
+Re-resolve when you mean to:
+
+```sh
+dev2 pin --update
+```
+
+`dev2 build` reports anything still unpinned, so the gap is visible rather
+than assumed.
+
+Pinning needs no `dev2 accept`: it narrows what a build fetches rather
+than widening it, and the project already chooses its own base images. A
+prompt that always deserves yes is how prompts stop being read.
+
+---
+
 ## Sharing configuration with a team
 
 `.devenv.yaml` is committed and shared. It states what the project
