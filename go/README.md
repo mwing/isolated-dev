@@ -71,8 +71,9 @@ first.
 | `dev2 console` | full-screen view: workload, egress events, live prompts |
 | `dev2 status` | what is running, what is allowed, what was blocked |
 | `dev2 clean` | remove containers, networks and the sidecar |
-| `dev2 add TOOL` | add a tool to this project's environment, permanently |
-| `dev2 tools` / `remove` | list and remove those tools |
+| `dev2 tools search TERM` | find what the image's package index has |
+| `dev2 tools add TOOL` | add a tool to this project's environment, permanently |
+| `dev2 tools list` / `remove` | list and remove those tools |
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
 | `dev2 agent allow HOST` | grant an egress destination for this project |

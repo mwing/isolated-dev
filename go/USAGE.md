@@ -52,7 +52,8 @@ dev2 run --allow-host proxy.corp.example.com -c 'go mod download'   # once
 dev2 agent allow proxy.corp.example.com                             # from now on
 ```
 
-**Caveat worth knowing:** image *builds* are not filtered. `docker build`
+**Caveat worth knowing:** image *builds* are not filtered, and neither is
+`dev2 tools search`, which reads a package index over the same path. `docker build`
 runs on the daemon, outside the sandbox network, so a `Dockerfile` or a
 `dev2 add` install step downloads over an unfiltered path. The allowlist
 is a runtime control, not a supply chain one.
@@ -201,10 +202,18 @@ may reach this" — and you answered that by asking for the port.
 
 ## Adding tools that stick
 
-You are in a shell, and `jq` is not there.
+You are in a shell, and `jq` is not there. Look it up rather than
+guessing at the name:
 
 ```sh
-dev2 add jq
+dev2 tools search jq
+```
+
+That asks the package manager inside this project's image what it has, so
+a wrong name is caught before a build fails on it. Then:
+
+```sh
+dev2 tools add jq
 ```
 
 It is recorded and the image rebuilt; it is there on every later run.
@@ -213,9 +222,13 @@ record is a declaration and the image is rebuilt from it, so the
 environment stays reproducible.
 
 ```sh
-dev2 tools           # what this project has
-dev2 remove jq       # rebuilds on the next run
+dev2 tools               # what this project has
+dev2 tools remove jq     # rebuilds on the next run
 ```
+
+If a name turns out not to exist, the record is backed out rather than
+left behind for every later build to fail on, and the error points at
+`dev2 tools search`.
 
 The record lives in `~/.dev-envs/projects/…`, outside the repository, so
 it is yours until you choose to share it.

