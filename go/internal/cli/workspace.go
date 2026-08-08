@@ -90,6 +90,7 @@ func newRunCmd(env *Env) *cobra.Command {
 		network      string
 		extraHosts   []string
 		egressPrompt string
+		image        string
 	)
 
 	cmd := &cobra.Command{
@@ -104,10 +105,11 @@ func newRunCmd(env *Env) *cobra.Command {
 				Network:      network,
 				ExtraHosts:   extraHosts,
 				EgressPrompt: egressPrompt,
+				Image:        image,
 			})
 		},
 	}
-	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts)
+	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
 	return cmd
 }
@@ -121,6 +123,7 @@ func newShellCmd(env *Env) *cobra.Command {
 		network      string
 		extraHosts   []string
 		egressPrompt string
+		image        string
 	)
 
 	cmd := &cobra.Command{
@@ -140,17 +143,20 @@ func newShellCmd(env *Env) *cobra.Command {
 				Network:      network,
 				ExtraHosts:   extraHosts,
 				EgressPrompt: egressPrompt,
+				Image:        image,
 				Fallback:     []string{"/bin/sh"},
 			})
 		},
 	}
-	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts)
+	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
 	return cmd
 }
 
 func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offline *bool,
-	network *string, extraHosts *[]string) {
+	network *string, extraHosts *[]string, image *string) {
+	cmd.Flags().StringVar(image, "image", "",
+		"run this image instead of building one for the project")
 	cmd.Flags().StringVarP(command, "command", "c", "", "run this command instead of the default")
 	cmd.Flags().StringVar(tty, "tty", "auto", "allocate a terminal: auto, on, or off")
 	cmd.Flags().BoolVar(rebuild, "rebuild", false, "rebuild the image first")
@@ -183,6 +189,11 @@ type workspaceOpts struct {
 	Network      string
 	ExtraHosts   []string
 	EgressPrompt string
+	// Image runs a given image directly instead of building one for the
+	// project. Sandboxing something that is not a project — a downloaded
+	// binary, a script from a stranger — otherwise needs a Dockerfile
+	// written before the thing can be looked at, which is backwards.
+	Image string
 	// Fallback is tried when the primary command is missing from the
 	// image, so a distroless or alpine base still opens a shell.
 	Fallback []string
@@ -215,13 +226,19 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	}
 
 	eng := container.New(env.driver(cfg.VMName))
-	exists, err := eng.ImageExists(ctx, p.Image)
-	if err != nil {
-		return err
-	}
-	if o.Rebuild || !exists {
-		if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+	if o.Image != "" {
+		// An image named explicitly is used as it is: building it would
+		// mean overwriting what the user asked for.
+		p.Image = o.Image
+	} else {
+		exists, err := eng.ImageExists(ctx, p.Image)
+		if err != nil {
 			return err
+		}
+		if o.Rebuild || !exists {
+			if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+				return err
+			}
 		}
 	}
 

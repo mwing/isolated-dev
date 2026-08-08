@@ -1,82 +1,117 @@
-# isolated-dev v2 (Go)
+# dev2
 
-Work in progress. This tree is the Go rewrite described in
-[docs/ROADMAP.md](../docs/ROADMAP.md). The bash v1 in `scripts/` remains the
-working tool; nothing here replaces it yet.
+Run code in a container without learning Docker, with a sandbox that is
+closed by default and opened one deliberate step at a time.
 
-Status: **M1 in progress** — the agent sandbox runs.
+This is the Go rewrite of isolated-dev. It ships as `dev2` while the bash
+`dev` still exists, and takes the `dev` name when v1 retires. See
+[docs/ROADMAP.md](../docs/ROADMAP.md) for where it is going and
+[docs/PARITY.md](../docs/PARITY.md) for what changed from v1 and why.
 
-## What exists
+**New here? Start with [USAGE.md](USAGE.md)** — it works through the
+common jobs: updating dependencies, running software you do not trust,
+sandboxing an agent, and running a server with no network at all.
+
+## Install
+
+```sh
+cd go
+make install        # builds dev2 into ~/.local/bin
+make proxy-image    # builds the egress sidecar image into the OrbStack VM
+dev2 doctor         # checks everything above
+```
+
+Requires Go 1.26+ and OrbStack. `doctor` never changes anything — it
+reports what it can see and what would block a run.
+
+## Two minutes
+
+```sh
+cd ~/code/my-project
+
+dev2 run -c 'go test ./...'   # detects the language, builds, runs
+dev2 shell                    # a shell in the same container
+dev2 status                   # what is running, under which policy
+dev2 clean                    # tear it down
+```
+
+The first run detects the project's language, renders that language's
+Dockerfile template, and builds an image. A project with its own
+`Dockerfile` uses it instead.
+
+## What is different from running docker yourself
+
+**Nothing sensitive is in the container unless you put it there.** No SSH
+keys, no `~/.gitconfig`, no docker socket, no host environment variables.
+The container runs as an unprivileged fixed uid that the tool sets — a
+project Dockerfile declaring `USER root` does not get root.
+
+**Egress is filtered by default.** A container reaches its language's
+package registries and nothing else until you say otherwise. The workload
+sits on a network with no route out; a proxy sidecar is the only path, and
+it allows destinations by hostname without terminating TLS.
+
+**A blocked destination can be a question rather than a failure.** In the
+console, or with `--egress-prompt ask`, the request is *held* while you
+decide: allow once, allow for this project from now on, or refuse.
+
+**What the project asks for is not what it gets.** A `.devenv.yaml` in the
+repository is a *request*. Running the project is not consent — anything
+it asks for that you have not accepted stops the run and is shown to you
+first.
+
+## Commands
 
 | | |
 |---|---|
-| `cmd/dev2` | entry point |
-| `cmd/dev2-proxy` | the egress sidecar, a separate binary in a separate trust domain |
-| `internal/runner` | the single choke point for external processes, with a fake for tests |
-| `internal/config` | v1-compatible config loading and layering, grant extraction |
-| `internal/backend` | engine abstraction; `orbstack` driver, `docker` driver lands in M3 |
-| `internal/container` | `RunSpec` → argv, and the docker operations built on it |
-| `internal/netpolicy` | allowlist, CONNECT proxy, filtering resolver, sidecar lifecycle, live notices |
-| `internal/agent` | agent registry, overlay images, run orchestration |
-| `internal/cli` | `version`, `doctor`, `agent` |
+| `dev2 run [-c CMD]` | run a command in the project's container |
+| `dev2 run --image IMG` | run a stock image instead, for things that are not projects |
+| `dev2 shell` | interactive shell |
+| `dev2 build` | build the project image |
+| `dev2 console` | full-screen view: workload, egress events, live prompts |
+| `dev2 status` | what is running, what is allowed, what was blocked |
+| `dev2 clean` | remove containers, networks and the sidecar |
+| `dev2 add TOOL` | add a tool to this project's environment, permanently |
+| `dev2 tools` / `remove` | list and remove those tools |
+| `dev2 accept` | review what `.devenv.yaml` requests |
+| `dev2 agent run NAME` | run a coding agent in the sandbox |
+| `dev2 agent allow HOST` | grant an egress destination for this project |
+| `dev2 doctor` | diagnose the setup |
+| `dev2 migrate` | what changes for an existing v1 user |
+| `dev2 vm` | start / inspect the container VM |
 
-## Build and test
+Every command takes `--verbose`, which prints the exact `docker`
+invocation before running it. A security tool should never make you guess
+what it ran.
 
-```sh
-make check          # gofmt, vet, race tests
-make build          # bin/dev2 and bin/dev2-proxy
-make proxy-image    # builds dev2-proxy:latest inside the OrbStack VM
+## Network modes
+
+| mode | what it means |
+|---|---|
+| `allowlist` (default) | language registries plus what you granted; everything else denied |
+| `open` | no filtering — v1 behavior |
+| `none` | no network at all (`--offline`) |
+
+Set per project in `.devenv.yaml` (`network: open`), or per run
+(`--network open`). A project asking for `open` needs your acceptance,
+because it switches the filtering off.
+
+## Where things are kept
+
+```
+~/.dev-envs/config.yaml                  global settings
+~/.dev-envs/languages/<lang>/            language plugins (same format as v1)
+~/.dev-envs/agents.yaml                  agent defaults for every project
+~/.dev-envs/projects/<slug>-<hash>.yaml  per-project grants, tools, acceptances
+<project>/.devenv.yaml                   the project's requests, committed and shared
 ```
 
-Requires Go 1.26+.
+Grants live **outside** the repository on purpose. Configuration inside a
+repository is configuration the repository can grant itself, so cloning a
+hostile project would widen its own access before anyone read it.
 
-## Running an agent
+## Where to go next
 
-```sh
-cd /path/to/your/project
-dev2 agent list                     # what is available, and its egress policy
-dev2 agent policy claude            # what a run would allow, without running
-dev2 agent run claude               # Claude Code, sandboxed
-dev2 agent run claude --dry-run     # the exact docker invocation
-dev2 agent logout claude            # discard the stored login
-```
-
-Useful flags: `--allow-host HOST` adds a destination for one run,
-`--tty on|off` overrides terminal detection, `--egress-notify off` silences
-live denial notices, `--rebuild` refreshes the agent image.
-
-The first run builds an overlay image (project base + agent) and creates a
-named volume for the agent's home, so a login survives across runs without
-any credential entering the project tree.
-
-## Design notes that matter early
-
-**Everything external goes through `internal/runner`.** No package calls
-`os/exec` directly. That is what makes commands mockable, printable under
-`--verbose`, and free of the quoting bugs that dominated v1: a `Command`
-carries an argument vector, never a string a shell will re-split.
-
-**`doctor` diagnoses, it never repairs.** It will not start a VM. A
-non-zero exit status from a probe is data, not an error, which is why
-`runner` reports exit codes in `Result` and reserves `error` for "the
-process could not be run at all".
-
-**Config layering is explicit and traceable.** Defaults, global file,
-project file, `DEV_*` environment. Pointer fields in `config.File`
-distinguish "absent" from "set to false", so a project saying
-`mount_ssh_keys: false` overrides a global `true`. Every resolved key
-remembers its origin, which `doctor` prints.
-
-**Grants are extracted, not inferred.** `Config.Asks()` returns only the
-security-relevant subset (mounts, env passthrough, socket, ports). The
-trust store will hash *that*, not the raw files, so routine edits do not
-re-prompt — see ROADMAP 4.2.
-
-**v1's never-implemented keys load but are reported.** `network_mode`,
-`port_range` and friends produce a note explaining they do nothing, rather
-than being silently dropped or silently honored.
-
-## Not done yet
-
-`run`, `shell`, `build`, agent mode, the egress proxy, the trust store.
-Milestones and sequencing are in the roadmap.
+- **[USAGE.md](USAGE.md)** — the common jobs, worked through
+- **[../docs/ROADMAP.md](../docs/ROADMAP.md)** — design and security model
+- **[../docs/PARITY.md](../docs/PARITY.md)** — what v1 did, and what v2 does instead
