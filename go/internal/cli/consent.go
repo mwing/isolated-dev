@@ -69,6 +69,22 @@ func projectAsks(cfg config.Config) []trust.Ask {
 // enforceConsent stops a run when the project asks for something the user
 // has not accepted. A project file is a request; running it is not consent.
 func enforceConsent(env *Env, cfg config.Config, store *trust.Store) error {
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	// Policy outranks acceptance. Something already accepted can become
+	// forbidden later, and a rule that only applied to new decisions would
+	// leave the machines that most need it untouched.
+	for _, ask := range projectAsks(cfg) {
+		if verr := pol.CheckSetting(ask.Key); verr != nil {
+			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, ask.Key, verr)
+		}
+	}
+	if err := pol.CheckNetwork(cfg.Network); err != nil {
+		return err
+	}
+
 	pending := store.PendingSettings(projectAsks(cfg))
 	if len(pending) == 0 {
 		return nil

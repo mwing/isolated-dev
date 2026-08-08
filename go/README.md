@@ -86,6 +86,7 @@ first.
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
 | `dev2 agent allow HOST` | grant an egress destination for this project |
+| `dev2 policy` | show the rules this machine enforces on everyone |
 | `dev2 doctor` | diagnose the setup |
 | `dev2 migrate` | what changes for an existing v1 user |
 | `dev2 vm` | start / inspect the container VM |

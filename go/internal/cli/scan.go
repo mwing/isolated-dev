@@ -42,6 +42,16 @@ func newScanCmd(env *Env) *cobra.Command {
 }
 
 func runScan(ctx context.Context, env *Env, severity, image string, reportOnly bool) error {
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	if floored, raised := pol.FloorSeverity(severity); raised {
+		fmt.Fprintf(env.Stderr,
+			"Policy raises the threshold from %s to %s.\n", severity, floored)
+		severity = floored
+	}
+
 	sev, err := scan.ParseSeverity(severity)
 	if err != nil {
 		return err

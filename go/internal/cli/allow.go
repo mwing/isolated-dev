@@ -41,6 +41,15 @@ func newAgentAllowCmd(env *Env) *cobra.Command {
 			if _, err := netpolicy.Parse(args); err != nil {
 				return err
 			}
+			pol, err := loadPolicy(env)
+			if err != nil {
+				return err
+			}
+			for _, host := range args {
+				if verr := pol.CheckHost(host); verr != nil {
+					return verr
+				}
+			}
 			store, err := trust.Load(env.Paths.Home, env.Paths.ProjectDir)
 			if err != nil {
 				return err

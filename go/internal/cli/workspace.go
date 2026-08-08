@@ -65,6 +65,16 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 	pinned := project.ApplyPins(dockerfile, cfg.Pins)
 	unpinned := project.BaseImages(pinned)
 
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	for _, image := range project.BaseImages(dockerfile) {
+		if verr := pol.CheckRegistry(image); verr != nil {
+			return verr
+		}
+	}
+
 	source := p.Dockerfile
 	if p.FromTemplate {
 		source = p.Detected.Language.DockerfileTemplate() + " (language template)"
@@ -225,12 +235,29 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		return err
 	}
 
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
 	if o.Network != "" {
 		mode, err := project.ParseNetworkMode(o.Network)
 		if err != nil {
 			return err
 		}
+		// A flag is still a request. Policy applies to the person running
+		// the command, or it applies to nobody.
+		if err := pol.CheckNetwork(string(mode)); err != nil {
+			return err
+		}
 		p.Network = mode
+	}
+	// Limits the policy requires are applied last, so nothing lower can
+	// relax them.
+	if pol.Require.Memory != "" {
+		cfg.MemoryLimit = pol.Require.Memory
+	}
+	if pol.Require.CPUs != "" {
+		cfg.CPULimit = pol.Require.CPUs
 	}
 	if o.Offline {
 		p.Network = project.NetworkNone

@@ -498,10 +498,18 @@ pinned.
 
 ### M4: Team features
 
-- Policy file (`~/.dev-envs/policy.yaml` or org-distributed): forbidden
-  mounts, mandatory limits, allowed registries, minimum scan severity;
-  `dev2` refuses configs that violate it. Aimed at the infosec-owner use
-  case: hand teammates a tool where the unsafe paths are closed org-wide.
+- Policy file: done. `~/.dev-envs/policy.yaml` restricts network modes,
+  forbids settings outright, denies egress destinations, floors the scan
+  threshold, restricts registries and imposes resource limits. It is
+  enforced at every route in — a flag, a project request, an acceptance
+  already recorded, a user's own grant — because a rule with one polite
+  entrance is not a rule.
+
+  Stated in the package doc rather than left implied: it is not a defense
+  against the machine's owner, who can edit the file. It closes the unsafe
+  paths for people who are not attacking their own laptop and makes an
+  override deliberate. An org needing more than that needs device
+  management.
 - devcontainer.json interop: read (not just write) the essentials, so
   projects standardized on devcontainers work with `dev2` unmodified.
 - `dev2 status` / `dev2 ps` across projects.

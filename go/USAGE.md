@@ -407,6 +407,52 @@ dev2 accept --all
 
 ---
 
+## Closing the unsafe paths for a team
+
+`~/.dev-envs/policy.yaml` constrains everyone using the machine, including
+the person running the command. It is for handing teammates a tool with
+the risky options already shut.
+
+```yaml
+network_modes: [allowlist, none]        # `open` is not available
+forbid: [mount_docker_socket, pass_env_vars]
+deny_hosts: [pastebin.com, "*.evil.example.com"]
+min_scan_severity: high                 # the loosest threshold permitted
+allowed_registries: [ghcr.io, docker.io]
+require:
+  memory: 4g
+```
+
+```sh
+dev2 policy      # what is in force, and where it came from
+```
+
+It holds against every route in, not just the polite ones:
+
+```
+$ dev2 run --network open
+policy forbids network mode open: this machine permits only allowlist, none
+
+$ dev2 agent allow pastebin.com
+policy forbids egress to pastebin.com: matches the denied destination pastebin.com
+
+$ dev2 scan --severity critical
+Policy raises the threshold from critical to high.
+```
+
+A project requesting something forbidden is refused rather than offered
+for acceptance — including something accepted before the rule existed,
+since a rule that only applied to new decisions would leave the machines
+that most need it untouched.
+
+**What it is not.** The file is on the user's disk and they can edit it.
+It closes the unsafe paths for people who are not attacking their own
+laptop, and it makes an override deliberate rather than accidental. An
+organization that needs more than that needs device management, not a YAML
+file.
+
+---
+
 ## The console
 
 ```sh
