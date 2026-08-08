@@ -324,6 +324,47 @@ prompt that always deserves yes is how prompts stop being read.
 
 ---
 
+## Scanning what you are about to run
+
+```sh
+dev2 scan
+```
+
+Runs whichever of trivy and grype are installed against the image this
+project actually runs — including any tools added to it, whose packages
+are as real as the base image's.
+
+```
+Image:     dev-img-go
+Scanners:  trivy, grype
+Threshold: high and above
+
+Clean at high and above.
+```
+
+It **exits non-zero** when something is found at or above the threshold,
+so CI can gate on it:
+
+```sh
+dev2 scan --severity critical || exit 1
+```
+
+Lower the threshold to see more (`--severity medium`), or use
+`--report-only` to print findings without failing. A scanner that cannot
+run is reported as a failure rather than a pass — "no findings" and "no
+scan" are different answers.
+
+To check an image before adopting it:
+
+```sh
+dev2 scan --image debian:11 --severity critical
+```
+
+That pulls it if you do not have it. Scanning something before running it
+is a reasonable thing to want.
+
+---
+
 ## Sharing configuration with a team
 
 `.devenv.yaml` is committed and shared. It states what the project

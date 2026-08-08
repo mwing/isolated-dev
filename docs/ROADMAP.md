@@ -461,10 +461,34 @@ rather than as a list of boxes that must all be ticked.
   what is still unpinned so the gap is visible rather than assumed.
   This is the answer to 4.3.1: egress control governs a running container,
   and pinning governs what a build fetches.
-- `dev2 scan` with real exit codes as the CI gate; SBOM emission (syft or
-  `docker sbom`) as an option.
+- `dev2 scan`: done. Runs trivy and grype against the image the project
+  actually runs, including its tools layer, and exits non-zero at or above
+  a threshold so CI can gate on it. A scanner that cannot run is a
+  failure, not a pass: "no findings" and "no scan" are different answers.
+  SBOM emission is still open.
 - Signed releases: goreleaser + cosign, checksums in release notes,
   brew tap.
+
+### M3.1: Requested during dogfooding
+
+**Shell completions.** v1 shipped bash and zsh completions and v2 has
+none. cobra generates most of it, but the valuable part is completing
+`--image` with a short curated list — the general language images and a
+slim debian — because the sandboxing case starts with someone who does not
+yet know which image to name. A completion that offers every image on the
+daemon would be noise; a completion that offers the five sensible starting
+points is a teaching device.
+
+**`dev2 update`.** Rebuild the project image with its packages upgraded to
+current patched versions, and record what changed. Pinning fixes what a
+build fetches, which is the right default and also means a pinned project
+stops receiving security updates silently — the two features are the same
+trade seen from opposite ends, so `update` should re-resolve the pin and
+report the move rather than quietly floating.
+
+The logging matters as much as the upgrade: "these packages moved, this
+base image moved" is the record that makes a pinned project safe to leave
+pinned.
 
 ### M4: Team features
 

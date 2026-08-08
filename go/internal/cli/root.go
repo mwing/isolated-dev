@@ -81,6 +81,7 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newConsoleCmd(env))
 	root.AddCommand(newToolsCmd(env))
 	root.AddCommand(newPinCmd(env))
+	root.AddCommand(newScanCmd(env))
 	root.AddCommand(newCleanCmd(env))
 	root.AddCommand(newEnvCmd(env))
 	return root

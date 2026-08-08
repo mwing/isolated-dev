@@ -76,6 +76,7 @@ first.
 | `dev2 tools add --shared TOOL` | add it to `.devenv.yaml` so the team gets it too |
 | `dev2 tools list` / `remove` | list and remove those tools |
 | `dev2 pin` | pin base images to digests, so builds are reproducible |
+| `dev2 scan` | scan the image for vulnerabilities; exits non-zero so CI can gate |
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
 | `dev2 agent allow HOST` | grant an egress destination for this project |
