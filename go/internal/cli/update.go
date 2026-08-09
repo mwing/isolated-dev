@@ -110,7 +110,7 @@ func runUpdate(ctx context.Context, env *Env, withScan, keepPins bool) error {
 		return nil
 	}
 	fmt.Fprintln(env.Stdout)
-	return runScan(ctx, env, "high", "", true)
+	return runScan(ctx, env, "high", "", true, false)
 }
 
 // setUpgradePackages records that builds should upgrade the base image's

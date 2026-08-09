@@ -354,6 +354,20 @@ Lower the threshold to see more (`--severity medium`), or use
 run is reported as a failure rather than a pass — "no findings" and "no
 scan" are different answers.
 
+**Only findings with an available fix are reported.** A real image here
+produced 303 findings of which 13 had a fix; the rest were CVEs Debian has
+acknowledged and not patched (`will_not_fix`, `fix_deferred`, or simply no
+release). A gate that fails on those cannot be satisfied by anything the
+user does, so it gets switched off — and takes the 13 that mattered with
+it. `--include-unfixed` shows the whole picture when you want it, which is
+usually when choosing a base image rather than when gating a build.
+
+If a scan still shows findings after `dev2 update`, look at where they
+live. OS packages with no fix are the distribution's backlog and nothing
+local will move them; findings in a *language* package (an npm or pip
+dependency baked into the base image) are fixed by updating that, which
+`dev2 update` cannot do for you.
+
 To check an image before adopting it:
 
 ```sh

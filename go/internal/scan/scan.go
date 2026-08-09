@@ -62,11 +62,25 @@ func (s Severity) trivyLevels() string {
 	return strings.Join(out, ",")
 }
 
+// Options tune a scan.
+type Options struct {
+	Severity Severity
+	// IncludeUnfixed reports vulnerabilities with no available fix.
+	//
+	// Off by default, which is a judgement rather than a convenience. A
+	// real image produced 303 findings of which 13 had a fix: the rest
+	// were CVEs the distribution has acknowledged and not patched. A gate
+	// that fails on those cannot be satisfied by any action the user can
+	// take, and a report nobody can act on is one they learn to skip —
+	// taking the 13 that mattered with it.
+	IncludeUnfixed bool
+}
+
 // Scanner is one tool that can inspect an exported image.
 type Scanner struct {
 	Name string
 	// Command builds the invocation for an image archive.
-	Command func(archive string, sev Severity) runner.Command
+	Command func(archive string, o Options) runner.Command
 }
 
 // Scanners are the supported tools, in the order they run.
@@ -74,27 +88,29 @@ func Scanners() []Scanner {
 	return []Scanner{
 		{
 			Name: "trivy",
-			Command: func(archive string, sev Severity) runner.Command {
-				return runner.Command{
-					Path: "trivy",
-					Args: []string{
-						"image", "--input", archive,
-						"--severity", sev.trivyLevels(),
-						"--scanners", "vuln",
-						// A scanner that finds problems and exits zero
-						// cannot gate anything.
-						"--exit-code", "1",
-					},
+			Command: func(archive string, o Options) runner.Command {
+				args := []string{
+					"image", "--input", archive,
+					"--severity", o.Severity.trivyLevels(),
+					"--scanners", "vuln",
+					// A scanner that finds problems and exits zero
+					// cannot gate anything.
+					"--exit-code", "1",
 				}
+				if !o.IncludeUnfixed {
+					args = append(args, "--ignore-unfixed")
+				}
+				return runner.Command{Path: "trivy", Args: args}
 			},
 		},
 		{
 			Name: "grype",
-			Command: func(archive string, sev Severity) runner.Command {
-				return runner.Command{
-					Path: "grype",
-					Args: []string{"docker-archive:" + archive, "--fail-on", string(sev)},
+			Command: func(archive string, o Options) runner.Command {
+				args := []string{"docker-archive:" + archive, "--fail-on", string(o.Severity)}
+				if !o.IncludeUnfixed {
+					args = append(args, "--only-fixed")
 				}
+				return runner.Command{Path: "grype", Args: args}
 			},
 		},
 	}
@@ -123,8 +139,8 @@ type Result struct {
 
 // Run executes a scanner against an exported image.
 func Run(ctx context.Context, r runner.Runner, s Scanner, archive string,
-	sev Severity, out runnerWriter) Result {
-	cmd := s.Command(archive, sev)
+	o Options, out runnerWriter) Result {
+	cmd := s.Command(archive, o)
 	cmd.Stdout, cmd.Stderr = out, out
 
 	res, err := r.Run(ctx, cmd)

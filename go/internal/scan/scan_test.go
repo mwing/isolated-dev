@@ -46,7 +46,7 @@ func TestScannersFailOnFindings(t *testing.T) {
 	// The whole point: a scanner that reports problems and exits zero
 	// cannot gate anything.
 	for _, s := range Scanners() {
-		cmd := s.Command("/tmp/img.tar", SeverityHigh)
+		cmd := s.Command("/tmp/img.tar", Options{Severity: SeverityHigh})
 		args := strings.Join(cmd.Args, " ")
 		switch s.Name {
 		case "trivy":
@@ -68,7 +68,8 @@ func TestRunReportsFindings(t *testing.T) {
 	f := runner.NewFake()
 	f.Default = runner.Result{ExitCode: 1}
 
-	got := Run(context.Background(), f, Scanners()[0], "/tmp/a.tar", SeverityHigh, io.Discard)
+	got := Run(context.Background(), f, Scanners()[0], "/tmp/a.tar",
+		Options{Severity: SeverityHigh}, io.Discard)
 	if !got.Findings || got.Err != nil {
 		t.Fatalf("result = %+v, want findings", got)
 	}
@@ -79,7 +80,8 @@ func TestScannerThatCannotRunIsNotClean(t *testing.T) {
 	f := runner.NewFake()
 	f.Err["trivy"] = errors.New("not installed")
 
-	got := Run(context.Background(), f, Scanners()[0], "/tmp/a.tar", SeverityHigh, io.Discard)
+	got := Run(context.Background(), f, Scanners()[0], "/tmp/a.tar",
+		Options{Severity: SeverityHigh}, io.Discard)
 	if got.Err == nil {
 		t.Fatal("a scanner that could not run reported success")
 	}
@@ -98,5 +100,31 @@ func TestSummarizeCleanRun(t *testing.T) {
 	})
 	if failed || len(reasons) != 0 {
 		t.Fatalf("clean run reported failure: %v %v", failed, reasons)
+	}
+}
+
+func TestUnfixedAreHiddenByDefault(t *testing.T) {
+	// A real image produced 303 findings of which 13 had a fix. A gate
+	// that fails on the other 290 cannot be satisfied by any action the
+	// user can take, and a report nobody can act on is one they learn to
+	// skip — taking the 13 that mattered with it.
+	for _, s := range Scanners() {
+		def := strings.Join(s.Command("/tmp/a.tar", Options{Severity: SeverityHigh}).Args, " ")
+		switch s.Name {
+		case "trivy":
+			if !strings.Contains(def, "--ignore-unfixed") {
+				t.Errorf("trivy reports unfixable findings by default: %s", def)
+			}
+		case "grype":
+			if !strings.Contains(def, "--only-fixed") {
+				t.Errorf("grype reports unfixable findings by default: %s", def)
+			}
+		}
+
+		all := strings.Join(s.Command("/tmp/a.tar",
+			Options{Severity: SeverityHigh, IncludeUnfixed: true}).Args, " ")
+		if strings.Contains(all, "--ignore-unfixed") || strings.Contains(all, "--only-fixed") {
+			t.Errorf("%s still hid unfixed findings when asked for them: %s", s.Name, all)
+		}
 	}
 }

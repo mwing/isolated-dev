@@ -19,6 +19,7 @@ func newScanCmd(env *Env) *cobra.Command {
 		severity   string
 		reportOnly bool
 		image      string
+		unfixed    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scan",
@@ -30,7 +31,7 @@ func newScanCmd(env *Env) *cobra.Command {
 			"exits successfully is a scan nothing can act on.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runScan(cmd.Context(), env, severity, image, reportOnly)
+			return runScan(cmd.Context(), env, severity, image, reportOnly, unfixed)
 		},
 	}
 	cmd.Flags().StringVar(&severity, "severity", "high",
@@ -38,10 +39,12 @@ func newScanCmd(env *Env) *cobra.Command {
 	cmd.Flags().BoolVar(&reportOnly, "report-only", false,
 		"print findings but exit zero")
 	cmd.Flags().StringVar(&image, "image", "", "scan this image instead of the project's")
+	cmd.Flags().BoolVar(&unfixed, "include-unfixed", false,
+		"also report vulnerabilities with no available fix")
 	return cmd
 }
 
-func runScan(ctx context.Context, env *Env, severity, image string, reportOnly bool) error {
+func runScan(ctx context.Context, env *Env, severity, image string, reportOnly, unfixed bool) error {
 	pol, err := loadPolicy(env)
 	if err != nil {
 		return err
@@ -103,7 +106,14 @@ func runScan(ctx context.Context, env *Env, severity, image string, reportOnly b
 	}
 	fmt.Fprintf(env.Stdout, "Image:     %s\n", target)
 	fmt.Fprintf(env.Stdout, "Scanners:  %s\n", strings.Join(names, ", "))
-	fmt.Fprintf(env.Stdout, "Threshold: %s and above\n\n", sev)
+	fmt.Fprintf(env.Stdout, "Threshold: %s and above\n", sev)
+	if unfixed {
+		fmt.Fprintf(env.Stdout, "Including: vulnerabilities with no available fix\n")
+	} else {
+		fmt.Fprintf(env.Stdout, "Showing:   only what a fix exists for "+
+			"(--include-unfixed for the rest)\n")
+	}
+	fmt.Fprintln(env.Stdout)
 
 	archive, cleanup, err := exportImage(ctx, env, eng, target)
 	if err != nil {
@@ -114,7 +124,8 @@ func runScan(ctx context.Context, env *Env, severity, image string, reportOnly b
 	var results []scan.Result
 	for _, s := range scanners {
 		fmt.Fprintf(env.Stdout, "── %s ──\n", s.Name)
-		results = append(results, scan.Run(ctx, env.Runner, s, archive, sev, env.Stdout))
+		results = append(results, scan.Run(ctx, env.Runner, s, archive,
+			scan.Options{Severity: sev, IncludeUnfixed: unfixed}, env.Stdout))
 		fmt.Fprintln(env.Stdout)
 	}
 
