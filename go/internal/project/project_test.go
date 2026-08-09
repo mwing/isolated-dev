@@ -355,3 +355,46 @@ func TestApplyPinsLeavesUnpinnedAlone(t *testing.T) {
 		t.Error("empty pin set changed the Dockerfile")
 	}
 }
+
+func TestUpgradeGoesInTheFinalStage(t *testing.T) {
+	// The final stage is the one that runs. Upgrading an earlier build
+	// stage would spend the time and ship none of it.
+	df := "FROM golang:1.26 AS build\nRUN go build ./...\n\nFROM alpine:3\nCOPY --from=build /out /out\n"
+	got := WithPackageUpgrade(df)
+
+	upgradeAt := strings.Index(got, UpgradeStep)
+	finalFrom := strings.Index(got, "FROM alpine:3")
+	buildFrom := strings.Index(got, "FROM golang:1.26")
+	if upgradeAt < 0 {
+		t.Fatalf("no upgrade step:\n%s", got)
+	}
+	if upgradeAt < finalFrom {
+		t.Errorf("upgrade landed before the final stage:\n%s", got)
+	}
+	if upgradeAt < buildFrom {
+		t.Errorf("upgrade landed in the build stage:\n%s", got)
+	}
+	// It has to run as root, whatever the base image left behind.
+	if !strings.Contains(got[finalFrom:], "USER root") {
+		t.Errorf("upgrade would run unprivileged:\n%s", got)
+	}
+}
+
+func TestUpgradeCoversEachPackageManager(t *testing.T) {
+	// The image family comes from the project, not from us.
+	for _, mgr := range []string{"apt-get", "apk", "dnf"} {
+		if !strings.Contains(UpgradeStep, mgr) {
+			t.Errorf("no %s branch in the upgrade step", mgr)
+		}
+	}
+	// An image with no package manager must not fail the build.
+	if !strings.Contains(UpgradeStep, "|| true") {
+		t.Error("an image without a package manager would fail to build")
+	}
+}
+
+func TestUpgradeLeavesADockerfileWithoutFromAlone(t *testing.T) {
+	if got := WithPackageUpgrade("RUN echo hi\n"); strings.Contains(got, UpgradeStep) {
+		t.Error("inserted an upgrade into a Dockerfile with no stage to put it in")
+	}
+}

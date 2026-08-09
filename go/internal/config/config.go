@@ -79,6 +79,10 @@ type File struct {
 	// like any other: packages are installed during a build, which runs
 	// unfiltered, so a repository must not be able to add them silently.
 	Tools []string `yaml:"tools"`
+	// UpgradePackages rebuilds with the base image's own packages upgraded.
+	// Recorded rather than applied once, so a later plain build does not
+	// silently drop the upgrade and reintroduce what was just fixed.
+	UpgradePackages *bool `yaml:"upgrade_packages,omitempty"`
 	// Pins maps a base image reference to the digest it resolved to. This
 	// narrows what a build fetches rather than widening it, so unlike the
 	// other project-supplied values it needs no acceptance: the project
@@ -112,6 +116,8 @@ type Config struct {
 	Tools []string
 	// Pins maps a base image reference to a digest.
 	Pins map[string]string
+	// UpgradePackages applies the base image's pending package upgrades.
+	UpgradePackages bool
 
 	origins map[string]Origin
 	// Notes collects non-fatal observations made while loading: dead keys,
@@ -249,6 +255,10 @@ func (c *Config) merge(f File, o Origin) {
 		c.Pins = f.Pins
 		c.origins["pins"] = o
 	}
+	if f.UpgradePackages != nil {
+		c.UpgradePackages = *f.UpgradePackages
+		c.origins["upgrade_packages"] = o
+	}
 }
 
 // deadKeys are v1 keys that were parsed and validated but never affected
@@ -282,6 +292,7 @@ var knownKeys = map[string]bool{
 	"network":             true,
 	"tools":               true,
 	"pins":                true,
+	"upgrade_packages":    true,
 }
 
 // classify inspects raw top-level keys and returns notes for anything dead

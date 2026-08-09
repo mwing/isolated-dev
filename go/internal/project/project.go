@@ -307,6 +307,45 @@ func ApplyPins(dockerfile string, pins map[string]string) string {
 	return strings.Join(lines, "\n")
 }
 
+// UpgradeStep upgrades the packages the base image shipped with.
+//
+// Rebuilding without cache reinstalls what a Dockerfile asks for, and
+// re-resolving the base fetches whatever upstream last published. Neither
+// touches a package that came with the base and has a fix upstream has
+// not rebuilt for yet — which is most of what a scanner reports.
+const UpgradeStep = `RUN (command -v apt-get >/dev/null && apt-get update && ` +
+	`DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && rm -rf /var/lib/apt/lists/*) || ` +
+	`(command -v apk >/dev/null && apk upgrade --no-cache) || ` +
+	`(command -v dnf >/dev/null && dnf -y upgrade) || true`
+
+// WithPackageUpgrade inserts the upgrade into the final stage.
+//
+// The final stage is the one that runs. Upgrading an earlier build stage
+// would spend the time and ship none of it.
+func WithPackageUpgrade(dockerfile string) string {
+	lines := strings.Split(dockerfile, "\n")
+	last := -1
+	for i, line := range lines {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && strings.EqualFold(fields[0], "FROM") {
+			last = i
+		}
+	}
+	if last < 0 {
+		return dockerfile
+	}
+	out := make([]string, 0, len(lines)+3)
+	out = append(out, lines[:last+1]...)
+	out = append(out,
+		"",
+		"# Upgrade packages the base image shipped with (dev2 update).",
+		"USER root",
+		UpgradeStep,
+	)
+	out = append(out, lines[last+1:]...)
+	return strings.Join(out, "\n")
+}
+
 // Registries returns the egress destinations a build or run of this
 // project legitimately needs, from the language plugin's own data.
 func (p *Project) Registries() []string {

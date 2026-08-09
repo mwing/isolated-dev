@@ -67,13 +67,22 @@ func runUpdate(ctx context.Context, env *Env, withScan, keepPins bool) error {
 		}
 	}
 
-	// Reload: the pins just changed on disk.
+	// Turn on package upgrades and record it. Applying it once and not
+	// recording it would leave the next plain build quietly reintroducing
+	// what this command just fixed.
+	if err := setUpgradePackages(env.Paths.Project, true); err != nil {
+		return err
+	}
+
+	// Reload: the pins and the upgrade flag just changed on disk.
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
 	}
 	eng := container.New(env.driver(cfg.VMName))
 
+	fmt.Fprintln(env.Stdout, "\nPackages")
+	fmt.Fprintln(env.Stdout, "  upgrading what the base image shipped with")
 	fmt.Fprintln(env.Stdout, "\nRebuilding without cache")
 	if err := buildImageNoCache(ctx, env, cfg, p); err != nil {
 		return err
@@ -102,4 +111,17 @@ func runUpdate(ctx context.Context, env *Env, withScan, keepPins bool) error {
 	}
 	fmt.Fprintln(env.Stdout)
 	return runScan(ctx, env, "high", "", true)
+}
+
+// setUpgradePackages records that builds should upgrade the base image's
+// own packages.
+//
+// Recorded rather than applied once: a later plain build would otherwise
+// drop the upgrade and quietly reintroduce what this command just fixed.
+func setUpgradePackages(path string, on bool) error {
+	block := "# Upgrade the base image's own packages on every build. Set by\n" +
+		"# `dev2 update`: most of what a scanner reports lives here, and\n" +
+		"# neither a new base digest nor a cacheless rebuild touches it.\n" +
+		fmt.Sprintf("upgrade_packages: %t\n", on)
+	return replaceBlock(path, "upgrade_packages:", block)
 }

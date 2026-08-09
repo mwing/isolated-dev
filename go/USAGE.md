@@ -387,12 +387,21 @@ Base images
 Rebuilding without cache
 ```
 
-Two things happen. The base images re-resolve to what their tags point at
-now, which is where most fixes come from: upstream rebuilds the base. Then
-the image rebuilds **without cache**, because a cached install layer
-reinstalls exactly what it installed the first time — the version being
-updated away from. Any tools you added rebuild too; their packages are as
-stale as anything else.
+Three things happen.
+
+The base images re-resolve to what their tags point at now. The image
+rebuilds **without cache**, because a cached install layer reinstalls
+exactly what it installed the first time — the version being updated away
+from. And the packages the base image *shipped with* are upgraded.
+
+That third one is where most of a scanner's findings live, and neither of
+the first two touches it: a new base digest only helps once upstream
+rebuilds, and a cacheless rebuild only re-runs what your Dockerfile asks
+for. Without it an update can look successful and change nothing.
+
+It is recorded as `upgrade_packages: true` rather than applied once, so a
+later plain `dev2 build` does not quietly reintroduce what was just fixed.
+Any tools you added rebuild too.
 
 ```sh
 dev2 update --scan        # and see whether it helped

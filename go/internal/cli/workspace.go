@@ -69,6 +69,9 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	// the same image, here and on a teammate's machine.
 	pinned := project.ApplyPins(dockerfile, cfg.Pins)
 	unpinned := project.BaseImages(pinned)
+	if cfg.UpgradePackages {
+		pinned = project.WithPackageUpgrade(pinned)
+	}
 
 	pol, err := loadPolicy(env)
 	if err != nil {
@@ -90,6 +93,9 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	fmt.Fprintf(env.Stdout, "Image:      %s\n", p.Image)
 	if len(cfg.Pins) > 0 {
 		fmt.Fprintf(env.Stdout, "Pinned:     %d base image(s)\n", len(cfg.Pins))
+	}
+	if cfg.UpgradePackages {
+		fmt.Fprintf(env.Stdout, "Upgrades:   base image packages upgraded\n")
 	}
 	if len(unpinned) > 0 {
 		fmt.Fprintf(env.Stdout, "Unpinned:   %s  (dev2 pin)\n", strings.Join(unpinned, " "))
