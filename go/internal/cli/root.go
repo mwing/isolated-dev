@@ -83,6 +83,7 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newPinCmd(env))
 	root.AddCommand(newScanCmd(env))
 	root.AddCommand(newPolicyCmd(env))
+	root.AddCommand(newUpdateCmd(env))
 
 	// Completion covers every command in the tree, so this has to run
 	// after the tree is built.

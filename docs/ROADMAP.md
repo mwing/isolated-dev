@@ -485,7 +485,9 @@ yet know which image to name. A completion that offers every image on the
 daemon would be noise; a completion that offers the five sensible starting
 points is a teaching device.
 
-**`dev2 update`.** Rebuild the project image with its packages upgraded to
+**`dev2 update`.** Done. Original note follows.
+
+Rebuild the project image with its packages upgraded to
 current patched versions, and record what changed. Pinning fixes what a
 build fetches, which is the right default and also means a pinned project
 stops receiving security updates silently — the two features are the same

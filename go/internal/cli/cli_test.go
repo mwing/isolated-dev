@@ -603,3 +603,19 @@ func TestImageCompletionIsShortAndNotFiles(t *testing.T) {
 		t.Error("no plain distribution offered, which is the sandboxing starting point")
 	}
 }
+
+func TestUpdateAndPinAreBothPresent(t *testing.T) {
+	// They are the same trade from opposite ends: one fixes what a build
+	// fetches, the other moves it deliberately and says what moved.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+	names := map[string]bool{}
+	for _, c := range root.Commands() {
+		names[c.Name()] = true
+	}
+	for _, want := range []string{"pin", "update", "scan", "policy"} {
+		if !names[want] {
+			t.Errorf("%q missing from the command tree", want)
+		}
+	}
+}

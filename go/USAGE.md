@@ -365,6 +365,52 @@ is a reasonable thing to want.
 
 ---
 
+## Keeping a pinned project patched
+
+A pin fixes what a build fetches. That is what makes a build reproducible,
+and it is also what stops security updates arriving — the same property,
+seen from either end. `dev2 update` is the command that moves the pin on
+purpose and says what moved:
+
+```sh
+dev2 update
+```
+
+```
+Base images
+  moved golang:1.26-alpine
+    from golang@sha256:1111111…
+    to   golang@sha256:0178a641…
+
+  Recorded in .devenv.yaml — commit it.
+
+Rebuilding without cache
+```
+
+Two things happen. The base images re-resolve to what their tags point at
+now, which is where most fixes come from: upstream rebuilds the base. Then
+the image rebuilds **without cache**, because a cached install layer
+reinstalls exactly what it installed the first time — the version being
+updated away from. Any tools you added rebuild too; their packages are as
+stale as anything else.
+
+```sh
+dev2 update --scan        # and see whether it helped
+dev2 update --keep-pins   # packages only; the base image stays put
+```
+
+That report is the point. A pinned project is only safe to leave pinned if
+someone can see when it last advanced — otherwise pinning quietly turns
+into neglect.
+
+Package versions inside the image are not pinned, only the base image is.
+An update fetches current packages at build time, so two builds a week
+apart can differ even at the same pin. Pinning every package is possible
+in principle and miserable in practice; the base digest is where the
+leverage is.
+
+---
+
 ## Sharing configuration with a team
 
 `.devenv.yaml` is committed and shared. It states what the project

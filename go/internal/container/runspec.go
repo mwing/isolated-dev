@@ -255,6 +255,10 @@ type BuildSpec struct {
 	Context    string
 	Platform   string
 	BuildArgs  map[string]string
+	// NoCache rebuilds every layer. An update needs it: a cached
+	// `apt-get install` layer reinstalls exactly what it installed the
+	// first time, which is the version being updated away from.
+	NoCache bool
 	// Stdin supplies the Dockerfile when Dockerfile is "-".
 	Quiet bool
 }
@@ -270,6 +274,9 @@ func (b BuildSpec) Args() []string {
 	}
 	if b.Platform != "" {
 		a = append(a, "--platform", b.Platform)
+	}
+	if b.NoCache {
+		a = append(a, "--no-cache")
 	}
 	if b.Quiet {
 		a = append(a, "--quiet")

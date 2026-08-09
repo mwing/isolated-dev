@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -35,21 +36,55 @@ func newPinCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
+// PinChange records one base image moving.
+type PinChange struct {
+	Image string
+	Old   string
+	New   string
+}
+
 func pinImages(ctx context.Context, env *Env, update bool) error {
-	cfg, p, err := resolveProject(env)
+	changes, err := resolvePins(ctx, env, update, env.Stderr)
 	if err != nil {
 		return err
 	}
+	if len(changes) == 0 {
+		fmt.Fprintln(env.Stdout, "Nothing changed: every base image is already pinned "+
+			"to what its tag points at.")
+		return nil
+	}
+	for _, c := range changes {
+		if c.Old == "" {
+			fmt.Fprintf(env.Stdout, "  + %s\n      %s\n", c.Image, c.New)
+			continue
+		}
+		fmt.Fprintf(env.Stdout, "  ~ %s\n      was %s\n      now %s\n", c.Image, c.Old, c.New)
+	}
+	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", env.Paths.Project)
+	fmt.Fprintln(env.Stdout, "Commit it: a teammate then builds the same image, "+
+		"not merely the same tag.")
+	return nil
+}
+
+// resolvePins resolves base images to digests and records them. It prints
+// nothing about the outcome: `pin` and `update` report it differently, and
+// two commands narrating the same thing twice is how output stops being
+// read.
+func resolvePins(ctx context.Context, env *Env, update bool, progress io.Writer) ([]PinChange, error) {
+	cfg, p, err := resolveProject(env)
+	if err != nil {
+		return nil, err
+	}
 	dockerfile, err := p.RenderedDockerfile()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	images := project.BaseImages(dockerfile)
 	if len(images) == 0 {
 		fmt.Fprintln(env.Stdout, "Nothing to pin: every FROM is already a digest, "+
 			"a stage name, or scratch.")
-		return nil
+		return nil, nil
 	}
 
 	eng := container.New(env.driver(cfg.VMName))
@@ -58,45 +93,34 @@ func pinImages(ctx context.Context, env *Env, update bool) error {
 		pins[k] = v
 	}
 
-	changed := 0
+	var changes []PinChange
 	for _, image := range images {
-		if existing, ok := pins[image]; ok && !update {
-			fmt.Fprintf(env.Stdout, "  = %s\n      %s\n", image, existing)
+		if _, ok := pins[image]; ok && !update {
 			continue
 		}
 		// Pull first: a digest can only be read from an image the daemon
 		// has, and the local copy may predate what the tag points at now.
-		if err := eng.Pull(ctx, image, env.Stderr); err != nil {
-			return err
+		if err := eng.Pull(ctx, image, progress); err != nil {
+			return nil, err
 		}
 		digest, err := eng.Digest(ctx, image)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if pins[image] == digest {
-			fmt.Fprintf(env.Stdout, "  = %s\n      unchanged\n", image)
 			continue
 		}
-		if old, ok := pins[image]; ok {
-			fmt.Fprintf(env.Stdout, "  ~ %s\n      was %s\n      now %s\n", image, old, digest)
-		} else {
-			fmt.Fprintf(env.Stdout, "  + %s\n      %s\n", image, digest)
-		}
+		changes = append(changes, PinChange{Image: image, Old: pins[image], New: digest})
 		pins[image] = digest
-		changed++
 	}
 
-	if changed == 0 {
-		fmt.Fprintln(env.Stdout, "\nNothing changed.")
-		return nil
+	if len(changes) == 0 {
+		return nil, nil
 	}
 	if err := writeProjectPins(env.Paths.Project, pins); err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", env.Paths.Project)
-	fmt.Fprintln(env.Stdout, "Commit it: a teammate then builds the same image, "+
-		"not merely the same tag.")
-	return nil
+	return changes, nil
 }
 
 // writeProjectPins updates the pins block, leaving the rest of the project

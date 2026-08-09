@@ -56,6 +56,11 @@ func newBuildCmd(env *Env) *cobra.Command {
 }
 
 func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Project, platform string) error {
+	return buildImageWith(ctx, env, cfg, p, platform, false)
+}
+
+func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project.Project,
+	platform string, noCache bool) error {
 	dockerfile, err := p.RenderedDockerfile()
 	if err != nil {
 		return err
@@ -99,7 +104,14 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 		Tag:      p.Image,
 		Context:  p.Dir,
 		Platform: platform,
+		NoCache:  noCache,
 	}, pinned, env.Stdout)
+}
+
+// buildImageNoCache rebuilds every layer, which is what an update needs:
+// a cached install layer reinstalls exactly what it installed before.
+func buildImageNoCache(ctx context.Context, env *Env, cfg config.Config, p *project.Project) error {
+	return buildImageWith(ctx, env, cfg, p, "", true)
 }
 
 func newRunCmd(env *Env) *cobra.Command {

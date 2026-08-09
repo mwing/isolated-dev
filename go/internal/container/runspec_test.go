@@ -274,3 +274,17 @@ func TestMountPathWithSpacesIsFineButCommaIsRejected(t *testing.T) {
 		t.Errorf("unhelpful error: %v", err)
 	}
 }
+
+func TestNoCacheIsOptIn(t *testing.T) {
+	// A cached install layer reinstalls exactly what it installed the
+	// first time — the version an update is trying to move away from.
+	plain := BuildSpec{Tag: "t", Context: "."}
+	for _, a := range plain.Args() {
+		if a == "--no-cache" {
+			t.Fatal("ordinary builds lost their cache")
+		}
+	}
+	if !argsContain(BuildSpec{Tag: "t", Context: ".", NoCache: true}.Args(), "--no-cache") {
+		t.Error("NoCache did not reach the build")
+	}
+}

@@ -83,6 +83,7 @@ first.
 | `dev2 tools list` / `remove` | list and remove those tools |
 | `dev2 pin` | pin base images to digests, so builds are reproducible |
 | `dev2 scan` | scan the image for vulnerabilities; exits non-zero so CI can gate |
+| `dev2 update` | move base images and packages to current, and report what moved |
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
 | `dev2 agent allow HOST` | grant an egress destination for this project |
