@@ -476,6 +476,38 @@ dev2 accept --all
 
 ---
 
+## A project that already has a devcontainer
+
+If the repository has a `.devcontainer/devcontainer.json`, dev2 reads it:
+the image or Dockerfile it names, and its `forwardPorts`. Nothing needs
+converting, and the team does not have to agree to a second config file.
+
+```
+Dockerfile: .devcontainer/devcontainer.json (image node:22-bookworm-slim)
+```
+
+Precedence is most-specific-first: a `Dockerfile` at the project root, then
+the devcontainer, then the language template.
+
+What it does **not** honor is said out loud rather than dropped quietly:
+
+```
+⚠  devcontainer.json: containerEnv (AWS_PROFILE): environment passthrough
+   is a grant here, not a setting
+⚠  devcontainer.json: remoteUser/containerUser: the uid is set by dev2, so
+   an image cannot choose to run as root
+⚠  devcontainer.json: postCreateCommand: not run
+```
+
+Those are not oversights. `containerEnv` and `mounts` hand a container
+access to your machine, which goes through `dev2 accept` rather than
+through a file the repository ships. `remoteUser` cannot decide who the
+container runs as, or a project could choose root. A config half-honored
+*silently* is worse than one not read at all, because you would believe
+the file describes what is running.
+
+---
+
 ## Closing the unsafe paths for a team
 
 `~/.dev-envs/policy.yaml` constrains everyone using the machine, including

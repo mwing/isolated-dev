@@ -69,6 +69,13 @@ been blocked so far in that run.
 needed: `start` and `status`. v1 called `orb start` and assumed it worked;
 v2 checks. Creating and destroying VMs is OrbStack's job, not this tool's.
 
+**devcontainer.json is read.** A repository that already describes its
+environment works unmodified: the image or Dockerfile it names and its
+forwardPorts are used. What is not honored — containerEnv, mounts,
+remoteUser, postCreateCommand — is reported on every build rather than
+dropped silently, since those are grants in this model rather than
+settings.
+
 **`dev debug` → `dev2 doctor`.** Done. Diagnosis only; never repairs.
 
 **`dev arch` → folded into `dev2 version`.** A whole command for one line
@@ -91,7 +98,7 @@ of output did not earn its place.
 | `dev new` / scaffolding | M2 late — no containers, so delegable to v1 in the meantime |
 | `dev templates *` | M2 late — same |
 | `dev devcontainer` (write) | M2 |
-| devcontainer.json (read) | M4 |
+
 | `dev security scan` | M3, with real exit codes as a CI gate |
 | `dev security check` | M3 |
 | `dev disk`, `dev troubleshoot` | M3 — candidates for folding into `doctor` |

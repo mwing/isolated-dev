@@ -84,8 +84,13 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	}
 
 	source := p.Dockerfile
-	if p.FromTemplate {
+	switch {
+	case p.FromTemplate:
 		source = p.Detected.Language.DockerfileTemplate() + " (language template)"
+	case p.DevcontainerImage != "":
+		source = p.Devcontainer.Path + " (image " + p.DevcontainerImage + ")"
+	case p.Devcontainer != nil && p.Dockerfile != "":
+		source = p.Dockerfile
 	}
 	fmt.Fprintf(env.Stdout, "Project:    %s\n", p.Name)
 	fmt.Fprintf(env.Stdout, "Detected:   %s\n", p.Detected.Explain())
@@ -96,6 +101,12 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	}
 	if cfg.UpgradePackages {
 		fmt.Fprintf(env.Stdout, "Upgrades:   base image packages upgraded\n")
+	}
+	// A config half-honored silently is worse than one not read at all.
+	if p.Devcontainer != nil {
+		for _, note := range p.Devcontainer.Ignored() {
+			fmt.Fprintf(env.Stderr, "⚠  devcontainer.json: %s\n", note)
+		}
 	}
 	if len(unpinned) > 0 {
 		fmt.Fprintf(env.Stdout, "Unpinned:   %s  (dev2 pin)\n", strings.Join(unpinned, " "))

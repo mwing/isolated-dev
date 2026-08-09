@@ -512,8 +512,13 @@ pinned.
   paths for people who are not attacking their own laptop and makes an
   override deliberate. An org needing more than that needs device
   management.
-- devcontainer.json interop: read (not just write) the essentials, so
-  projects standardized on devcontainers work with `dev2` unmodified.
+- devcontainer.json interop: read side done. The image or Dockerfile it
+  names and its forwardPorts are used, so a project standardized on
+  devcontainers works unmodified. What is deliberately not honored —
+  containerEnv, mounts, remoteUser, postCreateCommand — is reported on
+  every build: those are grants in this model rather than settings, and a
+  config half-honored silently would leave the user believing the file
+  describes what is running. The write side stays with the M2 long tail.
 - `dev2 status` / `dev2 ps` across projects.
 
 ### M5: Live console

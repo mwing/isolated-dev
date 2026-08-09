@@ -14,6 +14,7 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/detect"
+	"github.com/mwing/isolated-dev/go/internal/devcontainer"
 	"github.com/mwing/isolated-dev/go/internal/langs"
 )
 
@@ -58,6 +59,11 @@ type Project struct {
 	// FromTemplate reports that the Dockerfile came from a language plugin
 	// rather than the project.
 	FromTemplate bool
+	// Devcontainer is the project's devcontainer.json, when it has one.
+	Devcontainer *devcontainer.Config
+	// DevcontainerImage is an image the devcontainer names directly,
+	// which is used as-is rather than built.
+	DevcontainerImage string
 
 	Image     string
 	Container string
@@ -120,9 +126,31 @@ func Resolve(dir string, cfg config.Config, set *langs.Set) (*Project, error) {
 	p.Container = fmt.Sprintf("%s-ctn-%s", prefix, name)
 	p.Ports = detect.Ports(cfg.ForwardPorts, p.Detected)
 
+	// Precedence: the project's own Dockerfile, then its devcontainer,
+	// then the language template. A Dockerfile at the root is the most
+	// specific statement of intent; a devcontainer is the team's existing
+	// description; a template is our guess.
 	if df := filepath.Join(dir, "Dockerfile"); fileExists(df) {
 		p.Dockerfile = df
-	} else if p.Detected.Found() {
+	}
+	if path, ok := devcontainer.Find(dir); ok {
+		dc, err := devcontainer.Load(path)
+		if err != nil {
+			return nil, err
+		}
+		p.Devcontainer = dc
+		if p.Dockerfile == "" {
+			if df := dc.DockerfilePath(); df != "" && fileExists(df) {
+				p.Dockerfile = df
+			} else if dc.Image != "" {
+				p.DevcontainerImage = dc.Image
+			}
+		}
+		if cfg.ForwardPorts == "" && len(dc.ForwardPorts) > 0 {
+			p.Ports = append([]int(nil), dc.ForwardPorts...)
+		}
+	}
+	if p.Dockerfile == "" && p.DevcontainerImage == "" && p.Detected.Found() {
 		p.FromTemplate = true
 	}
 	return p, nil
@@ -143,6 +171,11 @@ func (p *Project) RenderedDockerfile() (string, error) {
 			return "", fmt.Errorf("project: reading %s: %w", p.Dockerfile, err)
 		}
 		return string(raw), nil
+	}
+	if p.DevcontainerImage != "" {
+		// A devcontainer naming an image needs no Dockerfile: the image
+		// is the environment.
+		return "FROM " + p.DevcontainerImage + "\n", nil
 	}
 	if !p.Detected.Found() {
 		return "", fmt.Errorf("project: no Dockerfile and no language detected in %s", p.Dir)
