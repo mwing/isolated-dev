@@ -281,3 +281,77 @@ func TestWorkComesBackOutOfAShallowClone(t *testing.T) {
 		t.Fatalf("patch content = %q", got)
 	}
 }
+
+// commitIn makes a commit inside a clone, as an agent would.
+func commitIn(t *testing.T, dir, file, body string) {
+	t.Helper()
+	run := runner.New(false)
+	ctx := context.Background()
+	write(t, filepath.Join(dir, file), body)
+	for _, args := range [][]string{
+		{"config", "user.email", "a@example.com"},
+		{"config", "user.name", "agent"},
+		{"add", "-A"},
+		{"commit", "-qm", "work"},
+	} {
+		if _, err := git(ctx, run, dir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStateCountsWorkTheProjectDoesNotHave(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	ctx := context.Background()
+	run := runner.New(false)
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	if dirty, unmerged, _, _ := State(ctx, run, dest); dirty != 0 || unmerged != 0 {
+		t.Fatalf("fresh clone: dirty=%d unmerged=%d, want 0/0", dirty, unmerged)
+	}
+
+	commitIn(t, dest, "work.txt", "output\n")
+	write(t, filepath.Join(dest, "scratch.txt"), "wip\n")
+
+	dirty, unmerged, _, _ := State(ctx, run, dest)
+	if unmerged != 1 {
+		t.Fatalf("unmerged = %d, want 1 — a deletion would lose that commit", unmerged)
+	}
+	if dirty != 1 {
+		t.Fatalf("dirty = %d, want 1", dirty)
+	}
+}
+
+// Once the work is merged back, the clone is safe to delete. Reporting it
+// as still at risk would train people to reach for --force, which is how
+// the guard stops working.
+func TestStateStopsCountingWorkOnceItIsMergedBack(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	ctx := context.Background()
+	run := runner.New(false)
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, dest, "work.txt", "output\n")
+
+	if _, unmerged, _, _ := State(ctx, run, dest); unmerged != 1 {
+		t.Fatalf("unmerged = %d before the fetch, want 1", unmerged)
+	}
+
+	for _, args := range [][]string{
+		{"fetch", "-q", dest, "HEAD"},
+		{"merge", "-q", "FETCH_HEAD", "-m", "merge"},
+	} {
+		if _, err := git(ctx, run, src, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, unmerged, _, _ := State(ctx, run, dest); unmerged != 0 {
+		t.Fatalf("unmerged = %d after merging it back, want 0", unmerged)
+	}
+}

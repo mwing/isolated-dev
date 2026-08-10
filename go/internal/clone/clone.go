@@ -315,3 +315,57 @@ func Remove(path string) error {
 	}
 	return os.RemoveAll(path)
 }
+
+// State reports what a clone is holding: uncommitted changes, commits the
+// project does not have, the current branch, and whether history is
+// truncated.
+//
+// The unmerged count is the one that matters, since it is what a deletion
+// would destroy. It is answered by asking the project whether it contains
+// each commit, not by asking the clone whether it has pushed them: work
+// fetched and merged back is safe, and the clone has no way to know that
+// happened. Reporting it as still at risk would train people to use
+// --force, which is how the guard stops working.
+func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged int,
+	branch string, shallow bool) {
+	if status, err := gitOutput(ctx, run, path, "status", "--porcelain"); err == nil {
+		dirty = len(nonEmptyLines(status))
+	}
+	branch, _ = gitOutput(ctx, run, path, "rev-parse", "--abbrev-ref", "HEAD")
+	if out, err := gitOutput(ctx, run, path, "rev-parse", "--is-shallow-repository"); err == nil {
+		shallow = strings.TrimSpace(out) == "true"
+	}
+
+	// Commits on local branches that no remote has: the candidates.
+	out, err := gitOutput(ctx, run, path, "log", "--branches", "--not", "--remotes",
+		"--format=%H")
+	if err != nil {
+		return dirty, unmerged, branch, shallow
+	}
+	candidates := nonEmptyLines(out)
+	if len(candidates) == 0 {
+		return dirty, unmerged, branch, shallow
+	}
+
+	origin, err := gitOutput(ctx, run, path, "remote", "get-url", "origin")
+	if err != nil {
+		// No origin to check against, so every candidate has to count.
+		return dirty, len(candidates), branch, shallow
+	}
+	origin = strings.TrimPrefix(strings.TrimSpace(origin), "file://")
+
+	for _, sha := range candidates {
+		sha = strings.TrimSpace(sha)
+		// A commit no branch in the project contains would be lost with
+		// the directory. One that is merged, or fetched onto a branch, is
+		// already safe.
+		res, err := run.Run(ctx, runner.Command{
+			Path: "git",
+			Args: []string{"-C", origin, "branch", "--all", "--contains", sha, "--format=%(refname)"},
+		})
+		if err != nil || res.ExitCode != 0 || strings.TrimSpace(res.Stdout) == "" {
+			unmerged++
+		}
+	}
+	return dirty, unmerged, branch, shallow
+}

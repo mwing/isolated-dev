@@ -148,11 +148,35 @@ back and cherry-picks.
 **4. If it went badly, throw it away.**
 
 ```sh
-rm -rf $CLONE
+dev2 clone rm            # this project's clone
+dev2 clone rm --force    # even if it still holds work
 ```
+
+`rm` refuses while the clone holds commits the project does not have, or
+uncommitted changes — that is the one irreversible thing this tool can do
+to work that exists nowhere else. Once you have fetched the commits back,
+it stops objecting: it asks the project whether it contains them, rather
+than asking the clone whether it pushed them.
 
 Nothing outside that directory changed. The next `--clone` run starts
 fresh — which is the point of running it there in the first place.
+
+### Keeping track of them
+
+Each clone is a full copy of a repository, sitting somewhere nobody looks:
+
+```sh
+dev2 clone list     # every clone, its size, branch, and what is still in it
+dev2 clone path     # this project's, for scripting
+```
+
+```
+  acme-platform            1.2G     fix-retries            2 commit(s) only here
+  scratch-repo             144K     main                   clean
+
+2 clone(s), 1.3G on disk, in ~/.dev-envs/clones
+1 hold work that is not in their project.
+```
 
 ### When you would not use a clone
 
