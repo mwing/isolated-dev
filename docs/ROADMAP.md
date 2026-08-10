@@ -1,7 +1,15 @@
-# Roadmap: isolated-dev v2 (Go rewrite)
+# Roadmap: isolated-dev
 
-Status: proposal
+Status: shipped. The Go tool is `dev`; the bash tool it replaced is `dev1`,
+kept in [v1/](../v1/).
 Owner: @mwing
+
+This began as a proposal and is now partly a record. Sections 1–4 are the
+design and still describe the tool as built; section 5 is the milestone
+plan with what actually happened; section 9 is what is left.
+
+**If you are here to use the tool rather than to understand its design,
+start with [../README.md](../README.md).**
 
 ## 1. Vision
 
@@ -248,6 +256,39 @@ build — but it means the allowlist is a runtime control, not a supply
 chain one. Digest pinning (M3) is the lever that addresses builds, and it
 addresses a different risk: what you get, rather than where you went.
 
+### 4.3.2 Credentials, and why the proxy does not inject them
+
+Docker Sandboxes keeps agent credentials on the host and has its proxy
+inject auth headers into outbound requests, so the key never enters the
+sandbox. It is the strongest idea in that design, and it is rejected here
+for a reason worth recording rather than rediscovering.
+
+Injection requires reading and rewriting the request, which requires
+terminating TLS for that host. This tool deliberately does not (4.3): the
+proxy checks the CONNECT target and relays bytes untouched, so certificate
+pinning keeps working and the proxy never holds anyone's plaintext.
+
+Scoping the injection is the easy half. A credential can be bound to one
+host, one path prefix, one method and one named header, and refused
+everywhere else — that part is ordinary matching, and it would stop a
+credential leaking to every destination on the allowlist.
+
+What scoping does not fix is the confused deputy. Any process in the
+sandbox can then issue requests to that host and have the credential
+attached on its way out. The key is protected; the *authority* is not.
+That is still a real improvement — a stolen key outlives the sandbox and
+borrowed authority does not — but it is a smaller improvement than it
+looks, bought with TLS interception, a CA certificate installed in the
+container's trust store, and per-host configuration that users have to
+maintain and get right.
+
+The better fit for this model is to broker the operation rather than the
+credential, which is already what `--allow-push` does: the ssh-agent
+socket is forwarded, so the container can ask for a signature and can
+never read the key. Generalizing that — a narrow host-side broker for the
+specific privileged actions a workload needs — gets the same property
+without touching TLS. Prefer it where a future case demands one.
+
 ### 4.4 Threat model, stated honestly
 
 **What is being promised.** The product guarantee is about defaults and
@@ -300,7 +341,7 @@ volumes, trust store, backend abstraction) to exist, and those primitives are
 exactly what the rest of the tool then reuses. Porting the crud commands
 first would delay the only genuinely new capability.
 
-### M0: Skeleton (small)
+### M0: Skeleton — done
 
 - Repo layout under `go/` (or a `v2` branch), cobra CLI, goreleaser config,
   CI matrix (macOS + Linux, go test, golangci-lint, govulncheck).
@@ -317,7 +358,7 @@ Status: implemented on the `v2-go-rewrite` branch under `go/`. `runner`
 reporting), `backend` + orbstack probe, `version`, `doctor`, CI matrix,
 goreleaser. `doctor` verified against a live OrbStack VM.
 
-### M1: Agent mode (the flagship)
+### M1: Agent mode — done
 
 - `dev agent claude`, `dev agent codex`, `dev agent list`.
 - Agent plugin format: `agents/<name>/agent.yaml` (install steps, binary,
@@ -398,7 +439,7 @@ Remaining before the milestone closes: Codex exercised end to end. Only
 Claude has been; `--auth env` exists for orgs that disable device-code
 login, but it has not been run against a live key.
 
-### M2: Core loop parity
+### M2: Core loop parity — done
 
 Scope honesty up front: this is the largest milestone, bigger than M0+M1
 combined. v1 is ~4k lines of bash plus 8 language plugins, interactive mode,
@@ -449,7 +490,7 @@ never good while making a deliberate removal look like a regression. The
 checklist survives as a disposition record — keep, redesign, drop, defer —
 rather than as a list of boxes that must all be ticked.
 
-### M3: Multi-backend + supply chain
+### M3: Multi-backend + supply chain — partly done
 
 - Plain docker backend (Linux, colima, Docker Desktop); backend auto-detect
   with config override.
@@ -471,7 +512,7 @@ rather than as a list of boxes that must all be ticked.
   release-time concern and building it early means maintaining it before
   it protects anyone.
 
-### M3.1: Requested during dogfooding
+### M3.1: Requested during dogfooding — done
 
 **Shell completions.** Done. `dev completion install` writes the script
 where the shell will find it, since printing a script is not installing
@@ -498,40 +539,7 @@ The logging matters as much as the upgrade: "these packages moved, this
 base image moved" is the record that makes a pinned project safe to leave
 pinned.
 
-### 4.3.2: Credentials, and why the proxy does not inject them
-
-Docker Sandboxes keeps agent credentials on the host and has its proxy
-inject auth headers into outbound requests, so the key never enters the
-sandbox. It is the strongest idea in that design, and it is rejected here
-for a reason worth recording rather than rediscovering.
-
-Injection requires reading and rewriting the request, which requires
-terminating TLS for that host. This tool deliberately does not (4.3): the
-proxy checks the CONNECT target and relays bytes untouched, so certificate
-pinning keeps working and the proxy never holds anyone's plaintext.
-
-Scoping the injection is the easy half. A credential can be bound to one
-host, one path prefix, one method and one named header, and refused
-everywhere else — that part is ordinary matching, and it would stop a
-credential leaking to every destination on the allowlist.
-
-What scoping does not fix is the confused deputy. Any process in the
-sandbox can then issue requests to that host and have the credential
-attached on its way out. The key is protected; the *authority* is not.
-That is still a real improvement — a stolen key outlives the sandbox and
-borrowed authority does not — but it is a smaller improvement than it
-looks, bought with TLS interception, a CA certificate installed in the
-container's trust store, and per-host configuration that users have to
-maintain and get right.
-
-The better fit for this model is to broker the operation rather than the
-credential, which is already what `--allow-push` does: the ssh-agent
-socket is forwarded, so the container can ask for a signature and can
-never read the key. Generalizing that — a narrow host-side broker for the
-specific privileged actions a workload needs — gets the same property
-without touching TLS. Prefer it where a future case demands one.
-
-### M4: Team features
+### M4: Team features — done
 
 - Policy file: done. `~/.dev-envs/policy.yaml` restricts network modes,
   forbids settings outright, denies egress destinations, floors the scan
@@ -554,7 +562,7 @@ without touching TLS. Prefer it where a future case demands one.
   describes what is running. The write side stays with the M2 long tail.
 - `dev status` / `dev ps` across projects.
 
-### M5: Live console
+### M5: Live console — done
 
 The aspirational shape: a full-screen terminal UI that owns the session,
 with the workload in one pane and everything the tool knows in another —
@@ -673,26 +681,52 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
   absent unless privileged + opt-in". These are the tests that define the
   product; they gate every release.
 
-## 8. Sequencing summary
+## 8. What actually happened
 
-```
-M0 skeleton -> M1 agent mode -> M2 core loop + trust -> M3 backends/supply chain -> M4 team/policy -> M5 live console
-```
+The plan held. Agent mode first was right: the proxy sidecar, the trust
+store and the backend abstraction were all built for it and everything
+since has reused them unchanged.
 
-Relative sizes, so the cut order below is actionable rather than a
-sentiment. These are ratios between milestones, not calendar estimates;
-whoever picks this up should replace them with real ones against their own
-capacity before committing to a date:
+Three things were bigger than the estimate, and all three for the same
+reason — they touched a terminal:
 
-| | size | notes |
-|---|---|---|
-| M0 | S | scaffolding, no product surface |
-| M1 | L | the proxy sidecar is the hard part and it is novel work |
-| M2 | XL | larger than M0+M1 combined; ~4k lines of bash, 8 language plugins |
-| M3 | M | mostly integration; the docker backend is well-understood |
-| M4 | M | policy file is small, devcontainer read-side is not |
+- **The live console.** The proxy, the resolver and the trust model were
+  each straightforward. Rendering a workload's own TUI inside another one
+  was not: it took a recording harness, a bisect, and the discovery that
+  reading the workload's pty shared a goroutine with rendering it, so at
+  188×52 the reader stalled and the workload blocked at exactly 1087 bytes.
+- **Blocking prompts.** Holding a request while a human decides means the
+  prompter and the workload both want stdin. Which one gets it is now an
+  explicit decision the run reports, rather than a race.
+- **Escapes.** `ctrl+]` is untypeable on a Finnish keyboard. Obvious in
+  hindsight, invisible from inside a US layout.
 
-M1 before M2 is intentional: agent mode is the new value and it builds the
-primitives (proxy, volumes, trust) that M2 then reuses. If effort must be
-cut, M4 drops first, then M3's extra backends; the trust model and egress
-control are not cuttable, they are the point of the tool.
+Things that were smaller than expected: the egress topology (an internal
+network plus a dual-homed sidecar does the whole job — no iptables, no
+NET_ADMIN), and reading devcontainer.json.
+
+Several capabilities were not in the original plan at all and came out of
+using the tool: run history, grant review against it, private clones,
+the devcontainer write side, and the guided front door.
+
+## 9. What is left
+
+Nothing here blocks daily use.
+
+- **Plain docker backend** (M3). Only matters off OrbStack — Linux, colima,
+  Docker Desktop. The abstraction exists and is exercised by one
+  implementation, which is the part that usually rots.
+- **SBOM emission** (M3). Worth doing when something consumes it.
+- **Signed releases** (M3). A release-time concern: goreleaser, cosign,
+  checksums. Building it before there is a release to sign means
+  maintaining it before it protects anyone.
+- **Codex end to end.** Runs, but has never been driven through a real
+  session with a key.
+- **Brokered credentials** (4.3.2). A narrow host-side broker for specific
+  privileged operations, generalizing what `--allow-push` already does with
+  the ssh-agent socket. Wanted only when a real case demands it.
+
+### Cut order, if it ever matters again
+
+M4 first, then M3's extra backends. The trust model and egress control are
+not cuttable: they are the tool.

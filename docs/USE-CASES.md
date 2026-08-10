@@ -1,15 +1,44 @@
-# Using dev
+# Use cases
 
 Worked examples for the jobs people actually reach for this tool to do.
 Each one starts from a real problem rather than a feature.
 
-- [Updating dependencies without trusting them](#updating-dependencies-without-trusting-them)
-- [Running software you do not trust](#running-software-you-do-not-trust)
+New to it? [CONCEPTS.md](CONCEPTS.md) explains how it works in six ideas,
+and [GETTING-STARTED.md](GETTING-STARTED.md) covers adopting it in a
+repository you already have.
+
+**Everyday**
+
+- [Starting a project](#starting-a-project)
+- [Adding tools that stick](#adding-tools-that-stick)
+- [What persists and what does not](#what-persists-and-what-does-not)
+- [Sharing configuration with a team](#sharing-configuration-with-a-team)
+- [A project that already has a devcontainer](#a-project-that-already-has-a-devcontainer)
+- [Teammates who use an IDE instead of dev](#teammates-who-use-an-ide-instead-of-dev)
+
+**Agents, and keeping them off your working tree**
+
 - [Sandboxing a coding agent](#sandboxing-a-coding-agent)
+- [Letting an agent run without risking your working tree](#letting-an-agent-run-without-risking-your-working-tree)
+- [Developing a patch in a clone, and landing it](#developing-a-patch-in-a-clone-and-landing-it)
+
+**Code you do not trust**
+
+- [Running software you do not trust](#running-software-you-do-not-trust)
 - [A server with no filesystem and no network](#a-server-with-no-filesystem-and-no-network)
 - [Reaching a server you do want to use](#reaching-a-server-you-do-want-to-use)
-- [Adding tools that stick](#adding-tools-that-stick)
-- [Sharing configuration with a team](#sharing-configuration-with-a-team)
+
+**Supply chain**
+
+- [Updating dependencies without trusting them](#updating-dependencies-without-trusting-them)
+- [Pinning what a build fetches](#pinning-what-a-build-fetches)
+- [Scanning what you are about to run](#scanning-what-you-are-about-to-run)
+- [Keeping a pinned project patched](#keeping-a-pinned-project-patched)
+
+**Review and operations**
+
+- [Reviewing what a project reached](#reviewing-what-a-project-reached)
+- [Closing the unsafe paths for a team](#closing-the-unsafe-paths-for-a-team)
 - [The console](#the-console)
 - [When something looks stuck](#when-something-looks-stuck)
 

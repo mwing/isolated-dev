@@ -1,6 +1,6 @@
 # Quickstart: adopting dev in a repository you already have
 
-[README](README.md) covers what the tool is. This is the other thing:
+[../README.md](../README.md) covers what the tool is. This is the other thing:
 you have a repository, possibly a large one, and you want it running in
 the sandbox without a day of work.
 
@@ -233,7 +233,7 @@ dev agent run claude --clone
 
 Your uncommitted work is carried in; whatever the agent does stays in
 `~/.dev-envs/clones/<project>` and comes back through git when you want
-it — see [USAGE.md](USAGE.md) for the full patch workflow. On a large
+it — see [USE-CASES.md](USE-CASES.md) for the full patch workflow. On a large
 repository add `--clone-depth 1`, which copies one commit of history
 instead of all of it. Worth making the habit early — it is the difference between reviewing
 a diff and restoring from a stash.
