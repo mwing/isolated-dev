@@ -15,6 +15,31 @@ Each one starts from a real problem rather than a feature.
 
 ---
 
+## Starting a project
+
+```sh
+dev2 new python my-app
+cd my-app
+dev2 run -c 'python main.py'
+```
+
+The files come from the language plugin, so adding a language means adding
+a directory rather than changing this tool. `dev2 new` with an unknown
+language lists what is available, and with an unknown version says which
+ones the plugin declares — a version that does not exist would otherwise
+fail much later, inside a build.
+
+It does **not** write a Dockerfile. The language template is rendered at
+build time and stays current, whereas a copy in the project is a copy that
+goes stale. Write one when you want to change it: `dev2 build` prefers a
+project Dockerfile over the template.
+
+Scaffolding never overwrites. If anything would collide, nothing is
+written at all — a half-scaffolded directory is worse than a refusal, and
+`--force` is there when you mean it.
+
+---
+
 ## Updating dependencies without trusting them
 
 A dependency update runs arbitrary code from strangers: install scripts,

@@ -22,6 +22,7 @@ dropped with a reason written down.
 | `dev build` | keep | done |
 | `dev run -c '<cmd>'` | keep | done |
 | `dev clean` | keep | done |
+| `dev new` | keep | done — no Dockerfile written; the template is rendered at build time |
 | `dev list` | redesign | done — `dev2 status` |
 | language detection | redesign | done — reads plugin data, deterministic |
 | language plugins | keep (format unchanged) | done — all 8 load |

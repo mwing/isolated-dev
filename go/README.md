@@ -70,6 +70,7 @@ first.
 
 | | |
 |---|---|
+| `dev2 new LANG [dir]` | start a new project from a language plugin |
 | `dev2 run [-c CMD]` | run a command in the project's container |
 | `dev2 run --image IMG` | run a stock image instead, for things that are not projects |
 | `dev2 shell` | interactive shell |

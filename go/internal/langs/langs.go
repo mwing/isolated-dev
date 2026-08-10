@@ -193,7 +193,9 @@ func (s *Set) Names() []string {
 	return out
 }
 
-// TemplateVars are the substitutions a Dockerfile template may use.
+// TemplateVars are the substitutions a template or scaffolding file may
+// use. Scaffolding shares the substitution set with Dockerfiles so a
+// plugin author has one thing to learn rather than two.
 type TemplateVars struct {
 	Version     string
 	ProjectName string
