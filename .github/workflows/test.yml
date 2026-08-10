@@ -1,4 +1,4 @@
-name: Test Suite
+name: Test Suite (v1, bash)
 
 on:
   push:
@@ -24,16 +24,16 @@ jobs:
     - name: ShellCheck
       run: |
         # Gate at error level for now; warning-level cleanup is tracked separately
-        shellcheck -S error scripts/dev scripts/lib/*.sh install.sh test.sh integration-test.sh
+        shellcheck -S error v1/scripts/dev v1/scripts/lib/*.sh v1/install.sh v1/test.sh v1/integration-test.sh
 
     - name: Run syntax and basic tests
       run: |
         # Run syntax validation and tests that don't require OrbStack
-        bash -n install.sh
-        bash -n scripts/dev
-        find scripts/lib -name "*.sh" -exec bash -n {} \;
+        bash -n v1/install.sh
+        bash -n v1/scripts/dev
+        find v1/scripts/lib -name "*.sh" -exec bash -n {} \;
         
         # Run limited test suite (syntax, help, structure tests only)
         # Skip OrbStack-dependent tests in CI
         export CI=true
-        bash test.sh
+        cd v1 && bash test.sh

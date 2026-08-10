@@ -183,7 +183,7 @@ accident of history — it is the trust model expressed as two files:
 A project file is therefore a *request*, never a grant. On each run the
 tool diffs what the project asks for against what the user has accepted,
 and anything new stops the run with a confirmation showing exactly what is
-being added. `dev2 agent accept` records the decision; from then on the
+being added. `dev agent accept` records the decision; from then on the
 project's config applies silently until it changes again. This is the
 trust-on-first-use flow of 4.2 with the request written down instead of
 inferred, which makes it *better* than a purely local file: the team can
@@ -198,7 +198,7 @@ cloned repository, which would let a hostile project widen its own egress
 before anyone read a line of it.
 
 Status: implemented. `.devenv.yaml` may carry an `agents:` section; a run
-stops on anything requested but not accepted, and `dev2 agent accept`
+stops on anything requested but not accepted, and `dev agent accept`
 records the decision. Acceptance is an intersection, not a union: a host the
 project stops requesting stops applying, and a host added later is pending
 again, so consent is never a blank cheque for future edits.
@@ -240,7 +240,7 @@ Egress control is enforced by network topology, not by environment variables:
 The proxy governs what a *running* container reaches. It does not govern
 image builds: `docker build` runs on the daemon, outside the internal
 network, with whatever access the daemon has. So a Dockerfile, a language
-template, or a `dev2 add` install step downloads over an unfiltered path.
+template, or a `dev add` install step downloads over an unfiltered path.
 
 This is worth stating rather than leaving to be discovered. It is also the
 right trade for now — a build that cannot reach a package index is not a
@@ -306,7 +306,7 @@ first would delay the only genuinely new capability.
   CI matrix (macOS + Linux, go test, golangci-lint, govulncheck).
 - `internal/runner` with fake for tests; `internal/config` reading the v1
   YAML files (schema-compatible where keys survive).
-- `dev2 version`, `dev2 doctor` (checks orb/docker presence, VM state; ports
+- `dev version`, `dev doctor` (checks orb/docker presence, VM state; ports
   the v1 `debug` checks).
 
 Exit criteria: binary builds on both platforms in CI, doctor works against a
@@ -319,7 +319,7 @@ goreleaser. `doctor` verified against a live OrbStack VM.
 
 ### M1: Agent mode (the flagship)
 
-- `dev2 agent claude`, `dev2 agent codex`, `dev2 agent list`.
+- `dev agent claude`, `dev agent codex`, `dev agent list`.
 - Agent plugin format: `agents/<name>/agent.yaml` (install steps, binary,
   default allowlist hosts, config dir path inside home).
 - Image overlay: project image + agent layer built on demand (project
@@ -329,7 +329,7 @@ goreleaser. `doctor` verified against a live OrbStack VM.
   proxy (LLM API + language registries + git hosts), proxy-only DNS, no TLS
   interception, denied-connection log surfaced at exit.
 - **Agent home volumes**: named volume per agent (configurable per-project),
-  OAuth login persists across runs; `dev2 agent logout <name>` removes it.
+  OAuth login persists across runs; `dev agent logout <name>` removes it.
 - **Live egress notices**: blocked destinations are surfaced the moment
   they happen, not only in the exit summary. A denial mid-run is
   actionable — the user can decide whether to allow it — but only while it
@@ -353,7 +353,7 @@ goreleaser. `doctor` verified against a live OrbStack VM.
   section 4.4's untrusted-default posture.
 - **Agent versioning**: agent CLIs ship on their own weekly-ish cadence, so
   `agents/<name>/agent.yaml` pins a version and the overlay layer is keyed
-  by it; `dev2 agent update <name>` re-resolves deliberately. Unpinned
+  by it; `dev agent update <name>` re-resolves deliberately. Unpinned
   "latest" would silently change what runs inside the sandbox between runs.
 
 Exit criteria: Claude Code and Codex both complete a real task in a sample
@@ -364,7 +364,7 @@ Status (in progress on `v2-go-rewrite`): the sandbox and its enforcement
 are built and verified against a real OrbStack daemon — allowlist, CONNECT
 proxy with no TLS interception, filtering resolver, internal-network
 topology, agent registry, overlay images, home volumes, live notices.
-`dev2 agent run claude` runs Claude Code in the sandbox today. Verified in
+`dev agent run claude` runs Claude Code in the sandbox today. Verified in
 the live container: uid 1000 (not root), no host credentials present, an
 allowlisted API reachable, a non-allowlisted host blocked and reported.
 
@@ -403,13 +403,13 @@ login, but it has not been run against a live key.
 Scope honesty up front: this is the largest milestone, bigger than M0+M1
 combined. v1 is ~4k lines of bash plus 8 language plugins, interactive mode,
 scaffolding, and devcontainer generation. Two rules keep it from stranding
-the project in a permanent dev/dev2 split:
+the project in a permanent dev/dev split:
 
 1. Every v1 command gets an explicit decision recorded in
    docs/PARITY.md — keep, redesign, drop or defer, each with a reason. No
    vague "core loop works", and equally no obligation to reproduce
    something merely because v1 had it.
-2. dev2 may DELEGATE long-tail commands to a vendored copy of the v1 scripts
+2. dev may DELEGATE long-tail commands to a vendored copy of the v1 scripts
    during the transition, so cutover is gated on the security-relevant path
    (run, shell, build, trust, egress), not on the least interesting code.
    The vendored scripts ship inside the release artifact with checksums;
@@ -433,7 +433,7 @@ Work items:
 - ssh-agent forwarding replaces key-file mounts.
 - The egress proxy from M1 becomes available to normal runs:
   `network: allowlist|open|none` per project, `--offline` flag.
-- v1 config migration: `dev2 migrate` reads `~/.dev-envs/config.yaml`,
+- v1 config migration: `dev migrate` reads `~/.dev-envs/config.yaml`,
   writes v2 config, reports dropped/renamed keys (v1 stopped emitting the
   never-implemented keys in the pre-rewrite fix PR, so the stray-key
   population is frozen at whatever users already have).
@@ -453,15 +453,15 @@ rather than as a list of boxes that must all be ticked.
 
 - Plain docker backend (Linux, colima, Docker Desktop); backend auto-detect
   with config override.
-- Digest pinning: done, as `dev2 pin`. It resolves every image the
+- Digest pinning: done, as `dev pin`. It resolves every image the
   Dockerfile builds FROM and records the digests in the project file
   rather than rewriting the Dockerfile — a language template is shared by
   every project using that language, so the pin belongs to the project.
-  `dev2 pin --update` re-resolves deliberately, and `dev2 build` reports
+  `dev pin --update` re-resolves deliberately, and `dev build` reports
   what is still unpinned so the gap is visible rather than assumed.
   This is the answer to 4.3.1: egress control governs a running container,
   and pinning governs what a build fetches.
-- `dev2 scan`: done. Runs trivy and grype against the image the project
+- `dev scan`: done. Runs trivy and grype against the image the project
   actually runs, including its tools layer, and exits non-zero at or above
   a threshold so CI can gate on it. A scanner that cannot run is a
   failure, not a pass: "no findings" and "no scan" are different answers.
@@ -473,7 +473,7 @@ rather than as a list of boxes that must all be ticked.
 
 ### M3.1: Requested during dogfooding
 
-**Shell completions.** Done. `dev2 completion install` writes the script
+**Shell completions.** Done. `dev completion install` writes the script
 where the shell will find it, since printing a script is not installing
 it, and --image completes to a short curated list. Original note follows.
 
@@ -485,7 +485,7 @@ yet know which image to name. A completion that offers every image on the
 daemon would be noise; a completion that offers the five sensible starting
 points is a teaching device.
 
-**`dev2 update`.** Done. Original note follows.
+**`dev update`.** Done. Original note follows.
 
 Rebuild the project image with its packages upgraded to
 current patched versions, and record what changed. Pinning fixes what a
@@ -552,7 +552,7 @@ without touching TLS. Prefer it where a future case demands one.
   every build: those are grants in this model rather than settings, and a
   config half-honored silently would leave the user believing the file
   describes what is running. The write side stays with the M2 long tail.
-- `dev2 status` / `dev2 ps` across projects.
+- `dev status` / `dev ps` across projects.
 
 ### M5: Live console
 
@@ -577,11 +577,11 @@ This is the natural home for things the CLI can only do awkwardly:
   the keyboard and routes it, a waiting question outranking the shell.
   Verified with a shell running: a curl blocked mid-command, the question
   appeared, one keystroke answered it, and the held request completed.
-- **Agents in the console.** Done: `dev2 console --agent claude` runs the
+- **Agents in the console.** Done: `dev console --agent claude` runs the
   agent with its stored login — the OAuth token lives in the same named
   volume either way — while its blocked destinations become questions
   rather than failures it has to work around. The agent is resolved
-  through the same request/acceptance path `dev2 agent run` uses, so the
+  through the same request/acceptance path `dev agent run` uses, so the
   same agent cannot end up on a different image depending on which command
   started it.
 - **Ports.** Done: a workload on an internal network cannot publish ports
@@ -592,7 +592,7 @@ This is the natural home for things the CLI can only do awkwardly:
   egress allowlist: that list answers what the workload may reach, while a
   published port answers what may reach it, and the user answered that by
   asking for the port.
-- **Live environment changes.** Done: `dev2 add <tool>` records the tool
+- **Live environment changes.** Done: `dev add <tool>` records the tool
   outside the repository and rebuilds the image with it, so the need is
   met when it appears rather than configured in advance. The record is a
   declaration and the image is rebuilt from it, never `docker commit` —
@@ -654,9 +654,9 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
   keys (network_mode, auto_host_networking, port_range, port health checks)
   are dropped with a loud migration note. `pass_env_vars` carries over but is
   gated behind trust level.
-- CLI: no compatibility promise. The binary ships as `dev2` during M1-M2 and
+- CLI: no compatibility promise. The binary ships as `dev` during M1-M2 and
   takes over the `dev` name when v1 is retired (installer keeps `dev` as an
-  alias to `dev2` from M2 on).
+  alias to `dev` from M2 on).
 - v1 lifecycle: bug fixes only from M0; removed from the installer at M3;
   directory kept in-tree as `legacy/` until M4.
 

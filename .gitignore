@@ -1,5 +1,9 @@
 test/
 TODO.md
 .devcontainer
-go/bin/
-go/dist/
+bin/
+dist/
+
+# Session artifacts, not project files.
+log.txt
+*.patch

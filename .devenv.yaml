@@ -1,25 +1,30 @@
-# Project-specific configuration for isolated-dev
-# This file overrides global settings for this project only
+# Shared project configuration. Committed, reviewed like code.
+#
+# This states what the project NEEDS; it grants nothing on its own. Each
+# user accepts it once with `dev agent accept` and the decision is
+# recorded outside the repository (ROADMAP 4.2.1).
 
-# VM name for this project (optional)
-# vm_name: dev-vm-isolated-dev
+agents:
+  default:
+    # Building and testing this module requires the Go module proxy and
+    # the checksum database. Without them `go test` fails on a cold cache
+    # inside the sandbox.
+    allow_hosts:
+      - proxy.golang.org
+      - sum.golang.org
 
-# Default template for this project (optional)
-default_template: ubuntu-24.04
+    # Run the agent on a Go image so it can build and test its own work.
+    # The agent's node runtime is installed into the overlay, so the base
+    # does not need to carry it.
+    base: golang:1.26
 
-# Container prefix for this project (optional)
-container_prefix: isolated-dev
+# Base images pinned to the digests they resolved to. A tag says
+# which image you meant; a digest says which image you got.
+# Re-resolve deliberately with `dev pin --update`.
+pins:
+  "golang:1.26-alpine": "golang@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2"
 
-# Network configuration (optional)
-network_mode: host                  # bridge, host, none, or custom network
-# auto_host_networking: false       # Auto-use host networking
-# port_range: "3000-9000"           # Custom port range
-enable_port_health_check: false     # Enable port health checks
-# port_health_timeout: 5            # Port check timeout (seconds)
-
-mount_ssh_keys: true                  
-mount_git_config: true 
-
-# Resource limits (optional)
-# memory_limit: "512m"              # Memory limit (e.g., "512m", "1g")
-# cpu_limit: "0.5"                  # CPU limit (e.g., "0.5", "1.0")
+# Upgrade the base image's own packages on every build. Set by
+# `dev update`: most of what a scanner reports lives here, and
+# neither a new base digest nor a cacheless rebuild touches it.
+upgrade_packages: true

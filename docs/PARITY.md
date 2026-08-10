@@ -17,7 +17,7 @@ dropped with a reason written down.
 
 | v1 | decision | state |
 |---|---|---|
-| `dev` (bare run) | keep | done — `dev2 run` |
+| `dev` (bare run) | keep | done — `dev run` |
 | `dev shell` | keep | done |
 | `dev build` | keep | done |
 | `dev run -c '<cmd>'` | keep | done |
@@ -25,7 +25,7 @@ dropped with a reason written down.
 | private clone runs (`--clone`) | new in v2 | done — an unattended run cannot damage the working tree |
 | devcontainer.json (write) | keep | done — exports the environment; says plainly that it does not export the sandbox |
 | `dev new` | keep | done — no Dockerfile written; the template is rendered at build time |
-| `dev list` | redesign | done — `dev2 status` |
+| `dev list` | redesign | done — `dev status` |
 | language detection | redesign | done — reads plugin data, deterministic |
 | language plugins | keep (format unchanged) | done — all 8 load |
 
@@ -42,7 +42,7 @@ dropped with a reason written down.
 
 ## Migration
 
-`dev2 migrate` reports what changes for an existing v1 setup. v2 reads
+`dev migrate` reports what changes for an existing v1 setup. v2 reads
 v1's files, so nothing needs converting; what changes is what some
 settings MEAN, and which of them never did anything. With `--write` it
 strips the never-implemented keys, taking their comment headings with them
@@ -50,7 +50,7 @@ and keeping a timestamped backup.
 
 ## Redesigned
 
-**`dev interactive` → `dev2 console`.** v1's interactive mode is a menu
+**`dev interactive` → `dev console`.** v1's interactive mode is a menu
 that wraps commands. It is useful, and it is also the wrong shape for a
 tool whose interesting events happen *while* something runs. Replaced by a
 full-screen console: workload output in one pane, egress decisions in
@@ -59,16 +59,16 @@ waits. It is a separate command that delegates to the same code `run`
 uses, so nothing becomes console-only.
 
 Not yet: an interactive shell inside the console, which needs a pty per
-pane. `dev2 shell` covers that case today.
+pane. `dev shell` covers that case today.
 
-**`dev list` → `dev2 status`.** v1 lists images. What a user needs is what
+**`dev list` → `dev status`.** v1 lists images. What a user needs is what
 is *running*, in which project, under which policy, and what it has been
 blocked from reaching. Done: it reports the resolved network mode with its
 origin, the destinations allowed and why (language registries vs. granted),
 running containers with their role, and — while a sidecar is up — what has
 been blocked so far in that run.
 
-**`dev env` → `dev2 vm`.** VM lifecycle, narrowed to what is actually
+**`dev env` → `dev vm`.** VM lifecycle, narrowed to what is actually
 needed: `start` and `status`. v1 called `orb start` and assumed it worked;
 v2 checks. Creating and destroying VMs is OrbStack's job, not this tool's.
 
@@ -79,9 +79,9 @@ remoteUser, postCreateCommand — is reported on every build rather than
 dropped silently, since those are grants in this model rather than
 settings.
 
-**`dev debug` → `dev2 doctor`.** Done. Diagnosis only; never repairs.
+**`dev debug` → `dev doctor`.** Done. Diagnosis only; never repairs.
 
-**`dev arch` → folded into `dev2 version`.** A whole command for one line
+**`dev arch` → folded into `dev version`.** A whole command for one line
 of output did not earn its place.
 
 ## Dropped
@@ -104,7 +104,7 @@ of output did not earn its place.
 
 | `dev security scan` | M3, with real exit codes as a CI gate |
 | `dev security check` | M3 |
-| `dev disk`, `dev troubleshoot` | M3 — candidates for folding into `doctor` |
+| `dev disk`, `dev troubleshoot` | folded into `doctor` — nobody runs a disk command on a good day |
 
 ## Behavior changes worth knowing
 

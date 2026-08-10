@@ -1,0 +1,56 @@
+version: 2
+
+project_name: dev
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dev
+    main: ./cmd/dev
+    binary: dev
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X github.com/mwing/isolated-dev/internal/cli.Version={{.Version}}
+      - -X github.com/mwing/isolated-dev/internal/cli.Commit={{.Commit}}
+      - -X github.com/mwing/isolated-dev/internal/cli.Date={{.Date}}
+
+  # The egress sidecar runs inside the container network, so it is only
+  # ever built for Linux.
+  - id: dev-proxy
+    main: ./cmd/dev-proxy
+    binary: dev-proxy
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+# Signing lands in M3 alongside the brew tap; the placeholder is left here
+# deliberately so the release path is not invented at the last minute.
+# signs:
+#   - cmd: cosign
+#     artifacts: checksum
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  prerelease: auto
