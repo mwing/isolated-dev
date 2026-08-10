@@ -315,7 +315,14 @@ func (r *Runner) SocketGID(ctx context.Context, image, hostSock string) (string,
 	return strings.TrimSpace(out.String()), nil
 }
 
-// EnsureVolume creates the agent's home volume if absent.
+// EnsureVolume creates the agent's home volume if absent, adopting the one
+// the tool used under its old name.
+//
+// The rename from dev2 to dev moved this volume, and the volume holds an
+// OAuth login. Creating a fresh empty one would look like a bug — the
+// agent simply asks you to log in again, with nothing to explain why — so
+// the contents are carried over once and the old volume is left in place
+// for anyone who wants to be sure before deleting it.
 func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
 	exists, err := r.Engine.VolumeExists(ctx, a.VolumeName())
 	if err != nil {
@@ -324,7 +331,43 @@ func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
 	if exists {
 		return nil
 	}
-	return r.Engine.VolumeCreate(ctx, a.VolumeName())
+	if err := r.Engine.VolumeCreate(ctx, a.VolumeName()); err != nil {
+		return err
+	}
+	return r.adoptLegacyVolume(ctx, a)
+}
+
+// legacyVolumeName is what this volume was called before the tool was
+// renamed. It can be deleted once nobody is upgrading across that change.
+func legacyVolumeName(a *Agent) string { return "dev2-agent-" + a.Name }
+
+func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
+	old := legacyVolumeName(a)
+	exists, err := r.Engine.VolumeExists(ctx, old)
+	if err != nil || !exists {
+		return nil
+	}
+
+	// Copied inside a container because the volumes live in the VM, not on
+	// the host. Failure is reported and not fatal: the worst case is one
+	// login, and refusing to run the agent over it would be worse.
+	spec := container.RunSpec{
+		Image:   "alpine",
+		Remove:  true,
+		Command: []string{"sh", "-c", "cp -a /from/. /to/ 2>/dev/null || true"},
+		Mounts: []container.Mount{
+			{Source: old, Target: "/from", Volume: true, ReadOnly: true},
+			{Source: a.VolumeName(), Target: "/to", Volume: true},
+		},
+	}
+	if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
+		fmt.Fprintf(r.Out, "⚠  could not carry %s over to %s: %v\n", old, a.VolumeName(), err)
+		return nil
+	}
+	fmt.Fprintf(r.Out, "Carried the stored login from %s into %s.\n", old, a.VolumeName())
+	fmt.Fprintf(r.Out, "  The old volume is left alone; remove it with:\n")
+	fmt.Fprintf(r.Out, "    docker volume rm %s\n", old)
+	return nil
 }
 
 // Logout removes the agent's home volume, discarding its stored login.

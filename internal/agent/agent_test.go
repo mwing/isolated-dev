@@ -1,12 +1,17 @@
 package agent
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/backend/orbstack"
+	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/runner"
 )
 
 func TestBuiltinsAreValid(t *testing.T) {
@@ -635,4 +640,70 @@ func contains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The rename moved this volume, and the volume holds an OAuth login. A
+// fresh empty one would look like a bug: the agent just asks you to log in
+// again, with nothing to explain why.
+func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
+	fake := runner.NewFake()
+	// Keys are a prefix of the whole rendered command, which the backend
+	// wraps in its own invocation.
+	const orb = "orb -m vm sudo docker "
+	// The new volume does not exist; the one from before the rename does.
+	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 1}
+	fake.Response[orb+"volume inspect dev2-agent-claude"] = runner.Result{ExitCode: 0}
+
+	r := &Runner{
+		Engine: container.New(orbstack.New("vm", fake)),
+		Out:    io.Discard,
+	}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b"}
+	if err := r.EnsureVolume(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+
+	var created, copied bool
+	for _, c := range fake.Calls {
+		line := c.String()
+		if strings.Contains(line, "volume create dev-agent-claude") {
+			created = true
+		}
+		// The copy runs in a container because the volumes live in the VM.
+		if strings.Contains(line, "source=dev2-agent-claude") &&
+			strings.Contains(line, "source=dev-agent-claude") {
+			copied = true
+		}
+	}
+	if !created {
+		t.Fatal("did not create the new volume")
+	}
+	if !copied {
+		t.Fatalf("did not copy the old volume in; calls:\n%s", callLines(fake))
+	}
+}
+
+// With nothing to adopt, it must not run a pointless container.
+func TestEnsureVolumeSkipsAdoptionWhenThereIsNoOldVolume(t *testing.T) {
+	fake := runner.NewFake()
+	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
+
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b"}
+	if err := r.EnsureVolume(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fake.Calls {
+		if strings.Contains(c.String(), "docker run") {
+			t.Fatalf("ran a container with nothing to adopt:\n%s", callLines(fake))
+		}
+	}
+}
+
+func callLines(f *runner.Fake) string {
+	var b strings.Builder
+	for _, c := range f.Calls {
+		b.WriteString("  " + c.String() + "\n")
+	}
+	return b.String()
 }
