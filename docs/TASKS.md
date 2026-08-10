@@ -208,7 +208,27 @@ the error (`dev clean --all`).
 **Acceptance:** a test with the fake runner where inspect reports
 `false` and creation is requested internal — assert the run refuses.
 
-## T6. SNI is claimed and not implemented  **[verified]**
+## T6. SNI is claimed and not implemented  **[verified] [DONE]**
+
+Implemented rather than documented away: the gap was real, and the sentence
+was worth keeping true. `internal/netpolicy/clienthello.go` parses the
+opening TLS record and refuses a session whose SNI is not the CONNECT
+authority, with a fatal `access_denied` alert so the block reaches the
+developer at the failed request rather than only the log.
+
+The record is inspected as it streams past rather than held: buffering until
+a complete ClientHello had arrived would deadlock any protocol whose server
+speaks first, and would put the check in the latency path of every
+connection. The verdict therefore lands a moment after the bytes it is
+about, which costs the far end one closed socket and reveals nothing the
+CONNECT had not. No interception: nothing is decrypted or rewritten, and a
+test asserts the client still sees the upstream's own certificate.
+
+Three cases pass deliberately and are documented in ROADMAP 4.3: a
+connection that is not TLS (ssh on 22, which `--allow-push` grants), a
+ClientHello with no SNI (it reaches the dialled host's default, already
+approved), and a matching name. A handshake record that cannot be read is
+refused, since fragmenting the ClientHello is how such a check is evaded.
 
 `docs/ROADMAP.md:236` says the proxy "allowlists by CONNECT target / SNI
 hostname"; `:369` says "SNI-allowlisting". No ClientHello or ServerName
@@ -508,7 +528,7 @@ Done means all six of these are true at once:
 | T3 | done — with a policy denying a host, all of `--allow-host`, the interactive grant, and `dev agent accept` refuse it; agent runs honor `network_modes`, `forbid`, `require.*` |
 | T4 | an accepted mount appears in the RunSpec and an unaccepted one does not — or the key is gone from config, consent, doctor, migrate and the docs |
 | T5 | a non-internal pre-existing network makes the run fail loudly, naming `dev clean --all` |
-| T6 | a handshake whose SNI differs from the CONNECT host is refused — or no doc claims SNI |
+| T6 | done — a handshake whose SNI differs from the CONNECT host is refused, and no interception is added to do it |
 | T7 | a connection transferring past the timeout survives; a silent one is closed |
 | T8 | the sidecar image builds with no repository present |
 | T9 | `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |

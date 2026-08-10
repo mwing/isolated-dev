@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,10 +33,12 @@ type Event struct {
 
 // Proxy is an HTTP CONNECT proxy that enforces an allowlist.
 //
-// It never terminates TLS. CONNECT targets are checked by hostname and the
-// bytes are then relayed untouched, so certificate pinning keeps working
-// and the proxy never sees plaintext. The cost, accepted deliberately in
-// ROADMAP 4.3, is that filtering is per-host and not per-path.
+// It never terminates TLS. CONNECT targets are checked by hostname, the SNI
+// inside the session is checked against that hostname as the opening record
+// streams past (see clienthello.go), and the bytes are relayed untouched, so
+// certificate pinning keeps working and the proxy never sees plaintext. The
+// cost, accepted deliberately in ROADMAP 4.3, is that filtering is per-host
+// and not per-path.
 type Proxy struct {
 	// allow is replaceable at runtime so a live console can widen the
 	// policy without restarting the workload. It is unexported and guarded
@@ -225,11 +229,45 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The name inside the session has to be the name the allowlist approved.
+	// Checking the CONNECT authority alone leaves the connection to an
+	// allowed front open to being steered elsewhere by SNI, which is the one
+	// bypass a per-host policy on a CDN cannot otherwise see.
+	src := &sniffer{src: buf, verify: func(h clientHello) error {
+		switch {
+		case !h.TLS:
+			return nil
+		case h.ServerName == "":
+			// No SNI: the far end serves whatever it serves by default, and
+			// that host is the one already approved.
+			return nil
+		case sameServerName(h.ServerName, host):
+			return nil
+		}
+		return &sniMismatch{Target: host, SNI: h.ServerName}
+	}}
+
 	start := p.now()
-	n := relay(client, buf, upstream, p.IdleTimeout)
+	n, verdict := relay(client, src, buf, upstream, p.IdleTimeout)
+	if m, ok := verdict.(*sniMismatch); ok {
+		// A fatal TLS alert rather than a bare close. The client is
+		// mid-handshake and a dropped connection there is indistinguishable
+		// from a flaky network; this reaches the developer staring at the
+		// failed request, which is what denyResponse does for plain HTTP.
+		_, _ = client.Write(tlsAccessDenied)
+		p.emit(Event{Action: "deny", Host: m.Host(), Port: port, Method: r.Method,
+			Bytes: n, Reason: m.Error()})
+		return
+	}
 	p.emit(Event{Action: "allow", Host: host, Port: port, Method: r.Method,
 		Bytes: n, Latency: p.now().Sub(start).String()})
 }
+
+// tlsAccessDenied is a TLS record carrying a fatal access_denied alert. It
+// is sent in place of the ServerHello the client is waiting for. Writing an
+// alert is not terminating the session: no handshake is performed, no key is
+// negotiated, and nothing the client sent is decrypted.
+var tlsAccessDenied = []byte{0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 49}
 
 func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if !r.URL.IsAbs() {
@@ -371,8 +409,14 @@ func removeHopByHop(h http.Header) {
 
 // relay copies bytes in both directions until either side closes, and
 // returns the total relayed.
-func relay(client net.Conn, buf *bufio.ReadWriter, upstream net.Conn, idle time.Duration) int64 {
-	var wg sync.WaitGroup
+//
+// src is the client half, which the caller may wrap to inspect the opening
+// bytes. When that wrapper refuses the connection its verdict is returned,
+// and relay does not close the client's write side on the way out: the
+// caller speaks last, and it can only do that if both copies have finished
+// and nobody else is writing.
+func relay(client net.Conn, src io.Reader, buf *bufio.ReadWriter,
+	upstream net.Conn, idle time.Duration) (int64, error) {
 	var total int64
 	var mu sync.Mutex
 
@@ -390,30 +434,47 @@ func relay(client net.Conn, buf *bufio.ReadWriter, upstream net.Conn, idle time.
 	touch(client)
 	touch(upstream)
 
-	wg.Add(2)
+	var aborting atomic.Bool
+	done := make(chan struct{})
 	go func() {
-		defer wg.Done()
-		n, _ := io.Copy(upstream, buf)
-		add(n)
-		if c, ok := upstream.(*net.TCPConn); ok {
-			_ = c.CloseWrite()
-		} else {
-			_ = upstream.Close()
-		}
-	}()
-	go func() {
-		defer wg.Done()
+		defer close(done)
 		n, _ := io.Copy(buf, upstream)
 		add(n)
 		_ = buf.Flush()
+		if aborting.Load() {
+			return
+		}
 		if c, ok := client.(*net.TCPConn); ok {
 			_ = c.CloseWrite()
 		} else {
 			_ = client.Close()
 		}
 	}()
-	wg.Wait()
-	return total
+
+	// The client half runs here rather than in a third goroutine so that a
+	// refusal can order what follows: stop the upstream, wait for the other
+	// direction to finish, and only then return to a caller that wants to
+	// write one last thing to the client.
+	n, err := io.Copy(upstream, src)
+	add(n)
+	// errors.As, not a type assertion: io.Copy hands the write side to
+	// TCPConn.ReadFrom when it can, and that wraps whatever the reader
+	// returned in a *net.OpError. The assertion silently missed it, and a
+	// refusal that is silently missed is worse than one never written.
+	var verdict *sniMismatch
+	if errors.As(err, &verdict) {
+		aborting.Store(true)
+		_ = upstream.Close()
+		<-done
+		return total, verdict
+	}
+	if c, ok := upstream.(*net.TCPConn); ok {
+		_ = c.CloseWrite()
+	} else {
+		_ = upstream.Close()
+	}
+	<-done
+	return total, nil
 }
 
 // Summary renders the denial tally for the exit report, most-blocked

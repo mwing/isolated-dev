@@ -259,6 +259,19 @@ Egress control is enforced by network topology, not by environment variables:
   terminate TLS: no injected CA, no MITM, certificate pinning keeps working,
   and the proxy never sees LLM traffic plaintext. The cost is that filtering
   is per-host, not per-path; that trade is accepted deliberately.
+
+  Both halves of that sentence are enforced, which they were not for a long
+  time. The CONNECT authority decides which address is dialled; the SNI
+  decides which site answers on a shared front, so checking only the first
+  left an allowed CDN name as a way to reach a denied one. The opening TLS
+  record is now read as it streams past — not held, not decrypted, not
+  rewritten — and a name that does not match the CONNECT target is refused
+  with a fatal `access_denied` alert. Two cases pass deliberately: a
+  connection that is not TLS at all (ssh on port 22 is a supported one) has
+  no name to check, and a ClientHello carrying no SNI reaches whatever the
+  dialled host serves by default, which is the host already approved. A
+  handshake record that cannot be read is refused rather than passed,
+  because fragmenting the ClientHello is how a check like this is evaded.
 - `HTTP(S)_PROXY`/`NO_PROXY` are injected as a convenience for well-behaved
   clients (npm, pip, git, curl, the agent CLIs); they are not the security
   boundary.

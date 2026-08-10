@@ -46,14 +46,17 @@ The enforcement is not an environment variable a program can ignore:
 The workload sits on a network with **no route out at all**. The sidecar
 is dual-homed and is the only path. Its DNS resolver answers for
 allowlisted names and refuses the rest, and its proxy checks the CONNECT
-target before relaying bytes.
+target — and the name inside the TLS session, which on a shared front is
+what actually decides who answers — before relaying bytes.
 
 Two consequences worth knowing:
 
 - **TLS is never terminated.** The proxy matches on hostname and then
   relays untouched, so certificate pinning keeps working and the proxy
   never holds your plaintext. The cost, accepted deliberately: filtering
-  is per-host, not per-path.
+  is per-host, not per-path. Reading the hostname out of the opening
+  handshake is not terminating it — the record is inspected on its way
+  past, and the session it opens is between your client and the far end.
 - **A process that ignores `HTTP_PROXY` gets nowhere.** The variables are
   a convenience for well-behaved clients, never the boundary.
 
