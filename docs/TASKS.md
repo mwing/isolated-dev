@@ -472,6 +472,43 @@ a language plugin fixture and asserts the registries reach the sidecar's
 
 Nothing to do; listed so it is not repeated.
 
+## T21. A stale sidecar enforces an older policy, silently  **[found while verifying T6]**
+
+`ensureProxyImage` accepts any locally-tagged `dev-proxy:latest`. The
+enforcement lives in that image, not in the `dev` binary, so a rebuilt
+binary and a stale image means the tool reports policies it is not applying.
+
+This is not hypothetical. Verifying T6 end to end, a mismatched SNI
+completed its handshake — because the sidecar image predated the SNI check
+by five commits. Nothing said so: `dev doctor` reported the image present,
+the run reported itself filtered, and the bypass the commit had just closed
+was wide open. It took a rebuild to notice, and only because the test was
+expected to fail.
+
+**Do:** fold into T8. Stamp the same version into both binaries at build
+time, have the sidecar report it in the line `waitReady` already parses,
+and refuse — not warn — when they disagree. A warning here is a line
+scrolling past above a run that then proceeds under the wrong policy.
+
+**Acceptance:** a run against a deliberately older sidecar image fails with
+a message naming the skew and the rebuild.
+
+## T22. Nothing reaps orphans in a container  **[done — fixed here]**
+
+The workload ran as pid 1, which inherits every orphaned process and reaps
+none of them. With `PidsLimit` at 512 that is not untidiness but a hard
+failure: the agent working through this queue accumulated 458 zombie `git`
+processes from `internal/clone`'s tests, after which `fork` failed and the
+suite reported errors that looked like test failures and were not.
+
+Fixed by adding `--init` to the hardened spec, so `docker-init` is pid 1 and
+reaps. Verified in a real run (`/proc/1/comm` is `docker-init`) and held by
+a unit test on the rendered argv.
+
+Worth noting for anything else that reads this: it was invisible for months
+because it only bites a workload that spawns many short-lived children, and
+the symptom names the wrong culprit.
+
 ## T20. The gitconfig filter is a denylist wearing an allowlist's label
 
 `internal/cli/hostaccess.go` filters the host gitconfig by dropping known
@@ -607,6 +644,8 @@ Done means all six of these are true at once:
 | T18 | done — one transport is reused across plain-HTTP requests |
 | T19 | done — an agent run's `--allow` contains the project's language registries |
 | T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
+| T21 | a run against an older sidecar image fails, naming the skew |
+| T22 | done — `/proc/1/comm` in a run is an init, not the workload |
 
 ---
 
@@ -720,7 +759,7 @@ Twelve steps. Each is a commit; the groups are natural stopping points.
 | 7 | **T6** SNI | Decide and act. Doing it after T3 means the sentence you write about enforcement is about a code path that is finally true. |
 | 8 | **T9, T13** | Small, mechanical, user-visible. A palate cleanser after the P0 block, and T9 unblocks CI use. |
 | 9 | **T7, T10, T18** | The proxy's connection handling, all in `internal/netpolicy`, all needing the same real-daemon verification — one context, one sitting. |
-| 10 | **T8** distribution | Needs the sidecar to be otherwise finished, since embedding it fixes its build path. Before any release, and before asking anyone else to install this. |
+| 10 | **T8 + T21** distribution and version skew | Needs the sidecar to be otherwise finished, since embedding it fixes its build path. Before any release, and before asking anyone else to install this. |
 | 11 | **T11, T12, T14** | User-facing surface: the port bug, the command move, the stale plugin docs. T12 last of the three because it renames things the other two mention. |
 | 12 | **T20, T15 (rest), T16, T17** | Finish the integration tier, then hardening. Hardening last is deliberate: each item widens or narrows matching behavior, and you want the full test suite underneath before touching allowlist semantics. |
 

@@ -1,6 +1,7 @@
 package container
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -286,5 +287,16 @@ func TestNoCacheIsOptIn(t *testing.T) {
 	}
 	if !argsContain(BuildSpec{Tag: "t", Context: ".", NoCache: true}.Args(), "--no-cache") {
 		t.Error("NoCache did not reach the build")
+	}
+}
+
+// Without an init, the workload is pid 1, and pid 1 inherits orphans
+// without reaping them. Combined with PidsLimit that is not untidiness, it
+// is a hard failure: found as 458 zombie git processes from a test suite,
+// turning the next fork into an error that looked like a test failure.
+func TestHardenedRunsGetAnInit(t *testing.T) {
+	args := Hardened().Args()
+	if !slices.Contains(args, "--init") {
+		t.Fatalf("hardened spec does not ask for an init:\n%s", strings.Join(args, " "))
 	}
 }

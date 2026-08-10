@@ -93,6 +93,17 @@ type RunSpec struct {
 	Remove      bool
 	Detach      bool
 
+	// Init runs a minimal init as pid 1 to reap orphaned processes.
+	//
+	// Without it the workload is pid 1, and pid 1 inherits every orphan
+	// without reaping it. A process that spawns short-lived children —
+	// a test suite shelling out to git, a build driving compilers — leaks
+	// a zombie per orphan until PidsLimit is reached, and then fork fails.
+	// The failure surfaces as whatever was running at the time, which is
+	// never the real cause: found here as 458 zombie git processes turning
+	// a passing test suite into fork errors.
+	Init bool
+
 	// GroupAdd adds supplementary groups. Used to reach a forwarded socket
 	// whose group ownership the host's file sharing decided, without
 	// changing the uid the container runs as.
@@ -117,6 +128,9 @@ func Hardened() RunSpec {
 		User:    "1000:1000",
 		CapDrop: []string{"ALL"},
 		CapAdd:  []string{"CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"},
+		// Every hardened run gets an init: PidsLimit makes leaked zombies
+		// fatal rather than merely untidy, so the two belong together.
+		Init: true,
 		SecurityOpt: []string{
 			"no-new-privileges:true",
 		},
@@ -169,6 +183,9 @@ func (s RunSpec) Args() []string {
 	}
 	for _, o := range s.SecurityOpt {
 		add("--security-opt", o)
+	}
+	if s.Init {
+		add("--init")
 	}
 	if s.PidsLimit > 0 {
 		add("--pids-limit", strconv.Itoa(s.PidsLimit))
