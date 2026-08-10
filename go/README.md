@@ -8,6 +8,10 @@ This is the Go rewrite of isolated-dev. It ships as `dev2` while the bash
 [docs/ROADMAP.md](../docs/ROADMAP.md) for where it is going and
 [docs/PARITY.md](../docs/PARITY.md) for what changed from v1 and why.
 
+**Adding this to a repository you already have? Start with
+[QUICKSTART.md](QUICKSTART.md)** — including the awkward parts: monorepos,
+production Dockerfiles, and why your first build ships 7 GB to the daemon.
+
 **New here? Start with [USAGE.md](USAGE.md)** — it works through the
 common jobs: updating dependencies, running software you do not trust,
 sandboxing an agent, and running a server with no network at all.
@@ -128,6 +132,7 @@ hostile project would widen its own access before anyone read it.
 
 ## Where to go next
 
+- **[QUICKSTART.md](QUICKSTART.md)** — adopting dev2 in an existing repository
 - **[USAGE.md](USAGE.md)** — the common jobs, worked through
 - **[../docs/ROADMAP.md](../docs/ROADMAP.md)** — design and security model
 - **[../docs/PARITY.md](../docs/PARITY.md)** — what v1 did, and what v2 does instead
