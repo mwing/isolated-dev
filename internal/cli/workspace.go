@@ -277,6 +277,24 @@ type workspaceOpts struct {
 	CloneDepth int
 }
 
+// workspaceAllowlist is the egress policy a plain run enforces: the
+// project's own language registries, the destinations this user granted, and
+// the ones the project requested and this user accepted.
+//
+// The registries are permitted because a build that cannot reach its own
+// package index is not a policy, it is a broken tool.
+//
+// `dev run`, `dev shell` and `dev console` resolve it here rather than each
+// assembling their own. That was the bug: `dev agent accept` recorded a
+// decision, and the plain runs — which consume the same grants and print
+// the same remedy when blocked — silently left the accepted half out. Two
+// commands that should agree must not be able to drift.
+func workspaceAllowlist(cfg config.Config, p *project.Project, store *trust.Store) []string {
+	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
+	return append(allowed,
+		store.AcceptedRequest("default", projectRequest(cfg, "default"))...)
+}
+
 func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
@@ -355,11 +373,8 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		return streamRun(ctx, env, eng, spec, o.Fallback)
 	}
 
-	// Allowlist mode: the same enforcement agents get. The project's
-	// language registries are permitted because a build that cannot reach
-	// its own package index is not a policy, it is a broken tool.
-	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
-	allowed = append(allowed, o.ExtraHosts...)
+	// Allowlist mode: the same enforcement agents get.
+	allowed := append(workspaceAllowlist(cfg, p, store), o.ExtraHosts...)
 
 	if len(allowed) == 0 {
 		fmt.Fprintf(env.Stderr,

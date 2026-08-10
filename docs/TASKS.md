@@ -88,7 +88,7 @@ harness in `internal/cli/cli_test.go`, run
 invocation does **not** contain `--dangerously-skip-permissions`. Assert
 the inverse without `--safe`. The existing unit test stays.
 
-## T2. Accepted egress hosts do not apply to plain runs  **[verified]**
+## T2. Accepted egress hosts do not apply to plain runs  **[verified] [DONE]**
 
 `store.AcceptedRequest(...)` is included when building the allowlist in
 `internal/cli/agent.go:353` and `internal/cli/console.go:369`, and is

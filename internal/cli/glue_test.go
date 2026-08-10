@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/mwing/isolated-dev/internal/trust"
 )
 
 // These tests drive the real cobra command tree and assert on the docker
@@ -37,6 +39,74 @@ func TestWorkspaceRunRendersAHardenedContainerOnTheInternalNetwork(t *testing.T)
 	}
 	if !strings.Contains(h.stderr.String(), "nothing is allowed") {
 		t.Errorf("an empty allowlist was not explained:\n%s", h.stderr.String())
+	}
+}
+
+// requestOneHost is a project file asking for a single destination on
+// behalf of every agent — the "default" key, which is what a plain run
+// resolves against.
+const requestOneHost = `agents:
+  default:
+    allow_hosts:
+      - internal.example.com
+`
+
+func TestAcceptedHostsApplyToPlainRuns(t *testing.T) {
+	// `dev agent accept` records a decision; `dev run` has to honor it.
+	// Two commands disagreeing about what is permitted is the bug, and it
+	// looks to the user like the acceptance did nothing.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, requestOneHost)
+	h.acceptHosts(t, "default", "internal.example.com")
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, strings.Join(h.fake.Lines(), "\n"))
+	}
+	if allow := h.sidecarAllow(t); !contains(allow, "internal.example.com") {
+		t.Fatalf("accepted host absent from the allowlist for `dev run`: %v", allow)
+	}
+}
+
+func TestAnUnacceptedRequestGrantsNothingToAPlainRun(t *testing.T) {
+	// The project file is a request. A clone must not widen its own egress
+	// by being run.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, requestOneHost)
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if allow := h.sidecarAllow(t); contains(allow, "internal.example.com") {
+		t.Fatalf("an unaccepted request applied itself: %v", allow)
+	}
+}
+
+func TestRunAndConsoleResolveTheSameAllowlist(t *testing.T) {
+	// Both commands go through workspaceAllowlist, which is the point: the
+	// divergence was two call sites assembling the set independently, and
+	// only one of them including what the user had accepted.
+	h := newHarness(t)
+	h.writeProject(t, requestOneHost)
+	h.acceptHosts(t, "default", "internal.example.com")
+	h.grantHosts(t, "default", "granted.example.com")
+
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := trust.Load(h.paths.Home, p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := workspaceAllowlist(cfg, p, store)
+	for _, want := range []string{"internal.example.com", "granted.example.com"} {
+		if !contains(got, want) {
+			t.Errorf("missing %q in %v", want, got)
+		}
 	}
 }
 

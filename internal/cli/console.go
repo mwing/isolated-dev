@@ -157,7 +157,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		if err != nil {
 			return err
 		}
-		allowed = append(p.Registries(), store.Resolve("default").AllowHosts...)
+		allowed = workspaceAllowlist(cfg, p, store)
 	}
 	allowed = append(allowed, extraHosts...)
 

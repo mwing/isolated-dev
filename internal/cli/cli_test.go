@@ -129,6 +129,31 @@ func (h *harness) readySidecar() {
 		sidecarName)] = runner.Result{Stdout: "172.31.0.2\n"}
 }
 
+// acceptHosts records this user's acceptance of destinations the project
+// requested, which is what `dev agent accept` writes.
+func (h *harness) acceptHosts(t *testing.T, agentName string, hosts ...string) {
+	t.Helper()
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Accept(agentName, hosts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// grantHosts records a user's own grant, which is what `dev allow` writes.
+func (h *harness) grantHosts(t *testing.T, agentName string, hosts ...string) {
+	t.Helper()
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Grant(store.Project, agentName, hosts); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // dockerArgs returns the argument vector of every docker invocation, with
 // the backend's wrapper stripped. Assertions work on the vector rather than
 // on a rendered line: the argv is the behavior, and a rendered line has to
