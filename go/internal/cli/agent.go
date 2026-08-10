@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/go/internal/agent"
+	"github.com/mwing/isolated-dev/go/internal/clone"
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
 	"github.com/mwing/isolated-dev/go/internal/history"
@@ -140,18 +141,19 @@ func newAgentLogoutCmd(env *Env) *cobra.Command {
 
 func newAgentRunCmd(env *Env) *cobra.Command {
 	var (
-		extraHosts []string
-		image      string
-		authMode   string
-		authEnv    []string
-		rebuild    bool
-		memory     string
-		cpus       string
-		dryRun     bool
-		tty        string
-		notify     string
-		safe       bool
-		allowPush  bool
+		extraHosts  []string
+		image       string
+		authMode    string
+		authEnv     []string
+		rebuild     bool
+		memory      string
+		cpus        string
+		dryRun      bool
+		tty         string
+		notify      string
+		safe        bool
+		allowPush   bool
+		useCloneDir bool
 	)
 
 	cmd := &cobra.Command{
@@ -190,6 +192,24 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 
 			opts.GitIdentity = gitIdentity(env)
 
+			// An agent left running unattended is the case a clone is
+			// for: the run keeps the project's identity, allowlist and
+			// history, and only the working tree it can damage changes.
+			if useCloneDir {
+				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
+				res, err := clone.Prepare(cmd.Context(), env.Runner, opts.Project, dest)
+				if err != nil {
+					return err
+				}
+				opts.Workspace = res.Path
+				fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
+				for _, note := range res.Notes {
+					fmt.Fprintf(env.Stdout, "           %s\n", note)
+				}
+				fmt.Fprintf(env.Stdout, "Bring back: git -C %s fetch %s\n",
+					opts.Project, res.Path)
+			}
+
 			if allowPush {
 				if err := grantPush(env, &opts); err != nil {
 					return err
@@ -222,6 +242,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 	cmd.Flags().StringVar(&tty, "tty", "auto", "allocate a terminal: auto, on, or off")
 	cmd.Flags().BoolVar(&allowPush, "allow-push", false,
 		"forward your ssh-agent so the agent can push, and allow the git host")
+	addCloneFlag(cmd, &useCloneDir)
 	cmd.Flags().BoolVar(&safe, "safe", false,
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",

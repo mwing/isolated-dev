@@ -22,6 +22,7 @@ dropped with a reason written down.
 | `dev build` | keep | done |
 | `dev run -c '<cmd>'` | keep | done |
 | `dev clean` | keep | done |
+| private clone runs (`--clone`) | new in v2 | done — an unattended run cannot damage the working tree |
 | devcontainer.json (write) | keep | done — exports the environment; says plainly that it does not export the sandbox |
 | `dev new` | keep | done — no Dockerfile written; the template is rendered at build time |
 | `dev list` | redesign | done — `dev2 status` |

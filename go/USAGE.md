@@ -40,6 +40,39 @@ written at all — a half-scaffolded directory is worse than a refusal, and
 
 ---
 
+## Letting an agent run without risking your working tree
+
+```sh
+dev2 agent run claude --clone
+dev2 run --clone -c './migrate.sh'
+```
+
+The container gets a private clone of the repository rather than the
+directory you are editing. Your uncommitted changes and untracked files
+are carried in, so the run starts from what you see; anything it does
+afterwards — including `rm -rf` — lands in the clone.
+
+```
+Clone:    ~/.dev-envs/clones/my-project
+          uncommitted changes carried in
+          1 untracked file(s) copied in
+Bring back: git -C . fetch ~/.dev-envs/clones/my-project
+```
+
+The work is not thrown away, it is moved: review it with
+`git -C <clone> status`, and fetch what you want back. A second run reuses
+the same clone rather than discarding the first one's work, and says how
+far it has drifted from the project.
+
+Two things it does not carry: ignored files, so dependencies are installed
+inside the sandbox rather than copied, and git objects are copied rather
+than hardlinked — a hardlinked object store is still your repository's own
+data, which is the thing being protected here.
+
+Needs a git repository, and the repository root.
+
+---
+
 ## Reviewing what a project reached
 
 Every filtered run is recorded, so the summary that scrolls past is still

@@ -1,0 +1,275 @@
+// Package clone gives a run a private copy of the project to work in.
+//
+// The default bind mount is the user's actual working tree, which is right
+// for a person typing commands and wrong for an agent left running
+// unattended: a mistake lands on the files being edited, and "undo" means
+// whatever git can recover. A clone moves the blast radius off the working
+// tree without taking the work away — the changes are still on disk,
+// reviewable and mergeable, just not in the directory the user is in.
+//
+// It is a copy, not a snapshot: git objects are copied rather than
+// hard-linked. Hard links are the fast default and are safe when both sides
+// are trusted, but this exists precisely for the case where the container
+// is not, and a process that rewrites a shared object file would corrupt
+// the repository it was cloned from.
+package clone
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/mwing/isolated-dev/go/internal/runner"
+)
+
+// Result describes the clone a run will use.
+type Result struct {
+	// Path is the directory to mount at /workspace.
+	Path string
+	// Fresh reports whether this run created it.
+	Fresh bool
+	// Notes are differences between the clone and the working tree that
+	// the user should know about before trusting what they see.
+	Notes []string
+}
+
+// Prepare returns a private copy of projectDir at dest, creating it when
+// it does not exist and reusing it when it does.
+//
+// Reuse is deliberate. An agent session that spans several runs would
+// otherwise lose its work every time, which is the one outcome worse than
+// working in the wrong directory. The cost is that the clone drifts from
+// the project, so drift is reported rather than silently tolerated.
+func Prepare(ctx context.Context, run runner.Runner, projectDir, dest string) (Result, error) {
+	res := Result{Path: dest}
+
+	top, err := gitOutput(ctx, run, projectDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return res, fmt.Errorf("--clone needs a git repository: %s is not one "+
+			"(a clone is how the work gets back out, and without git there is "+
+			"nothing to diff against)", projectDir)
+	}
+	// git reports a resolved path, so both sides are resolved before they
+	// are compared. Without this, a project reached through a symlink —
+	// /tmp on macOS, or anyone whose code directory is a link — is
+	// rejected as a subdirectory of itself.
+	if !sameDir(top, projectDir) {
+		// Cloning the whole repository when the user is in a subdirectory
+		// would mount a different tree than a normal run does, silently
+		// changing what /workspace means.
+		return res, fmt.Errorf("--clone works from the repository root; "+
+			"this is a subdirectory of %s", top)
+	}
+
+	if info, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil && info.IsDir() {
+		notes, err := driftNotes(ctx, run, projectDir, dest)
+		res.Notes = notes
+		return res, err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return res, err
+	}
+	// --no-hardlinks: see the package comment. The point of this mode is
+	// that the container is not trusted with the working tree, and a
+	// hard-linked object store is still the original repository's data.
+	if _, err := git(ctx, run, "", "clone", "--no-hardlinks", projectDir, dest); err != nil {
+		return res, fmt.Errorf("cloning %s: %w", projectDir, err)
+	}
+	res.Fresh = true
+
+	notes, err := carryUncommitted(ctx, run, projectDir, dest)
+	res.Notes = notes
+	return res, err
+}
+
+// carryUncommitted reproduces the working tree's uncommitted state in the
+// clone, so a run starts from what the user sees rather than from the last
+// commit.
+//
+// Without this, a clone silently discards work in progress — the run would
+// look fine and be operating on different code, which is worse than
+// refusing outright.
+func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) ([]string, error) {
+	var notes []string
+
+	// --binary so the patch survives files git considers binary; without
+	// it, apply fails on exactly the files nobody remembers to check.
+	//
+	// The output is used verbatim: a patch is newline-terminated, and
+	// trimming the last one makes `git apply` reject it as corrupt.
+	diffRes, err := git(ctx, run, src, "diff", "HEAD", "--binary")
+	if err != nil {
+		return notes, err
+	}
+	diff := diffRes.Stdout
+	if strings.TrimSpace(diff) != "" {
+		res, err := run.Run(ctx, runner.Command{
+			Path:  "git",
+			Args:  []string{"-C", dest, "apply", "--whitespace=nowarn"},
+			Stdin: strings.NewReader(diff),
+		})
+		if err != nil {
+			return notes, err
+		}
+		if res.ExitCode != 0 {
+			return notes, fmt.Errorf("carrying uncommitted changes into the clone: %s",
+				strings.TrimSpace(res.Stderr))
+		}
+		notes = append(notes, "uncommitted changes carried in")
+	}
+
+	untracked, err := gitOutput(ctx, run, src, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return notes, err
+	}
+	var copied int
+	for _, rel := range strings.Split(untracked, "\n") {
+		rel = strings.TrimSpace(rel)
+		if rel == "" {
+			continue
+		}
+		if err := copyFile(filepath.Join(src, rel), filepath.Join(dest, rel)); err != nil {
+			return notes, err
+		}
+		copied++
+	}
+	if copied > 0 {
+		notes = append(notes, fmt.Sprintf("%d untracked file(s) copied in", copied))
+	}
+	// Ignored files are not carried: they are build output and installed
+	// dependencies, they are the bulk of a large tree, and a clone that
+	// copied them would take minutes to make. Say so, because a missing
+	// node_modules looks like a bug until you know.
+	notes = append(notes, "ignored files (dependencies, build output) not copied — "+
+		"install them inside the sandbox")
+	return notes, nil
+}
+
+// driftNotes describes how a reused clone differs from the project.
+func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]string, error) {
+	notes := []string{"reusing the existing clone"}
+
+	srcHead, err := gitOutput(ctx, run, src, "rev-parse", "HEAD")
+	if err != nil {
+		return notes, nil
+	}
+	destHead, err := gitOutput(ctx, run, dest, "rev-parse", "HEAD")
+	if err != nil {
+		return notes, nil
+	}
+	if srcHead != destHead {
+		notes = append(notes, "the clone is on a different commit than the project")
+	}
+	if status, err := gitOutput(ctx, run, dest, "status", "--porcelain"); err == nil {
+		if n := len(nonEmptyLines(status)); n > 0 {
+			notes = append(notes, fmt.Sprintf("%d uncommitted change(s) already in the clone", n))
+		}
+	}
+	return notes, nil
+}
+
+// sameDir compares two paths after resolving symlinks.
+func sameDir(a, b string) bool {
+	ra, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		ra = a
+	}
+	rb, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		rb = b
+	}
+	return filepath.Clean(ra) == filepath.Clean(rb)
+}
+
+func nonEmptyLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func git(ctx context.Context, run runner.Runner, dir string, args ...string) (runner.Result, error) {
+	cmd := runner.Command{Path: "git", Args: args, Dir: dir}
+	res, err := run.Run(ctx, cmd)
+	if err != nil {
+		return res, err
+	}
+	if res.ExitCode != 0 {
+		return res, fmt.Errorf("git %s: %s", strings.Join(args, " "),
+			strings.TrimSpace(res.Stderr))
+	}
+	return res, nil
+}
+
+func gitOutput(ctx context.Context, run runner.Runner, dir string, args ...string) (string, error) {
+	res, err := git(ctx, run, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(res.Stdout, "\n"), nil
+}
+
+func copyFile(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	// Symlinks are recreated rather than followed: following one would
+	// copy a file from outside the project into the clone, which is the
+	// opposite of what this mode is for.
+	if info.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		_ = os.Remove(dst)
+		return os.Symlink(target, dst)
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
+}
+
+// Dir is where a project's clone lives.
+func Dir(home, slug string) string {
+	return filepath.Join(home, "clones", slug)
+}
+
+// Remove deletes a clone. It refuses anything that is not one, since the
+// argument is a path this tool composed and a bug here deletes a user's
+// work.
+func Remove(path string) error {
+	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
+		return fmt.Errorf("clone: %s does not look like a clone; not removing it", path)
+	}
+	return os.RemoveAll(path)
+}

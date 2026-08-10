@@ -142,6 +142,7 @@ func newRunCmd(env *Env) *cobra.Command {
 		extraHosts   []string
 		egressPrompt string
 		image        string
+		useCloneDir  bool
 	)
 
 	cmd := &cobra.Command{
@@ -157,11 +158,13 @@ func newRunCmd(env *Env) *cobra.Command {
 				ExtraHosts:   extraHosts,
 				EgressPrompt: egressPrompt,
 				Image:        image,
+				Clone:        useCloneDir,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
+	addCloneFlag(cmd, &useCloneDir)
 	return cmd
 }
 
@@ -175,6 +178,7 @@ func newShellCmd(env *Env) *cobra.Command {
 		extraHosts   []string
 		egressPrompt string
 		image        string
+		useCloneDir  bool
 	)
 
 	cmd := &cobra.Command{
@@ -196,11 +200,13 @@ func newShellCmd(env *Env) *cobra.Command {
 				EgressPrompt: egressPrompt,
 				Image:        image,
 				Fallback:     []string{"/bin/sh"},
+				Clone:        useCloneDir,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
+	addCloneFlag(cmd, &useCloneDir)
 	return cmd
 }
 
@@ -214,6 +220,12 @@ func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offlin
 	cmd.Flags().BoolVar(offline, "offline", false, "no network at all")
 	cmd.Flags().StringVar(network, "network", "", "override network mode: allowlist, open or none")
 	cmd.Flags().StringArrayVar(extraHosts, "allow-host", nil, "add a destination for this run")
+}
+
+// addCloneFlag is shared by every command that mounts a workspace.
+func addCloneFlag(cmd *cobra.Command, clone *bool) {
+	cmd.Flags().BoolVar(clone, "clone", false,
+		"work in a private clone of the repository, not the working tree")
 }
 
 // egressPromptFlag is shared by run and shell.
@@ -248,6 +260,10 @@ type workspaceOpts struct {
 	// Fallback is tried when the primary command is missing from the
 	// image, so a distroless or alpine base still opens a shell.
 	Fallback []string
+	// Clone mounts a private copy of the repository instead of the
+	// working tree, so an unattended run cannot damage what is being
+	// edited outside it.
+	Clone bool
 }
 
 func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
@@ -316,6 +332,12 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	}
 	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, os.Stdin))
 	spec.Image = image
+
+	if o.Clone {
+		if err := useClone(ctx, env, p, &spec); err != nil {
+			return err
+		}
+	}
 
 	switch p.Network {
 	case project.NetworkOpen, project.NetworkNone:

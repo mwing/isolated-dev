@@ -223,7 +223,22 @@ dev2 in a large repository.
 
 ---
 
-## 7. Pin, update, scan
+## 7. Let an agent loose without risking your tree
+
+For anything unattended, put the run in a private clone:
+
+```sh
+dev2 agent run claude --clone
+```
+
+Your uncommitted work is carried in; whatever the agent does stays in
+`~/.dev-envs/clones/<project>` and comes back through git when you want
+it. Worth making the habit early — it is the difference between reviewing
+a diff and restoring from a stash.
+
+---
+
+## 8. Pin, update, scan
 
 Once it runs, make it reproducible and keep it patched:
 
@@ -244,7 +259,7 @@ same tag.
 
 ---
 
-## 8. Roll it out to the rest of the team
+## 9. Roll it out to the rest of the team
 
 ```sh
 git add .devenv.yaml .dockerignore && git commit
@@ -262,7 +277,7 @@ an editor will not start it. The generated file says so.
 
 ---
 
-## 9. Look back at what happened
+## 10. Look back at what happened
 
 ```sh
 dev2 history           # what each run reached, and what was blocked

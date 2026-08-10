@@ -10,6 +10,14 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 )
 
+// workspaceSource is the host directory to mount.
+func (o Options) workspaceSource() string {
+	if o.Workspace != "" {
+		return o.Workspace
+	}
+	return o.Project
+}
+
 // WorkspacePath is where the project is mounted inside the container.
 const WorkspacePath = "/workspace"
 
@@ -19,7 +27,12 @@ const HomePath = "/home/dev"
 // Options configure one agent run.
 type Options struct {
 	Agent   *Agent
-	Project string // host path to mount as the workspace
+	Project string // host path the run belongs to
+	// Workspace overrides what is mounted at /workspace. It is set for a
+	// clone run, where the container works in a private copy while the
+	// run still belongs to Project — grants, history and image are keyed
+	// by the project, not by whatever directory is mounted.
+	Workspace string
 	// ExtraHosts are per-run additions from --allow-host.
 	ExtraHosts []string
 	// AuthMode is "volume" (default, OAuth persists in a named volume) or
@@ -146,7 +159,7 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 	}
 
 	spec.Mounts = []container.Mount{
-		{Source: o.Project, Target: WorkspacePath},
+		{Source: o.workspaceSource(), Target: WorkspacePath},
 		// The agent's home is a named volume, so an OAuth login survives
 		// across runs without any credential touching the project tree.
 		{Source: a.VolumeName(), Target: HomePath, Volume: true},

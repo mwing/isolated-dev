@@ -498,6 +498,39 @@ The logging matters as much as the upgrade: "these packages moved, this
 base image moved" is the record that makes a pinned project safe to leave
 pinned.
 
+### 4.3.2: Credentials, and why the proxy does not inject them
+
+Docker Sandboxes keeps agent credentials on the host and has its proxy
+inject auth headers into outbound requests, so the key never enters the
+sandbox. It is the strongest idea in that design, and it is rejected here
+for a reason worth recording rather than rediscovering.
+
+Injection requires reading and rewriting the request, which requires
+terminating TLS for that host. This tool deliberately does not (4.3): the
+proxy checks the CONNECT target and relays bytes untouched, so certificate
+pinning keeps working and the proxy never holds anyone's plaintext.
+
+Scoping the injection is the easy half. A credential can be bound to one
+host, one path prefix, one method and one named header, and refused
+everywhere else — that part is ordinary matching, and it would stop a
+credential leaking to every destination on the allowlist.
+
+What scoping does not fix is the confused deputy. Any process in the
+sandbox can then issue requests to that host and have the credential
+attached on its way out. The key is protected; the *authority* is not.
+That is still a real improvement — a stolen key outlives the sandbox and
+borrowed authority does not — but it is a smaller improvement than it
+looks, bought with TLS interception, a CA certificate installed in the
+container's trust store, and per-host configuration that users have to
+maintain and get right.
+
+The better fit for this model is to broker the operation rather than the
+credential, which is already what `--allow-push` does: the ssh-agent
+socket is forwarded, so the container can ask for a signature and can
+never read the key. Generalizing that — a narrow host-side broker for the
+specific privileged actions a workload needs — gets the same property
+without touching TLS. Prefer it where a future case demands one.
+
 ### M4: Team features
 
 - Policy file: done. `~/.dev-envs/policy.yaml` restricts network modes,

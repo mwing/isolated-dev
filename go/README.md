@@ -65,6 +65,11 @@ it allows destinations by hostname without terminating TLS.
 console, or with `--egress-prompt ask`, the request is *held* while you
 decide: allow once, allow for this project from now on, or refuse.
 
+**An unattended run need not touch your working tree.** `--clone` mounts a
+private copy of the repository instead, carrying your uncommitted work in
+and keeping whatever happens next out. The changes stay on disk and stay
+mergeable — just not in the directory you are editing.
+
 **What the project asks for is not what it gets.** A `.devenv.yaml` in the
 repository is a *request*. Running the project is not consent — anything
 it asks for that you have not accepted stops the run and is shown to you
@@ -78,6 +83,7 @@ first.
 | `dev2 run [-c CMD]` | run a command in the project's container |
 | `dev2 run --image IMG` | run a stock image instead, for things that are not projects |
 | `dev2 shell` | interactive shell |
+| `dev2 run --clone` | work in a private clone, leaving the working tree untouched |
 | `dev2 build` | build the project image |
 | `dev2 console` | full-screen view: workload, egress events, live prompts |
 | `dev2 status` | what is running, what is allowed, what was blocked |
