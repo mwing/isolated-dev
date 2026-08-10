@@ -352,6 +352,45 @@ tests at all.
 
 Without this, fixing T1–T5 means the next one hides the same way.
 
+## T19. An agent run does not get the project's registries  **[done — fixed while the queue was paused]**
+
+Found by dogfooding this queue: the agent could not fetch a Go module.
+`proxy.golang.org` serves large zips as a signed redirect to
+`storage.googleapis.com`, which nothing had granted — because `runAgent`
+never resolved the project at all, so `p.Registries()` could not reach it.
+`dev run` had them all along.
+
+This was T2 in the opposite direction: two paths that should agree, that
+could drift. Fixed the same way — `agentEgress` in `internal/cli/workspace.go`,
+used by both `runAgent` and `prepareAgent`, with a CLI-level test that seeds
+a language plugin fixture and asserts the registries reach the sidecar's
+`--allow`. The test was confirmed to fail without the fix.
+
+Nothing to do; listed so it is not repeated.
+
+## T20. The gitconfig filter is a denylist wearing an allowlist's label
+
+`internal/cli/hostaccess.go` filters the host gitconfig by dropping known
+dangerous keys (`credential`, `insteadof`, `signingkey`, `sshcommand` …).
+The file it writes says "Only identity is carried over", and the commit
+that added it says the same. That is not what a denylist does: everything
+not named is passed, including settings that run programs —
+`core.fsmonitor`, `filter.*.clean/smudge`, `diff.*.textconv`,
+`protocol.*.allow`, `alias.*`.
+
+The sandbox contains the consequences, so this is not urgent, and the
+dangerous-for-the-host cases (token helpers, remote rewriting) are already
+denied. But the stated intent and the mechanism disagree, which is the same
+class of problem this whole queue is about.
+
+**Do:** invert it — carry `user.*`, `init.defaultBranch`, `core.autocrlf`
+and the handful of genuinely identity-shaped keys, drop everything else.
+Keep the header comment honest either way.
+
+**Acceptance:** a test feeding a gitconfig containing `core.fsmonitor` and
+an alias, asserting neither survives, alongside the existing tests that
+identity does.
+
 ## T16. Allowlist hardening
 
 - **Public-suffix guard** (`internal/netpolicy/allowlist.go:79`): `*.co.uk`,
@@ -457,6 +496,8 @@ Done means all six of these are true at once:
 | T16 | `*.co.uk` is refused or warned about; an over-long QNAME under a wildcard grant is refused; a dial to 169.254.169.254 is refused unless a rule names it |
 | T17 | a flood of distinct denials does not grow memory without bound |
 | T18 | one transport is reused across plain-HTTP requests |
+| T19 | done — an agent run's `--allow` contains the project's language registries |
+| T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
 
 ---
 
@@ -572,7 +613,7 @@ Twelve steps. Each is a commit; the groups are natural stopping points.
 | 9 | **T7, T10, T18** | The proxy's connection handling, all in `internal/netpolicy`, all needing the same real-daemon verification — one context, one sitting. |
 | 10 | **T8** distribution | Needs the sidecar to be otherwise finished, since embedding it fixes its build path. Before any release, and before asking anyone else to install this. |
 | 11 | **T11, T12, T14** | User-facing surface: the port bug, the command move, the stale plugin docs. T12 last of the three because it renames things the other two mention. |
-| 12 | **T15 (rest), T16, T17** | Finish the integration tier, then hardening. Hardening last is deliberate: each item widens or narrows matching behavior, and you want the full test suite underneath before touching allowlist semantics. |
+| 12 | **T20, T15 (rest), T16, T17** | Finish the integration tier, then hardening. Hardening last is deliberate: each item widens or narrows matching behavior, and you want the full test suite underneath before touching allowlist semantics. |
 
 Two ordering rules worth stating, because they are why this is not simply
 P0→P3:

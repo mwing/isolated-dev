@@ -289,6 +289,31 @@ type workspaceOpts struct {
 // decision, and the plain runs — which consume the same grants and print
 // the same remedy when blocked — silently left the accepted half out. Two
 // commands that should agree must not be able to drift.
+// agentEgress is what an agent run may reach: the project's own language
+// registries, then the destinations this user granted or accepted, then
+// anything added for this run.
+//
+// The registries are the fix for a real failure, found by running an agent
+// on this repository: it could not fetch a Go module, because
+// proxy.golang.org serves large zips as a signed redirect to
+// storage.googleapis.com, and an agent run inherited none of the project's
+// registries. A plain `dev run` had them all along. That is the same drift
+// between two paths that workspaceAllowlist exists to prevent, in the
+// opposite direction, so it is fixed the same way: in one place both
+// callers use.
+//
+// An agent is asked to work on the project — build it, test it, install its
+// dependencies. Withholding the package index its language needs does not
+// make the agent safer, it makes it useless and teaches the user to widen
+// the policy by hand.
+func agentEgress(p *project.Project, hosts ...[]string) []string {
+	out := p.Registries()
+	for _, set := range hosts {
+		out = append(out, set...)
+	}
+	return out
+}
+
 func workspaceAllowlist(cfg config.Config, p *project.Project, store *trust.Store) []string {
 	allowed := append(p.Registries(), store.Resolve("default").AllowHosts...)
 	return append(allowed,

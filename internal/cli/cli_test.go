@@ -71,6 +71,24 @@ func (h *harness) writeProject(t *testing.T, body string) {
 // test can reach the checks that come after the backend probe. The PATH
 // lookup is injected too: whether the host running the suite has orb
 // installed must not change the result.
+// writeLanguage installs a language plugin into the temp home, so a test
+// can make a project detect as something without depending on which plugins
+// happen to be shipped.
+func (h *harness) writeLanguage(t *testing.T, name, body string) {
+	t.Helper()
+	dir := filepath.Join(h.paths.Languages, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "language.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile.template"),
+		[]byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (h *harness) readyBackend() {
 	h.env.LookPath = func(bin string) (string, bool) {
 		if bin == "orb" {

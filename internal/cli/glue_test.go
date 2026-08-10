@@ -439,3 +439,42 @@ func containsPair(args []string, flag, value string) bool {
 	}
 	return false
 }
+
+// An agent asked to work on a project needs that project's package index.
+// Found by running an agent on this repository: it could not fetch a Go
+// module, because proxy.golang.org serves large zips as a redirect to
+// storage.googleapis.com and the agent path inherited none of the project's
+// registries. `dev run` had them all along.
+func TestAgentRunGetsTheProjectsRegistries(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	// A language plugin declaring the module proxy and the bucket its zips
+	// are redirected to, and a go.mod so the project detects as that
+	// language. The fixture is deliberately minimal: the point is that
+	// whatever a plugin declares reaches an agent run, not what the shipped
+	// golang plugin happens to say today.
+	h.writeLanguage(t, "golang", `name: golang
+versions: ["1.26"]
+detection:
+  files: [go.mod]
+registries:
+  - proxy.golang.org
+  - storage.googleapis.com
+`)
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "go.mod"),
+		[]byte("module example.com/x\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.run(t, "agent", "run", "claude", "--tty", "off"); err != nil {
+		t.Fatalf("agent run: %v", err)
+	}
+
+	allow := h.sidecarAllow(t)
+	for _, want := range []string{"proxy.golang.org", "storage.googleapis.com"} {
+		if !contains(allow, want) {
+			t.Fatalf("agent allowlist missing %q: %s", want, argv(allow))
+		}
+	}
+}

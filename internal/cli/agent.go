@@ -335,6 +335,13 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if err != nil {
 		return err
 	}
+	// Resolved for its language registries. An agent asked to work on a
+	// project needs the package index that project builds against, and
+	// until now this path was the only one that did not have it.
+	_, p, err := resolveProject(env)
+	if err != nil {
+		return err
+	}
 	saved := store.Resolve(a.Name)
 	granted := saved.AllowHosts
 
@@ -353,9 +360,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	}
 	accepted := store.AcceptedRequest(a.Name, request)
 
-	opts.ExtraHosts = append(
-		append(append([]string(nil), granted...), accepted...),
-		opts.ExtraHosts...)
+	opts.ExtraHosts = agentEgress(p, granted, accepted, opts.ExtraHosts)
 
 	// Preferences from the project apply directly: they change how the
 	// sandbox is built, not what it may reach or read.

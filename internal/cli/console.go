@@ -373,8 +373,8 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		return nil, "", nil, err
 	}
 
-	allowed := append(opts.Allowlist(), saved.AllowHosts...)
-	allowed = append(allowed, store.AcceptedRequest(a.Name, request)...)
+	allowed := agentEgress(p, opts.Allowlist(), saved.AllowHosts,
+		store.AcceptedRequest(a.Name, request))
 	return &opts, image, allowed, nil
 }
 
