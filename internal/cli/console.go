@@ -295,7 +295,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		return err
 	}
 	if code := model.ExitCode(); code != 0 {
-		return fmt.Errorf("exited with status %d", code)
+		return &exitStatus{Code: code}
 	}
 	return nil
 }

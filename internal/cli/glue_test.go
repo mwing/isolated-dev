@@ -444,6 +444,65 @@ func containsPair(args []string, flag, value string) bool {
 	return false
 }
 
+// --- Exit codes (T9) ---
+
+// workloadKey matches the `docker run` that starts the user's own
+// container. The sidecar detaches and the socket probe runs on no network,
+// so --interactive is what tells the three apart.
+var workloadKey = dockerKey("run", "--rm", "--interactive")
+
+func TestAWorkloadsExitStatusReachesTheProcess(t *testing.T) {
+	// `dev run -- make test` has to be usable as a step in a script. Every
+	// failure collapsing to 1 meant the sandbox threw away the one thing the
+	// thing it sandboxed was reporting.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	// Keyed on the workload's own invocation: the sidecar's `docker run`
+	// shares the prefix, and a response matching both would be answering a
+	// question this test is not asking.
+	h.fake.Response[workloadKey] = runner.Result{ExitCode: 7}
+
+	err := h.run(t, "run", "--tty", "off", "-c", "exit 7")
+	if err == nil {
+		t.Fatal("a workload exiting 7 was reported as success")
+	}
+	if got := exitCode(err); got != 7 {
+		t.Fatalf("process would exit %d, want 7 (error was %v)", got, err)
+	}
+	if !strings.Contains(err.Error(), "status 7") {
+		t.Errorf("the message should still say what happened: %v", err)
+	}
+}
+
+func TestAnAgentsExitStatusReachesTheProcessToo(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.fake.Response[workloadKey] = runner.Result{ExitCode: 3}
+
+	err := h.run(t, "agent", "run", "claude", "--tty", "off")
+	if got := exitCode(err); got != 3 {
+		t.Fatalf("process would exit %d, want 3 (error was %v)", got, err)
+	}
+	if !strings.Contains(err.Error(), "claude") {
+		t.Errorf("the message should name what exited: %v", err)
+	}
+}
+
+func TestAnOrdinaryFailureIsStillExitOne(t *testing.T) {
+	// Only a workload's own status is propagated. A tool failure is the
+	// tool's failure, and dressing it up as a workload status would be a
+	// script reading the wrong thing.
+	h := newHarness(t)
+	if got := exitCode(h.run(t, "run", "--network", "nonsense")); got != 1 {
+		t.Fatalf("a usage error would exit %d, want 1", got)
+	}
+	if got := exitCode(nil); got != 0 {
+		t.Fatalf("success would exit %d", got)
+	}
+}
+
 // --- Machine policy: the routes it did not cover (T3) ---
 
 // denyEvil is the smallest policy that matters here. `internal/policy`

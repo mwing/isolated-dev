@@ -517,7 +517,7 @@ func streamRunWith(ctx context.Context, env *Env, eng *container.Engine,
 		if hint := explainTTYFailure(errBuf.String()); hint != "" {
 			return fmt.Errorf("could not start: %s", hint)
 		}
-		return fmt.Errorf("exited with status %d", res.ExitCode)
+		return &exitStatus{Code: res.ExitCode}
 	}
 	return nil
 }

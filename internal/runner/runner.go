@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/creack/pty"
 )
@@ -131,19 +132,37 @@ func (e *Exec) Run(ctx context.Context, cmd Command) (Result, error) {
 		c.Stderr = &errBuf
 	}
 
-	err := c.Run()
-	res := Result{Stdout: outBuf.String(), Stderr: errBuf.String()}
+	code, err := exitStatusOf(cmd.Path, c.Run())
+	return Result{ExitCode: code, Stdout: outBuf.String(), Stderr: errBuf.String()}, err
+}
 
+// exitStatusOf turns a Wait error into an exit status.
+//
+// Shared by both paths because both got it wrong in the same place: a
+// failure that is not an *exec.ExitError carries no status, and reporting
+// zero for it reads as success. That is how a PTY workload which never
+// started was recorded as having finished cleanly.
+func exitStatusOf(path string, err error) (int, error) {
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
-		res.ExitCode = 0
+		return 0, nil
 	case errors.As(err, &exitErr):
-		res.ExitCode = exitErr.ExitCode()
+		if code := exitErr.ExitCode(); code >= 0 {
+			return code, nil
+		}
+		// A signalled process reports -1, which is neither a status a
+		// caller can propagate nor a number a user recognizes. Shells say
+		// 128+N and so does this.
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return 128 + int(ws.Signal()), nil
+		}
+		return 1, nil
 	default:
-		return res, fmt.Errorf("runner: %s: %w", cmd.Path, err)
+		// Not an exit status at all. Non-zero is the honest direction: the
+		// process did not report success, it reported nothing.
+		return 1, fmt.Errorf("runner: %s: %w", path, err)
 	}
-	return res, nil
 }
 
 // runPTY runs the command attached to a pseudo-terminal. Output is copied
@@ -186,15 +205,8 @@ func (e *Exec) runPTY(ctx context.Context, c *exec.Cmd, cmd Command) (Result, er
 	err = c.Wait()
 	<-done
 
-	var exitErr *exec.ExitError
-	switch {
-	case err == nil:
-		return Result{}, nil
-	case errors.As(err, &exitErr):
-		return Result{ExitCode: exitErr.ExitCode()}, nil
-	default:
-		return Result{}, nil
-	}
+	code, err := exitStatusOf(cmd.Path, err)
+	return Result{ExitCode: code}, err
 }
 
 // LookPath reports whether a binary is on PATH.

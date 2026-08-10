@@ -292,7 +292,22 @@ existing error as the fallback when the build is impossible.
 **Acceptance:** building the sidecar succeeds from a directory that is not
 the repository.
 
-## T9. Exit codes are lost twice  **[verified]**
+## T9. Exit codes are lost twice  **[verified] [DONE]**
+
+Both halves fixed, and a third found on the way. The two `Wait` switches in
+`internal/runner` are now one `exitStatusOf`: a failure that is not an
+`*exec.ExitError` carries no status at all, so reporting zero for it read as
+success — that was the PTY bug, and the non-PTY path had the same shape.
+The third: `exitErr.ExitCode()` is -1 for a signalled process, which is
+neither a status to propagate nor a number anyone recognizes, so it becomes
+128+N the way a shell reports it.
+
+The CLI carries the number rather than the sentence: `exitStatus` in
+`root.go` is an error the root unwraps into the process status, used by
+`run`, `shell`, `console` and `agent run`. The message is still printed —
+the code is for the machine, the sentence is for the person. Only a
+workload's own status propagates; a tool failure stays exit 1, or a script
+would read the wrong thing.
 
 - `internal/runner/runner.go` (`runPTY`): the `default` branch of the error
   switch returns `Result{}, nil`, so a PTY workload that failed for any
@@ -531,7 +546,7 @@ Done means all six of these are true at once:
 | T6 | done — a handshake whose SNI differs from the CONNECT host is refused, and no interception is added to do it |
 | T7 | a connection transferring past the timeout survives; a silent one is closed |
 | T8 | the sidecar image builds with no repository present |
-| T9 | `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |
+| T9 | done — `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |
 | T10 | `Close()` returns within a bounded time with an idle forwarded connection open |
 | T11 | approving `host:8080` grants 8080 and does not grant 80/443 |
 | T12 | `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |

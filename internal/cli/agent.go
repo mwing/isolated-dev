@@ -579,7 +579,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		if hint := explainTTYFailure(errBuf.String()); hint != "" {
 			return fmt.Errorf("%s could not start: %s", a.Name, hint)
 		}
-		return fmt.Errorf("%s exited with status %d", a.Name, res.ExitCode)
+		return &exitStatus{What: a.Name, Code: res.ExitCode}
 	}
 	return nil
 }

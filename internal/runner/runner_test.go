@@ -2,7 +2,10 @@ package runner
 
 import (
 	"context"
+	"errors"
+	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -108,5 +111,44 @@ func TestFakeRecordsAndResponds(t *testing.T) {
 	}
 	if got := f.Lines(); len(got) != 1 || got[0] != "orb list" {
 		t.Fatalf("Lines() = %v", got)
+	}
+}
+
+func TestAFailureThatIsNotAnExitStatusIsNotSuccess(t *testing.T) {
+	// The default branch of the Wait switch reported Result{} with no
+	// error, which reads as exit 0. A workload that never produced a status
+	// is not a workload that succeeded, and a PTY run said so for years.
+	code, err := exitStatusOf("docker", errors.New("pty: read: input/output error"))
+	if err == nil {
+		t.Fatal("a failure with no exit status was reported as success")
+	}
+	if code == 0 {
+		t.Fatal("exit code 0 for a process that never exited")
+	}
+	if !strings.Contains(err.Error(), "docker") {
+		t.Errorf("the error does not say what failed: %v", err)
+	}
+}
+
+func TestASignalIsReportedTheWayAShellReportsIt(t *testing.T) {
+	// exec reports -1 for a signalled process, which is neither a status
+	// nor something a caller can propagate. 128+N is what a shell says.
+	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("the shell did not kill itself")
+	} else if code, cerr := exitStatusOf("sh", err); code != 128+int(syscall.SIGTERM) || cerr != nil {
+		t.Fatalf("code = %d, err = %v; want %d and no error",
+			code, cerr, 128+int(syscall.SIGTERM))
+	}
+}
+
+func TestAnOrdinaryExitStatusSurvives(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	code, err := exitStatusOf("sh", cmd.Run())
+	if err != nil {
+		t.Fatalf("an ordinary non-zero exit became an error: %v", err)
+	}
+	if code != 7 {
+		t.Fatalf("code = %d, want 7", code)
 	}
 }

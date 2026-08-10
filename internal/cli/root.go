@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -39,6 +40,40 @@ type Env struct {
 
 // Verbose reports whether --verbose was given.
 func (e *Env) Verbose() bool { return e.verbose }
+
+// exitStatus carries a workload's exit code out through the error path.
+//
+// Without it every failure was exit 1, so `dev run -- make test` could not
+// be a step in a script or a CI job: the thing being sandboxed had a status
+// and the sandbox threw it away. The message is still printed — the code is
+// for the machine, the sentence is for the person.
+type exitStatus struct {
+	// What names the thing that exited, empty for the workload itself.
+	What string
+	Code int
+}
+
+func (e *exitStatus) Error() string {
+	if e.What == "" {
+		return fmt.Sprintf("exited with status %d", e.Code)
+	}
+	return fmt.Sprintf("%s exited with status %d", e.What, e.Code)
+}
+
+// exitCode maps an error to a process status. A status outside 1..255 is
+// not one the OS can carry, and a workload that exited 0 does not reach
+// here, so anything unusable becomes a plain failure rather than an
+// accidental success.
+func exitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	var status *exitStatus
+	if errors.As(err, &status) && status.Code > 0 && status.Code < 256 {
+		return status.Code
+	}
+	return 1
+}
 
 // stdin returns the reader to attach to a container, or nil when there is
 // nothing to attach. A typed nil *os.File would be a non-nil io.Reader that
@@ -160,7 +195,7 @@ func run(ctx context.Context, args []string) int {
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "dev:", err)
-		return 1
+		return exitCode(err)
 	}
 	return 0
 }
