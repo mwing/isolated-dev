@@ -155,7 +155,7 @@ only when accepted, and does not appear otherwise. If removed, a test that
 the config parser rejects or ignores the key with a clear note, and no doc
 mentions it.
 
-## T5. An existing network is trusted without checking it  **[verified]**
+## T5. An existing network is trusted without checking it  **[verified] [DONE]**
 
 `internal/container/engine.go:167` (`NetworkCreate`) treats
 `already exists` as success without verifying the existing network's

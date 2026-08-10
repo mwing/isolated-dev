@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
 
@@ -39,6 +41,66 @@ func TestWorkspaceRunRendersAHardenedContainerOnTheInternalNetwork(t *testing.T)
 	}
 	if !strings.Contains(h.stderr.String(), "nothing is allowed") {
 		t.Errorf("an empty allowlist was not explained:\n%s", h.stderr.String())
+	}
+}
+
+// existingNetwork makes `network create --internal` report that the network
+// is already there, which is the state a crashed run leaves behind.
+func (h *harness) existingNetwork(internal bool) {
+	h.fake.Response[dockerKey("network", "create", "--internal", internalNetwork)] =
+		runner.Result{ExitCode: 1, Stderr: "Error response from daemon: network with name " +
+			internalNetwork + " already exists\n"}
+	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", internalNetwork)] =
+		runner.Result{Stdout: fmt.Sprintf("%v\n", internal)}
+}
+
+func TestARunRefusesAPreExistingNetworkThatIsNotInternal(t *testing.T) {
+	// The worst outcome the tool can produce is this one: no error, no
+	// warning, `network: allowlist` printed, and the workload holding a
+	// default route the proxy never sees.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.existingNetwork(false)
+
+	err := h.run(t, "run", "--tty", "off", "-c", "true")
+	if err == nil {
+		t.Fatal("the run proceeded on a network with a route out")
+	}
+	if !strings.Contains(err.Error(), "dev clean --all") {
+		t.Errorf("the error does not name the fix: %v", err)
+	}
+	for _, args := range h.dockerRuns() {
+		t.Errorf("something was started anyway: %s", argv(args))
+	}
+}
+
+func TestARunReusesAPreExistingInternalNetwork(t *testing.T) {
+	// The check must not turn a normal second run into a failure: an
+	// internal network left behind is exactly what should be reused.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.existingNetwork(true)
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, strings.Join(h.fake.Lines(), "\n"))
+	}
+	h.workloadRun(t)
+}
+
+func TestAnUnreadableInternalFlagRefuses(t *testing.T) {
+	// A network whose isolation cannot be read is a network whose isolation
+	// cannot be relied on.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.existingNetwork(false)
+	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", internalNetwork)] =
+		runner.Result{Stdout: "<no value>\n"}
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err == nil {
+		t.Fatal("the run proceeded without knowing whether the network was internal")
 	}
 }
 

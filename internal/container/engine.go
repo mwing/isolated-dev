@@ -166,9 +166,42 @@ func (e *Engine) NetworkCreate(ctx context.Context, name string, internal bool) 
 		return err
 	}
 	if res.ExitCode != 0 && strings.Contains(res.Stderr, "already exists") {
+		// Reusing a network is only safe when it is the network that was
+		// asked for. Everything about egress control rests on --internal:
+		// a leftover network created without it — by a crashed run, by an
+		// older version of this tool, or by a name collision — gives the
+		// workload a default route and fully open egress while the CLI
+		// reports `network: allowlist`. No error, no warning, and the one
+		// security property the mode exists for silently absent.
+		if internal {
+			return e.requireInternal(ctx, name)
+		}
 		return nil
 	}
 	return check(res, nil, "creating network "+name)
+}
+
+// requireInternal fails unless an existing network really has no route out.
+//
+// Anything other than a definite "true" refuses: a network whose flag
+// cannot be read is a network whose isolation cannot be relied on, and
+// guessing in the permissive direction is the failure this check exists to
+// prevent.
+func (e *Engine) requireInternal(ctx context.Context, name string) error {
+	res, err := e.docker(ctx, "network", "inspect", "--format", "{{.Internal}}", name)
+	if err != nil {
+		return err
+	}
+	if err := check(res, nil, "inspecting network "+name); err != nil {
+		return err
+	}
+	if strings.TrimSpace(res.Stdout) == "true" {
+		return nil
+	}
+	return fmt.Errorf("network %s already exists and is not internal: the workload "+
+		"would have a route out that the egress proxy never sees, while this run "+
+		"reported itself filtered.\nRemove it and start clean:\n  dev clean --all",
+		name)
 }
 
 // NetworkRemove deletes a network, ignoring absence.
