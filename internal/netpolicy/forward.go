@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Forward publishes a workload port to the host.
@@ -33,7 +34,20 @@ type Forward struct {
 	wg        sync.WaitGroup
 	closeOnce sync.Once
 	closeErr  error
+
+	// live are the connections being relayed right now, and closing is set
+	// once teardown starts. Close needs both: a copy blocked reading an idle
+	// connection does not notice a closed listener, and waiting for it to
+	// notice is waiting forever.
+	mu      sync.Mutex
+	live    map[net.Conn]struct{}
+	closing bool
 }
+
+// closeWait bounds how long teardown waits for relays to finish after their
+// connections have been closed under them. Long enough for a copy to return,
+// short enough that nothing wedged can hold up a `dev clean`.
+const closeWait = 5 * time.Second
 
 // ParseForward reads a "listen:host:target" specification.
 func ParseForward(spec string) (*Forward, error) {
@@ -77,26 +91,40 @@ func (f *Forward) accept() {
 		if err != nil {
 			return
 		}
-		f.wg.Add(1)
+		// Counted and registered together, under the lock teardown takes.
+		// A connection accepted a moment before Close has to be either
+		// fully tracked or never started: adding to the WaitGroup after the
+		// wait has begun is a race, and a relay that started without being
+		// registered is one Close cannot interrupt.
+		if !f.hold(conn, true) {
+			_ = conn.Close()
+			return
+		}
 		go func() {
-			defer f.wg.Done()
+			defer f.release(conn, true)
 			f.handle(conn)
 		}()
 	}
 }
 
 func (f *Forward) handle(client net.Conn) {
-	defer func() { _ = client.Close() }()
-
 	target := net.JoinHostPort(f.TargetHost, strconv.Itoa(f.TargetPort))
-	// The workload may not be listening yet — a server takes a moment to
-	// start — so a refused connection is reported to the client rather
-	// than silently dropped.
+	// A refused upstream closes the accepted connection at once. The
+	// workload may simply not be listening yet — a server takes a moment to
+	// start — and there is no protocol here to say so in: this end of the
+	// forward is raw TCP, so an immediate close is the whole vocabulary.
+	// The comment here used to claim the client was told; it was not, and
+	// could not be.
 	upstream, err := net.Dial("tcp", target)
 	if err != nil {
 		return
 	}
-	defer func() { _ = upstream.Close() }()
+	defer f.release(upstream, false)
+	if !f.hold(upstream, false) {
+		// Teardown began while this was dialling. Relaying now would start
+		// a copy after the wait that was supposed to cover it.
+		return
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -117,10 +145,47 @@ func (f *Forward) handle(client net.Conn) {
 	wg.Wait()
 }
 
+// hold registers a connection as one teardown must interrupt, reporting
+// false when teardown has already begun. count says whether it also stands
+// for a relay the WaitGroup is waiting on.
+func (f *Forward) hold(c net.Conn, count bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closing {
+		return false
+	}
+	if f.live == nil {
+		f.live = map[net.Conn]struct{}{}
+	}
+	f.live[c] = struct{}{}
+	if count {
+		f.wg.Add(1)
+	}
+	return true
+}
+
+// release forgets a connection and closes it.
+func (f *Forward) release(c net.Conn, count bool) {
+	f.mu.Lock()
+	delete(f.live, c)
+	f.mu.Unlock()
+	_ = c.Close()
+	if count {
+		f.wg.Done()
+	}
+}
+
 // Close stops the listener and waits for connections in flight. It is
 // safe to call twice: teardown paths overlap, and a second close reporting
 // "use of closed network connection" would be noise on an error path where
 // people are already looking for the real failure.
+//
+// The relays are closed rather than left to finish. One idle forwarded
+// connection — a browser tab holding a keep-alive, an editor's language
+// server — used to block teardown for as long as it stayed open, which is
+// indefinitely, and the user's `dev clean` hung on it. The wait after that
+// is bounded too: a copy that does not return from a closed socket is a
+// copy nothing here can wait for usefully.
 func (f *Forward) Close() error {
 	if f.ln == nil {
 		return nil
@@ -128,7 +193,23 @@ func (f *Forward) Close() error {
 	f.closeOnce.Do(func() {
 		f.closeErr = f.ln.Close()
 	})
-	f.wg.Wait()
+
+	f.mu.Lock()
+	f.closing = true
+	for c := range f.live {
+		_ = c.Close()
+	}
+	f.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		f.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(closeWait):
+	}
 	return f.closeErr
 }
 

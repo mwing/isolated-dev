@@ -54,7 +54,9 @@ type Proxy struct {
 	// Emit receives every decision. Defaults to discarding.
 	Emit func(Event)
 
-	// IdleTimeout bounds a relayed connection's inactivity.
+	// IdleTimeout bounds a relayed connection's inactivity: it is extended
+	// whenever bytes move in either direction, so a busy connection lives
+	// as long as it is busy and a silent one is closed.
 	IdleTimeout time.Duration
 
 	// AskTimeout makes a denial block rather than fail immediately: the
@@ -68,6 +70,13 @@ type Proxy struct {
 	AskTimeout time.Duration
 	// AskPoll is how often a held connection re-checks the policy.
 	AskPoll time.Duration
+
+	// transport serves the plain-HTTP path. One per request was one
+	// connection pool per request, none of them ever closed: a loop of
+	// requests leaked a socket and its goroutines each time round, and the
+	// sidecar is the process that has to survive a long session.
+	transportOnce sync.Once
+	transport     *http.Transport
 
 	mu      sync.Mutex
 	denials map[string]int
@@ -299,10 +308,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	outreq.RequestURI = ""
 	removeHopByHop(outreq.Header)
 
-	transport := &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return p.dial(ctx, addr)
-	}}
-	resp, err := transport.RoundTrip(outreq)
+	resp, err := p.roundTripper().RoundTrip(outreq)
 	if err != nil {
 		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
 			Reason: "upstream error: " + err.Error()})
@@ -320,6 +326,27 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 	n, _ := io.Copy(w, resp.Body)
 	p.emit(Event{Action: "allow", Host: host, Port: port, Method: r.Method, Bytes: n})
+}
+
+// roundTripper returns the one transport the plain-HTTP path uses.
+//
+// Built on first use rather than in NewProxy because Dial is injected after
+// construction, and a transport that captured the zero value would dial
+// straight out, past the very substitution a test made to stop it.
+func (p *Proxy) roundTripper() http.RoundTripper {
+	p.transportOnce.Do(func() {
+		p.transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+				return p.dial(ctx, addr)
+			},
+			// Bounded: this process outlives every request through it, and a
+			// workload naming many hosts must not grow the pool forever.
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 4,
+			IdleConnTimeout:     90 * time.Second,
+		}
+	})
+	return p.transport
 }
 
 // awaitDecision holds a denied connection while someone decides, and
@@ -426,19 +453,15 @@ func relay(client net.Conn, src io.Reader, buf *bufio.ReadWriter,
 		mu.Unlock()
 	}
 
-	touch := func(c net.Conn) {
-		if idle > 0 {
-			_ = c.SetDeadline(time.Now().Add(idle))
-		}
-	}
-	touch(client)
-	touch(upstream)
+	// A real idle timer, not a lifetime: both copies feed it, so the
+	// connection lives as long as anything is moving in either direction.
+	alive := newIdleTimer(idle, client, upstream)
 
 	var aborting atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		n, _ := io.Copy(buf, upstream)
+		n, _ := io.Copy(buf, alive.reader(upstream))
 		add(n)
 		_ = buf.Flush()
 		if aborting.Load() {
@@ -455,7 +478,7 @@ func relay(client net.Conn, src io.Reader, buf *bufio.ReadWriter,
 	// refusal can order what follows: stop the upstream, wait for the other
 	// direction to finish, and only then return to a caller that wants to
 	// write one last thing to the client.
-	n, err := io.Copy(upstream, src)
+	n, err := io.Copy(upstream, alive.reader(src))
 	add(n)
 	// errors.As, not a type assertion: io.Copy hands the write side to
 	// TCPConn.ReadFrom when it can, and that wraps whatever the reader

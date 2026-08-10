@@ -8,9 +8,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -342,5 +344,127 @@ func TestSummaryOrderIsStable(t *testing.T) {
 func TestSummaryEmptyWhenNothingBlocked(t *testing.T) {
 	if got := Summary(nil); got != nil {
 		t.Errorf("Summary(nil) = %v", got)
+	}
+}
+
+func TestAConnectionSurvivesPastTheTimeoutWhileItIsBusy(t *testing.T) {
+	// IdleTimeout was set once, before the copies started, and io.Copy never
+	// refreshes a deadline — so it was a hard lifetime, and a long agent
+	// session or a large clone died mid-transfer with nothing to explain it.
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	go func() {
+		conn, err := upstream.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(conn, conn)
+	}()
+
+	p := NewProxy(mustParse(t, "allowed.example.com"))
+	p.IdleTimeout = 150 * time.Millisecond
+	p.Dial = func(context.Context, string, string) (net.Conn, error) {
+		return net.Dial("tcp", upstream.Addr().String())
+	}
+	addr := startProxy(t, p)
+
+	status, conn, br := connectThrough(t, addr, "allowed.example.com:443")
+	defer conn.Close()
+	if !strings.Contains(status, "200") {
+		t.Fatalf("status = %q", status)
+	}
+	drainHeaders(t, br)
+
+	// Six exchanges over ~600ms, four times the window, none of them idle
+	// for more than 100ms.
+	for i := 0; i < 6; i++ {
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := fmt.Fprintf(conn, "tick %d\n", i); err != nil {
+			t.Fatalf("write %d after %v: %v", i, time.Duration(i)*100*time.Millisecond, err)
+		}
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read %d: the connection died while it was busy: %v", i, err)
+		}
+		if strings.TrimSpace(line) != fmt.Sprintf("tick %d", i) {
+			t.Fatalf("echo %d = %q", i, line)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestASilentConnectionIsClosed(t *testing.T) {
+	// The other half: the timeout still has to end a connection nothing is
+	// using, or it is not a timeout.
+	upstream, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	go func() {
+		conn, err := upstream.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	p := NewProxy(mustParse(t, "allowed.example.com"))
+	p.IdleTimeout = 100 * time.Millisecond
+	p.Dial = func(context.Context, string, string) (net.Conn, error) {
+		return net.Dial("tcp", upstream.Addr().String())
+	}
+	addr := startProxy(t, p)
+
+	status, conn, br := connectThrough(t, addr, "allowed.example.com:443")
+	defer conn.Close()
+	if !strings.Contains(status, "200") {
+		t.Fatalf("status = %q", status)
+	}
+	drainHeaders(t, br)
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := br.ReadString('\n'); err == nil {
+		t.Fatal("a connection that said nothing for five windows was still open")
+	}
+}
+
+func TestPlainHTTPReusesOneTransport(t *testing.T) {
+	// A transport per request was a connection pool per request, never
+	// closed. The observable consequence is the one that matters: two
+	// requests to the same host should reuse the connection, and did not.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "ok")
+	}))
+	defer upstream.Close()
+
+	var dials int32
+	p := NewProxy(mustParse(t, "allowed.example.com"))
+	p.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		atomic.AddInt32(&dials, 1)
+		return net.Dial("tcp", strings.TrimPrefix(upstream.URL, "http://"))
+	}
+	addr := startProxy(t, p)
+
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)},
+		Timeout:   5 * time.Second,
+	}
+	for i := 0; i < 3; i++ {
+		resp, err := client.Get("http://allowed.example.com/thing")
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+	if got := atomic.LoadInt32(&dials); got != 1 {
+		t.Fatalf("dialled upstream %d times for 3 requests; the pool is not being reused", got)
 	}
 }

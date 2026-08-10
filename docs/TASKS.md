@@ -254,7 +254,14 @@ existing test proving no interception. If documented instead, a grep for
 
 # P1 — it breaks normal use, or a clean install
 
-## T7. `IdleTimeout` is a hard 10-minute lifetime  **[verified]**
+## T7. `IdleTimeout` is a hard 10-minute lifetime  **[verified] [DONE]**
+
+A real idle timer (`internal/netpolicy/idle.go`): both copies feed it, so
+the deadline moves whenever bytes move in either direction. Activity on
+one side counts for both — a download is silent on the way up and a long
+poll is silent on the way down, and treating either as idleness would cut
+off the connection it describes. Refreshed at most every tenth of the
+window, since a syscall per packet is a cost nobody asked for.
 
 `internal/netpolicy/proxy.go`: `touch()` sets a deadline on both
 connections once, before the two `io.Copy` goroutines start, and is never
@@ -324,7 +331,28 @@ carry the number rather than the sentence.
 **Acceptance:** `dev run -c 'exit 7'` exits 7. A unit test for the runner's
 default branch.
 
-## T10. Forward relay teardown can block forever  **[verified]**
+## T10. Forward relay teardown can block forever  **[verified] [DONE]**
+
+Close now interrupts the relays rather than waiting for them to end on
+their own, and the wait after that is bounded (`closeWait`, 5s). One quiet
+forwarded connection used to hold teardown open for as long as it stayed
+open, which is indefinitely.
+
+A departure from the brief: no idle deadline on the relayed copies. A
+published port is not egress — a hot-reload websocket, an SSE stream, a
+debugger session are all legitimately silent for long stretches, and a
+blanket deadline would kill them and be blamed on the framework. Teardown
+was the actual bug, and closing the tracked connections fixes it without
+putting a clock on a connection nobody asked to time.
+
+The comment at the dial was corrected rather than the code: this end of a
+forward is raw TCP, so a refused upstream has no vocabulary but an
+immediate close. It never told the client anything and could not.
+
+Writing the test found a race the change had introduced and the old code
+had latent: `wg.Add` in the accept loop against `wg.Wait` in Close. Both
+now happen under one lock with a `closing` flag, so a connection accepted
+a moment before teardown is either fully tracked or never started.
 
 `internal/netpolicy/forward.go`: the copy has no deadlines and `Close()`
 does `wg.Wait()` (`:131`), so one idle forwarded connection blocks teardown
@@ -493,7 +521,12 @@ The sidecar and the host-side watcher key maps by destination. A retrying
 client can emit thousands of distinct denials. Cap the maps and the log
 volume.
 
-## T18. `http.Transport` per plain-HTTP request
+## T18. `http.Transport` per plain-HTTP request  **[DONE]**
+
+One transport, built on first use because `Dial` is injected after
+construction, with a bounded idle pool. The test asserts the observable
+consequence rather than the identity of the object: three requests to one
+host now dial once.
 
 `proxy.go:264` constructs one per request and never closes it, leaking fds
 and goroutines under a loop. Reuse one.
@@ -560,10 +593,10 @@ Done means all six of these are true at once:
 | T4 | an accepted mount appears in the RunSpec and an unaccepted one does not — or the key is gone from config, consent, doctor, migrate and the docs |
 | T5 | a non-internal pre-existing network makes the run fail loudly, naming `dev clean --all` |
 | T6 | done — a handshake whose SNI differs from the CONNECT host is refused, and no interception is added to do it |
-| T7 | a connection transferring past the timeout survives; a silent one is closed |
+| T7 | done — a connection transferring past the timeout survives; a silent one is closed |
 | T8 | the sidecar image builds with no repository present |
 | T9 | done — `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |
-| T10 | `Close()` returns within a bounded time with an idle forwarded connection open |
+| T10 | done — `Close()` returns within a bounded time with an idle forwarded connection open |
 | T11 | approving `host:8080` grants 8080 and does not grant 80/443 |
 | T12 | `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |
 | T13 | done — each of the four is corrected, and `--egress-notify of` is rejected rather than silently accepted |
@@ -571,7 +604,7 @@ Done means all six of these are true at once:
 | T15 | the CLI suite fails when any of T1–T5 is reverted |
 | T16 | `*.co.uk` is refused or warned about; an over-long QNAME under a wildcard grant is refused; a dial to 169.254.169.254 is refused unless a rule names it |
 | T17 | a flood of distinct denials does not grow memory without bound |
-| T18 | one transport is reused across plain-HTTP requests |
+| T18 | done — one transport is reused across plain-HTTP requests |
 | T19 | done — an agent run's `--allow` contains the project's language registries |
 | T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
 

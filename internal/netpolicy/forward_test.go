@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +113,57 @@ func TestForwardCloseWaitsForConnections(t *testing.T) {
 	}
 	if err := f.Close(); err != nil {
 		t.Errorf("second Close: %v", err)
+	}
+}
+
+func TestForwardCloseReturnsWithAnIdleConnectionOpen(t *testing.T) {
+	// One quiet forwarded connection — a browser tab holding a keep-alive,
+	// an editor's language server — used to hold teardown open for as long
+	// as it stayed open, which is indefinitely. `dev clean` hung on it.
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	go func() {
+		for {
+			conn, err := backend.Accept()
+			if err != nil {
+				return
+			}
+			// Accept and say nothing, which is what an idle connection is.
+			go func() { <-make(chan struct{}); _ = conn.Close() }()
+		}
+	}()
+
+	host, port, _ := net.SplitHostPort(backend.Addr().String())
+	target, _ := strconv.Atoi(port)
+	f := &Forward{ListenPort: 0, TargetHost: host, TargetPort: target}
+	if err := f.Listen(); err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := net.Dial("tcp", f.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	// Send something so the relay is certainly established before teardown.
+	if _, err := conn.Write([]byte("hello\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- f.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		// Deliberately shorter than closeWait: falling back on the bounded
+		// wait would pass a test that is supposed to prove the relays are
+		// interrupted, not merely given up on.
+		t.Fatal("Close did not return with an idle connection open")
 	}
 }
