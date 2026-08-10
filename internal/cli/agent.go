@@ -189,6 +189,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				Memory:      memory,
 				CPUs:        cpus,
 				Args:        args[1:],
+				Safe:        safe,
 			}
 
 			opts.GitIdentity = gitIdentity(env)

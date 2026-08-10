@@ -47,6 +47,17 @@ func matches(line, key string) bool {
 	return len(key) <= len(line) && line[:len(key)] == key
 }
 
+// Snapshot returns a copy of the recorded commands.
+//
+// Read this rather than Calls directly: a command can leave a goroutine
+// behind that is still following a container's logs, so the slice may still
+// be growing while a test inspects it.
+func (f *Fake) Snapshot() []Command {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Command(nil), f.Calls...)
+}
+
 // Lines returns every recorded command as a rendered string.
 func (f *Fake) Lines() []string {
 	f.mu.Lock()

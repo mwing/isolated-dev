@@ -67,7 +67,7 @@ docs/               guides and design
 
 # P0 — the security claim is not currently true
 
-## T1. `--safe` never reaches the agent  **[verified]**
+## T1. `--safe` never reaches the agent  **[verified] [DONE]**
 
 `internal/cli/agent.go:154` declares `safe`, `:249` binds the flag, and
 nothing ever assigns it into `agent.Options.Safe`. So
@@ -321,6 +321,15 @@ format, or delete it and point at `docs/`.
 # P3 — hardening, and the reason these bugs were possible
 
 ## T15. Integration tests through the CLI glue  **(do this early, not last)**
+
+**[harness DONE]** — `internal/cli/glue_test.go` drives the real command
+tree against the fake runner. The harness in `cli_test.go` gained
+`dockerKey` (keys rendered the way the backend spawns them, quoting
+included), `dockerArgs`/`dockerRuns` (argument vectors, not rendered
+lines), `workloadRun` and `sidecarAllow`. Standard input moved into `Env`
+because `isTerminal(os.Stdin)` decided whether prompting blocks and `go
+test` supplies /dev/null, a character device that reads as a terminal.
+Remaining: the per-fix coverage below, and the real-daemon CI tier.
 
 Every P0 above survived a green suite because the tests stop below the glue
 layer. `internal/cli/cli_test.go` has a harness with a fake runner; it is

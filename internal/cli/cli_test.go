@@ -135,7 +135,7 @@ func (h *harness) readySidecar() {
 // be un-quoted before it can be compared.
 func (h *harness) dockerArgs() [][]string {
 	var out [][]string
-	for _, c := range h.fake.Calls {
+	for _, c := range h.fake.Snapshot() {
 		for i, a := range c.Args {
 			if a == "docker" {
 				out = append(out, c.Args[i+1:])

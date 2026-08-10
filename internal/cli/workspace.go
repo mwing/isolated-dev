@@ -422,7 +422,12 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		// that made asking possible.
 		spec.Interactive = false
 	}
-	watchEgress(ctx, env, eng, topo, ask)
+	// The log follower outlives nothing: it is stopped before the deferred
+	// teardown reads the same log, so the two do not race for it, and a run
+	// does not leave a goroutine attached to a container that is gone.
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	defer stopWatch()
+	watchEgress(watchCtx, env, eng, topo, ask)
 
 	stdin := env.stdin()
 	if ask != nil {
