@@ -90,7 +90,11 @@ type Model struct {
 	width, height int
 
 	output []string
-	events []string
+	events []event
+	// allowed and blocked count destinations for the header, which is the
+	// one place a long-running session can show its shape at a glance.
+	allowed int
+	blocked int
 	// pending is the queue of unanswered questions. A retrying client can
 	// raise the same destination repeatedly; only the first is queued.
 	pending []question
@@ -171,7 +175,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case grantedMsg:
 		if msg.err != nil {
-			m.addEvent("✗ could not allow " + msg.host + ": " + msg.err.Error())
+			m.addEvent(kindWarn, "✗ could not allow "+msg.host+": "+msg.err.Error())
 		}
 		m.trim()
 		return m, nil
@@ -310,7 +314,11 @@ func (m *Model) decide(q question, d Decision, note string) tea.Cmd {
 	if d == DecideNo {
 		mark = "✗ "
 	}
-	m.addEvent(mark + note + ": " + q.String())
+	kind := kindGrant
+	if d == DecideNo {
+		kind = kindDeny
+	}
+	m.addEvent(kind, mark+note+": "+q.String())
 
 	host := q.host
 	return func() tea.Msg {
@@ -333,15 +341,17 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 			m.pending = append(m.pending, question{host: e.Host, port: e.Port})
 		}
 	case "deny":
-		m.addEvent("⛔ blocked " + dest)
+		m.blocked++
+		m.addEvent(kindDeny, "⛔ blocked "+dest)
 	case "timeout":
-		m.addEvent("⏱ no answer, blocked " + dest)
+		m.blocked++
+		m.addEvent(kindWarn, "⏱ no answer, blocked "+dest)
 	case "error":
 		// Allowed, but unreachable. Calling this "blocked" would send the
 		// user to the allowlist to fix something it did not cause.
-		m.addEvent("✗ could not reach " + dest)
+		m.addEvent(kindWarn, "✗ could not reach "+dest)
 	case "granted":
-		m.addEvent("→ proceeding " + dest)
+		m.addEvent(kindGrant, "→ proceeding "+dest)
 	case "allow":
 		// Successful traffic is the common case. An agent opens dozens of
 		// connections to the same host, and a line each buries the
@@ -350,7 +360,8 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 		if e.Method == "DNS" {
 			return nil
 		}
-		m.addEvent("· " + dest)
+		m.allowed++
+		m.addEvent(kindAllow, "· "+dest)
 		return nil
 	}
 	m.trim()
@@ -359,17 +370,17 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 
 // addEvent appends a line, collapsing an immediate repeat into a count
 // rather than filling the pane with identical entries.
-func (m *Model) addEvent(line string) {
+func (m *Model) addEvent(kind eventKind, line string) {
 	if n := len(m.events); n > 0 {
-		if last := m.events[n-1]; last == line || strings.HasPrefix(last, line+" ×") {
+		if last := m.events[n-1].text; last == line || strings.HasPrefix(last, line+" ×") {
 			m.repeat++
-			m.events[n-1] = fmt.Sprintf("%s ×%d", line, m.repeat+1)
+			m.events[n-1].text = fmt.Sprintf("%s ×%d", line, m.repeat+1)
 			m.trim()
 			return
 		}
 	}
 	m.repeat = 0
-	m.events = append(m.events, line)
+	m.events = append(m.events, event{kind: kind, text: line})
 	m.trim()
 }
 
@@ -384,6 +395,22 @@ func (m *Model) trim() {
 	}
 }
 
+// eventKind decides how a line is coloured. The pane is small and mixed:
+// without colour, a refusal and a successful connection read the same.
+type eventKind int
+
+const (
+	kindAllow eventKind = iota
+	kindDeny
+	kindWarn
+	kindGrant
+)
+
+type event struct {
+	kind eventKind
+	text string
+}
+
 // Pending reports how many questions are unanswered, for tests.
 func (m *Model) Pending() int { return len(m.pending) }
 
@@ -396,20 +423,20 @@ func (m *Model) Err() error { return m.err }
 var (
 	headerStyle = lipgloss.NewStyle().Bold(true)
 	dimStyle    = lipgloss.NewStyle().Faint(true)
-	askStyle    = lipgloss.NewStyle().Bold(true)
+	denyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	warnStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	grantStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	countStyle  = lipgloss.NewStyle().Faint(true)
+	// A held request is the one thing on screen that stops until it is
+	// answered, so it gets the only reversed bar in the interface.
+	askStyle = lipgloss.NewStyle().Bold(true).Reverse(true)
 )
 
 // View implements tea.Model.
 func (m *Model) View() string {
 	var b strings.Builder
 
-	// Truncate the plain text, then style it: cutting an already-styled
-	// string slices the escape sequences and corrupts the terminal.
-	b.WriteString(headerStyle.Render(truncateWidth(m.Title, m.width)))
-	if rest := m.width - lipgloss.Width(m.Title) - 2; rest > 0 {
-		b.WriteString("  ")
-		b.WriteString(dimStyle.Render(truncateWidth(m.Policy, rest)))
-	}
+	b.WriteString(m.header())
 	b.WriteString("\n")
 
 	outputHeight := m.outputHeight()
@@ -418,12 +445,56 @@ func (m *Model) View() string {
 		lines = m.Term.Lines()
 	}
 	b.WriteString(pane(lines, outputHeight, m.width))
-	b.WriteString(dimStyle.Render(strings.Repeat("─", max(m.width, 0))))
+	b.WriteString(m.divider())
 	b.WriteString("\n")
-	b.WriteString(pane(m.events, m.eventHeight(), m.width))
+	b.WriteString(eventPane(m.events, m.eventHeight(), m.width))
 
 	b.WriteString(m.footer())
 	return b.String()
+}
+
+// header is one line: what is running on the left, what egress has done on
+// the right. A long session otherwise gives no sense of its own shape —
+// the event strip only shows the last few lines.
+func (m *Model) header() string {
+	counts := ""
+	if m.allowed > 0 || m.blocked > 0 {
+		counts = fmt.Sprintf("%d reached", m.allowed)
+		if m.blocked > 0 {
+			counts += fmt.Sprintf("  %d blocked", m.blocked)
+		}
+	}
+
+	left := truncateWidth(m.Title, m.width)
+	room := m.width - lipgloss.Width(left) - 2
+	if room <= 0 {
+		return headerStyle.Render(left)
+	}
+
+	// Counts sit at the right edge; the policy fills whatever is left,
+	// because it is the less urgent of the two.
+	right := truncateWidth(counts, room)
+	middle := truncateWidth(m.Policy, room-lipgloss.Width(right)-2)
+	gap := room - lipgloss.Width(middle) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return headerStyle.Render(left) + "  " + dimStyle.Render(middle) +
+		strings.Repeat(" ", gap) + countStyle.Render(right)
+}
+
+// divider labels the strip below it. Unlabelled, the second pane reads as
+// more program output, and the egress decisions in it get skipped.
+func (m *Model) divider() string {
+	label := " egress "
+	if len(m.pending) > 0 {
+		label = " egress — waiting for you "
+	}
+	if m.width <= lipgloss.Width(label)+4 {
+		return dimStyle.Render(strings.Repeat("─", max(m.width, 0)))
+	}
+	rest := m.width - lipgloss.Width(label) - 2
+	return dimStyle.Render("──" + label + strings.Repeat("─", max(rest, 0)))
 }
 
 // outputHeight is the room left for the workload after the header, the
@@ -449,6 +520,41 @@ func (m *Model) eventHeight() int {
 		return 2
 	}
 	return 4
+}
+
+// eventPane renders the egress strip, coloured by what each line means.
+// The pane is small and mixed: without colour a refusal and a successful
+// connection read the same, which is the one distinction it exists for.
+func eventPane(events []event, n, width int) string {
+	start := len(events) - n
+	if start < 0 {
+		start = 0
+	}
+	var b strings.Builder
+	shown := events[start:]
+	for _, e := range shown {
+		// Truncate the plain text before styling: cutting a styled string
+		// slices the escape sequences and corrupts the terminal.
+		b.WriteString(eventStyle(e.kind).Render(truncateWidth(e.text, width)))
+		b.WriteString("\n")
+	}
+	for i := len(shown); i < n; i++ {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func eventStyle(k eventKind) lipgloss.Style {
+	switch k {
+	case kindDeny:
+		return denyStyle
+	case kindWarn:
+		return warnStyle
+	case kindGrant:
+		return grantStyle
+	default:
+		return dimStyle
+	}
 }
 
 // pane renders the last n lines, padding so the layout does not jump as
@@ -498,11 +604,21 @@ func (m *Model) footer() string {
 		q := m.pending[0]
 		extra := ""
 		if len(m.pending) > 1 {
-			extra = fmt.Sprintf("  (+%d more)", len(m.pending)-1)
+			extra = fmt.Sprintf(" (+%d more)", len(m.pending)-1)
 		}
-		return askStyle.Render(truncateWidth(fmt.Sprintf(
-			"⛔ %s blocked, waiting.  [o] once  [p] project  [n] no%s",
-			q.String(), extra), m.width))
+		// Destination and queue depth come before the keys: a narrow
+		// terminal truncates the tail, and the keys are guessable while
+		// "which host, and how many more" is not.
+		//
+		// Padded to the full width so the bar reads as a bar rather than
+		// as a sentence that happens to be inverted.
+		line := fmt.Sprintf(" ⛔ blocked: %s%s   [o] once   [p] this project   [n] refuse",
+			q.String(), extra)
+		line = truncateWidth(line, m.width)
+		if pad := m.width - lipgloss.Width(line); pad > 0 {
+			line += strings.Repeat(" ", pad)
+		}
+		return askStyle.Render(line)
 	}
 	quit := "q to stop"
 	if m.Term != nil {

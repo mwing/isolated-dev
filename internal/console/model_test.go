@@ -32,7 +32,7 @@ func TestPendingEventBecomesAQuestion(t *testing.T) {
 	if m.Pending() != 1 {
 		t.Fatalf("pending = %d", m.Pending())
 	}
-	if !strings.Contains(m.View(), "evil.example.com:443 blocked, waiting") {
+	if !strings.Contains(m.View(), "blocked: evil.example.com:443") {
 		t.Errorf("question not shown:\n%s", m.View())
 	}
 }
@@ -558,5 +558,52 @@ func TestFeedStillRenders(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("content never reached the screen: %q", term.Lines())
+	}
+}
+
+// A narrow terminal truncates the prompt's tail. The destination and the
+// queue depth must survive that, because the keys are guessable and
+// "which host, and how many more" is not.
+func TestPromptSurvivesANarrowTerminal(t *testing.T) {
+	m := newTestModel(nil)
+	send(m, tea.WindowSizeMsg{Width: 46, Height: 20})
+	send(m, EventMsg(netpolicy.Event{Action: "pending", Host: "a.example.com", Port: 443}))
+	send(m, EventMsg(netpolicy.Event{Action: "pending", Host: "b.example.com", Port: 443}))
+
+	view := m.View()
+	for _, want := range []string{"a.example.com:443", "(+1 more)"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q at 46 columns:\n%s", want, view)
+		}
+	}
+}
+
+// The header is where a long session shows its shape: the strip below only
+// holds the last few lines.
+func TestHeaderCountsWhatEgressDid(t *testing.T) {
+	m := newTestModel(nil)
+	send(m, tea.WindowSizeMsg{Width: 100, Height: 24})
+	for i := 0; i < 3; i++ {
+		send(m, EventMsg(netpolicy.Event{Action: "allow", Host: "ok.example.com", Port: 443}))
+	}
+	send(m, EventMsg(netpolicy.Event{Action: "deny", Host: "no.example.com", Port: 443}))
+
+	view := m.View()
+	if !strings.Contains(view, "3 reached") || !strings.Contains(view, "1 blocked") {
+		t.Fatalf("counts missing from the header:\n%s", strings.SplitN(view, "\n", 2)[0])
+	}
+}
+
+// An unlabelled second pane reads as more program output, and the egress
+// decisions in it get skipped.
+func TestTheEgressStripIsLabelled(t *testing.T) {
+	m := newTestModel(nil)
+	send(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if !strings.Contains(m.View(), "egress") {
+		t.Fatalf("no label on the divider:\n%s", m.View())
+	}
+	send(m, EventMsg(netpolicy.Event{Action: "pending", Host: "a.example.com", Port: 443}))
+	if !strings.Contains(m.View(), "waiting for you") {
+		t.Fatalf("divider does not say a question is waiting:\n%s", m.View())
 	}
 }
