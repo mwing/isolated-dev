@@ -42,8 +42,9 @@ type Options struct {
 	// is read from the caller's environment only for names the user named
 	// explicitly; nothing is passed implicitly.
 	AuthEnv []string
-	// Command overrides the agent's default invocation.
-	Command []string
+	// Args are passed to the agent after its own default arguments, so a
+	// prompt or a flag adds to the invocation rather than replacing it.
+	Args []string
 	// Interactive attaches a TTY.
 	Interactive bool
 	// Safe drops the agent's auto-approve arguments, restoring its own
@@ -223,18 +224,21 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		spec.Env = append(spec.Env, o.AuthEnv...)
 	}
 
-	spec.Command = o.Command
-	if len(spec.Command) == 0 {
-		spec.Command = []string{a.Binary}
-		// The agent's default args are its auto-approve flags. They are
-		// only defensible because the sandbox is the boundary: no host
-		// credentials, no route out beyond the allowlist, no host path
-		// but the workspace. --safe drops them for anyone who wants the
-		// in-agent prompts as a second layer.
-		if !o.Safe {
-			spec.Command = append(spec.Command, a.Args...)
-		}
+	spec.Command = []string{a.Binary}
+	// The agent's default args are its auto-approve flags. They are
+	// only defensible because the sandbox is the boundary: no host
+	// credentials, no route out beyond the allowlist, no host path
+	// but the workspace. --safe drops them for anyone who wants the
+	// in-agent prompts as a second layer.
+	if !o.Safe {
+		spec.Command = append(spec.Command, a.Args...)
 	}
+	// Trailing arguments go to the agent, they do not replace it.
+	// `dev2 agent run claude -- "fix the retry logic"` reads as a prompt
+	// in every other tool that takes one, and replacing the command made
+	// it exec the prompt: "executable file not found", status 127, for
+	// what is the most obvious way to use this command.
+	spec.Command = append(spec.Command, o.Args...)
 	return spec
 }
 

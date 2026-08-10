@@ -582,3 +582,57 @@ func TestForwardedSocketGroupIsAdded(t *testing.T) {
 		t.Errorf("uid changed to reach the socket: %s", args)
 	}
 }
+
+// `dev2 agent run claude -- "fix the retry logic"` reads as a prompt in
+// every other tool that takes one. Treating trailing arguments as a
+// replacement command made the container try to exec the prompt, which
+// fails with "executable file not found" and status 127 — for the most
+// obvious way to use the command.
+func TestTrailingArgumentsGoToTheAgentNotInsteadOfIt(t *testing.T) {
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b",
+		Args: []string{"--dangerously-skip-permissions"},
+	}
+	spec := Spec(Options{
+		Agent: a,
+		Args:  []string{"finish the work in todo.txt"},
+	}, netpolicy.Topology{})
+
+	if len(spec.Command) < 2 {
+		t.Fatalf("command = %v", spec.Command)
+	}
+	if spec.Command[0] != a.Binary {
+		t.Fatalf("command starts with %q, want the agent binary", spec.Command[0])
+	}
+	if last := spec.Command[len(spec.Command)-1]; last != "finish the work in todo.txt" {
+		t.Fatalf("prompt did not reach the agent: %v", spec.Command)
+	}
+	// The auto-approve default still applies; a prompt is not a reason to
+	// silently change the agent's posture.
+	if !contains(spec.Command, "--dangerously-skip-permissions") {
+		t.Fatalf("default args dropped when a prompt was given: %v", spec.Command)
+	}
+}
+
+func TestSafeStillDropsAutoApproveWithAPrompt(t *testing.T) {
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b",
+		Args: []string{"--dangerously-skip-permissions"},
+	}
+	spec := Spec(Options{Agent: a, Safe: true, Args: []string{"do the thing"}}, netpolicy.Topology{})
+	if contains(spec.Command, "--dangerously-skip-permissions") {
+		t.Fatalf("--safe did not drop auto-approve: %v", spec.Command)
+	}
+	if spec.Command[len(spec.Command)-1] != "do the thing" {
+		t.Fatalf("prompt lost: %v", spec.Command)
+	}
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}

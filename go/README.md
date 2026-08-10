@@ -84,6 +84,7 @@ first.
 | `dev2 run --image IMG` | run a stock image instead, for things that are not projects |
 | `dev2 shell` | interactive shell |
 | `dev2 run --clone` | work in a private clone, leaving the working tree untouched |
+| `dev2 run --clone-depth 1` | the same, copying only recent history — for large repositories |
 | `dev2 build` | build the project image |
 | `dev2 console` | full-screen view: workload, egress events, live prompts |
 | `dev2 status` | what is running, what is allowed, what was blocked |

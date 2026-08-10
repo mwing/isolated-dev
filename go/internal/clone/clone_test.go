@@ -59,7 +59,8 @@ func TestPrepareCarriesUncommittedWork(t *testing.T) {
 	write(t, filepath.Join(src, "new.txt"), "untracked\n")
 
 	dest := filepath.Join(t.TempDir(), "clone")
-	res, err := Prepare(context.Background(), runner.New(false), src, dest)
+	res, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: src, Dest: dest})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,8 @@ func TestPrepareCarriesUncommittedWork(t *testing.T) {
 func TestWritesInTheCloneDoNotReachTheProject(t *testing.T) {
 	src := gitRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if _, err := Prepare(context.Background(), runner.New(false), src, dest); err != nil {
+	if _, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: src, Dest: dest}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,10 +102,16 @@ func TestWritesInTheCloneDoNotReachTheProject(t *testing.T) {
 func TestObjectsAreCopiedNotHardLinked(t *testing.T) {
 	src := gitRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone")
-	if _, err := Prepare(context.Background(), runner.New(false), src, dest); err != nil {
+	if _, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: src, Dest: dest}); err != nil {
 		t.Fatal(err)
 	}
 
+	assertNoSharedObjects(t, dest)
+}
+
+func assertNoSharedObjects(t *testing.T, dest string) {
+	t.Helper()
 	var checked int
 	err := filepath.Walk(filepath.Join(dest, ".git", "objects"),
 		func(path string, info os.FileInfo, err error) error {
@@ -130,8 +138,8 @@ func TestObjectsAreCopiedNotHardLinked(t *testing.T) {
 }
 
 func TestPrepareRefusesANonRepository(t *testing.T) {
-	_, err := Prepare(context.Background(), runner.New(false), t.TempDir(),
-		filepath.Join(t.TempDir(), "clone"))
+	_, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: t.TempDir(), Dest: filepath.Join(t.TempDir(), "clone")})
 	if err == nil || !strings.Contains(err.Error(), "git repository") {
 		t.Fatalf("err = %v", err)
 	}
@@ -145,8 +153,8 @@ func TestPrepareRefusesASubdirectory(t *testing.T) {
 	if err := os.MkdirAll(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Prepare(context.Background(), runner.New(false), sub,
-		filepath.Join(t.TempDir(), "clone"))
+	_, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: sub, Dest: filepath.Join(t.TempDir(), "clone")})
 	if err == nil || !strings.Contains(err.Error(), "repository root") {
 		t.Fatalf("err = %v", err)
 	}
@@ -157,12 +165,13 @@ func TestPrepareReusesAndReportsDrift(t *testing.T) {
 	src := gitRepo(t)
 	dest := filepath.Join(t.TempDir(), "clone")
 	ctx := context.Background()
-	if _, err := Prepare(ctx, runner.New(false), src, dest); err != nil {
+	if _, err := Prepare(ctx, runner.New(false),
+		Options{Project: src, Dest: dest}); err != nil {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(dest, "work.txt"), "agent output\n")
 
-	res, err := Prepare(ctx, runner.New(false), src, dest)
+	res, err := Prepare(ctx, runner.New(false), Options{Project: src, Dest: dest})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,5 +194,90 @@ func TestRemoveRefusesWhatIsNotAClone(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatal("it was removed anyway")
+	}
+}
+
+// commits adds n commits so history has something to truncate.
+func commits(t *testing.T, dir string, n int) {
+	t.Helper()
+	run := runner.New(false)
+	ctx := context.Background()
+	for i := 0; i < n; i++ {
+		write(t, filepath.Join(dir, "kept.txt"), strings.Repeat("x", i+1)+"\n")
+		if _, err := git(ctx, run, dir, "commit", "-qam", "change"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestShallowCloneTruncatesHistory(t *testing.T) {
+	src := gitRepo(t)
+	commits(t, src, 4)
+	dest := filepath.Join(t.TempDir(), "clone")
+
+	ctx := context.Background()
+	res, err := Prepare(ctx, runner.New(false), Options{Project: src, Dest: dest, Depth: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := gitOutput(ctx, runner.New(false), dest, "rev-list", "--count", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != "1" {
+		t.Fatalf("history depth = %s, want 1", count)
+	}
+	if !strings.Contains(strings.Join(res.Notes, "; "), "shallow") {
+		t.Fatalf("shallowness not reported: %v", res.Notes)
+	}
+}
+
+// file:// transport copies objects, so the property that made
+// --no-hardlinks necessary holds here by a different route.
+func TestShallowCloneAlsoSharesNothing(t *testing.T) {
+	src := gitRepo(t)
+	commits(t, src, 3)
+	dest := filepath.Join(t.TempDir(), "clone")
+	if _, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: src, Dest: dest, Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	assertNoSharedObjects(t, dest)
+}
+
+// The point of a clone is that the work comes back. A shallow clone's
+// commits sit on top of a commit the project already has, so nothing that
+// was left behind is needed to fetch them.
+func TestWorkComesBackOutOfAShallowClone(t *testing.T) {
+	src := gitRepo(t)
+	commits(t, src, 3)
+	dest := filepath.Join(t.TempDir(), "clone")
+
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest, Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	write(t, filepath.Join(dest, "patch.txt"), "the fix\n")
+	for _, args := range [][]string{
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+		{"add", "-A"},
+		{"commit", "-qm", "the fix"},
+	} {
+		if _, err := git(ctx, run, dest, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if _, err := git(ctx, run, src, "fetch", "-q", dest, "HEAD"); err != nil {
+		t.Fatalf("fetching work back from a shallow clone: %v", err)
+	}
+	if _, err := git(ctx, run, src, "cherry-pick", "FETCH_HEAD"); err != nil {
+		t.Fatalf("applying the fetched commit: %v", err)
+	}
+	if got := read(t, filepath.Join(src, "patch.txt")); got != "the fix\n" {
+		t.Fatalf("patch content = %q", got)
 	}
 }

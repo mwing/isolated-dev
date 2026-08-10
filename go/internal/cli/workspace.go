@@ -143,6 +143,7 @@ func newRunCmd(env *Env) *cobra.Command {
 		egressPrompt string
 		image        string
 		useCloneDir  bool
+		cloneDepth   int
 	)
 
 	cmd := &cobra.Command{
@@ -159,12 +160,13 @@ func newRunCmd(env *Env) *cobra.Command {
 				EgressPrompt: egressPrompt,
 				Image:        image,
 				Clone:        useCloneDir,
+				CloneDepth:   cloneDepth,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
-	addCloneFlag(cmd, &useCloneDir)
+	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
 	return cmd
 }
 
@@ -179,6 +181,7 @@ func newShellCmd(env *Env) *cobra.Command {
 		egressPrompt string
 		image        string
 		useCloneDir  bool
+		cloneDepth   int
 	)
 
 	cmd := &cobra.Command{
@@ -201,12 +204,13 @@ func newShellCmd(env *Env) *cobra.Command {
 				Image:        image,
 				Fallback:     []string{"/bin/sh"},
 				Clone:        useCloneDir,
+				CloneDepth:   cloneDepth,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
-	addCloneFlag(cmd, &useCloneDir)
+	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
 	return cmd
 }
 
@@ -223,9 +227,15 @@ func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offlin
 }
 
 // addCloneFlag is shared by every command that mounts a workspace.
-func addCloneFlag(cmd *cobra.Command, clone *bool) {
+//
+// --clone-depth implies --clone. Asking for a shallow clone and then being
+// told nothing was cloned would be a pedantic reading of an unambiguous
+// request.
+func addCloneFlag(cmd *cobra.Command, clone *bool, depth *int) {
 	cmd.Flags().BoolVar(clone, "clone", false,
 		"work in a private clone of the repository, not the working tree")
+	cmd.Flags().IntVar(depth, "clone-depth", 0,
+		"copy only this many commits of history into the clone (0: all)")
 }
 
 // egressPromptFlag is shared by run and shell.
@@ -264,6 +274,8 @@ type workspaceOpts struct {
 	// working tree, so an unattended run cannot damage what is being
 	// edited outside it.
 	Clone bool
+	// CloneDepth limits the history that copy carries. Zero copies it all.
+	CloneDepth int
 }
 
 func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
@@ -333,8 +345,8 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, os.Stdin))
 	spec.Image = image
 
-	if o.Clone {
-		if err := useClone(ctx, env, p, &spec); err != nil {
+	if o.Clone || o.CloneDepth > 0 {
+		if err := useClone(ctx, env, p, &spec, o.CloneDepth); err != nil {
 			return err
 		}
 	}

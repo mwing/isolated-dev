@@ -14,9 +14,12 @@ import (
 // Only the mount changes. The image, the allowlist and the recorded
 // history stay the project's own, because the run is still that project's
 // run — it is the working tree that is being protected, not the identity.
-func useClone(ctx context.Context, env *Env, p *project.Project, spec *container.RunSpec) error {
+func useClone(ctx context.Context, env *Env, p *project.Project, spec *container.RunSpec,
+	depth int) error {
 	dest := clone.Dir(env.Paths.Home, projectSlug(p.Dir))
-	res, err := clone.Prepare(ctx, env.Runner, p.Dir, dest)
+	res, err := clone.Prepare(ctx, env.Runner, clone.Options{
+		Project: p.Dir, Dest: dest, Depth: depth,
+	})
 	if err != nil {
 		return err
 	}

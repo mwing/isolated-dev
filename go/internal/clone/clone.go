@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mwing/isolated-dev/go/internal/runner"
@@ -36,14 +37,32 @@ type Result struct {
 	Notes []string
 }
 
-// Prepare returns a private copy of projectDir at dest, creating it when
-// it does not exist and reusing it when it does.
+// Options describe the clone to prepare.
+type Options struct {
+	// Project is the repository to copy, which must be its root.
+	Project string
+	// Dest is where the copy lives.
+	Dest string
+	// Depth limits how much history is copied. Zero copies all of it.
+	//
+	// A full copy of a large repository is mostly history the run will
+	// never read, and the first clone of a multi-gigabyte tree is slow
+	// enough to put people off using the mode at all. Work still comes
+	// back out: the commits made in a shallow clone sit on top of a commit
+	// the project already has, so fetching them needs nothing that was
+	// left behind.
+	Depth int
+}
+
+// Prepare returns a private copy of the project, creating it when it does
+// not exist and reusing it when it does.
 //
 // Reuse is deliberate. An agent session that spans several runs would
 // otherwise lose its work every time, which is the one outcome worse than
 // working in the wrong directory. The cost is that the clone drifts from
 // the project, so drift is reported rather than silently tolerated.
-func Prepare(ctx context.Context, run runner.Runner, projectDir, dest string) (Result, error) {
+func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) {
+	projectDir, dest := o.Project, o.Dest
 	res := Result{Path: dest}
 
 	top, err := gitOutput(ctx, run, projectDir, "rev-parse", "--show-toplevel")
@@ -73,17 +92,36 @@ func Prepare(ctx context.Context, run runner.Runner, projectDir, dest string) (R
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return res, err
 	}
-	// --no-hardlinks: see the package comment. The point of this mode is
-	// that the container is not trusted with the working tree, and a
-	// hard-linked object store is still the original repository's data.
-	if _, err := git(ctx, run, "", "clone", "--no-hardlinks", projectDir, dest); err != nil {
+	if _, err := git(ctx, run, "", cloneArgs(o)...); err != nil {
 		return res, fmt.Errorf("cloning %s: %w", projectDir, err)
 	}
 	res.Fresh = true
+	if o.Depth > 0 {
+		res.Notes = append(res.Notes, fmt.Sprintf(
+			"shallow: %d commit(s) of history, so `git log` and anything deriving "+
+				"a version from tags sees less than the project does", o.Depth))
+	}
 
 	notes, err := carryUncommitted(ctx, run, projectDir, dest)
-	res.Notes = notes
+	res.Notes = append(res.Notes, notes...)
 	return res, err
+}
+
+// cloneArgs builds the git invocation.
+//
+// The two forms are not interchangeable. A plain local path lets git share
+// the object store, so --no-hardlinks is required: a hard-linked object
+// store is still the project's own data, and this mode exists because the
+// container is not trusted with it. Depth is silently ignored on that
+// path, which is why a shallow clone goes through file:// instead — and
+// that transport copies objects anyway, so the same property holds by a
+// different route.
+func cloneArgs(o Options) []string {
+	if o.Depth > 0 {
+		return []string{"clone", "--depth", strconv.Itoa(o.Depth),
+			"file://" + o.Project, o.Dest}
+	}
+	return []string{"clone", "--no-hardlinks", o.Project, o.Dest}
 }
 
 // carryUncommitted reproduces the working tree's uncommitted state in the
@@ -152,6 +190,10 @@ func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) 
 // driftNotes describes how a reused clone differs from the project.
 func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]string, error) {
 	notes := []string{"reusing the existing clone"}
+	if shallow, err := gitOutput(ctx, run, dest, "rev-parse", "--is-shallow-repository"); err == nil &&
+		strings.TrimSpace(shallow) == "true" {
+		notes = append(notes, "the clone is shallow")
+	}
 
 	srcHead, err := gitOutput(ctx, run, src, "rev-parse", "HEAD")
 	if err != nil {

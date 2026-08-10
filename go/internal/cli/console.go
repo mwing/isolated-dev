@@ -350,7 +350,7 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		Agent:       a,
 		Project:     p.Dir,
 		Interactive: true,
-		Command:     command,
+		Args:        command,
 		Image:       base,
 		Memory:      firstSet(saved.Memory, request.Memory),
 		CPUs:        firstSet(saved.CPUs, request.CPUs),

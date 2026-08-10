@@ -154,6 +154,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		safe        bool
 		allowPush   bool
 		useCloneDir bool
+		cloneDepth  int
 	)
 
 	cmd := &cobra.Command{
@@ -187,7 +188,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				Interactive: wantTTY(tty, os.Stdin),
 				Memory:      memory,
 				CPUs:        cpus,
-				Command:     args[1:],
+				Args:        args[1:],
 			}
 
 			opts.GitIdentity = gitIdentity(env)
@@ -195,9 +196,11 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 			// An agent left running unattended is the case a clone is
 			// for: the run keeps the project's identity, allowlist and
 			// history, and only the working tree it can damage changes.
-			if useCloneDir {
+			if useCloneDir || cloneDepth > 0 {
 				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
-				res, err := clone.Prepare(cmd.Context(), env.Runner, opts.Project, dest)
+				res, err := clone.Prepare(cmd.Context(), env.Runner, clone.Options{
+					Project: opts.Project, Dest: dest, Depth: cloneDepth,
+				})
 				if err != nil {
 					return err
 				}
@@ -242,7 +245,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 	cmd.Flags().StringVar(&tty, "tty", "auto", "allocate a terminal: auto, on, or off")
 	cmd.Flags().BoolVar(&allowPush, "allow-push", false,
 		"forward your ssh-agent so the agent can push, and allow the git host")
-	addCloneFlag(cmd, &useCloneDir)
+	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
 	cmd.Flags().BoolVar(&safe, "safe", false,
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
@@ -376,8 +379,11 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if opts.CPUs == "" {
 		opts.CPUs = saved.CPUs
 	}
-	if len(opts.Command) == 0 && len(saved.Args) > 0 {
-		opts.Command = append([]string{a.Binary}, saved.Args...)
+	// Saved args are the project's stored defaults; args typed on the
+	// command line replace them rather than being appended, since a
+	// stored default is what you get when you say nothing.
+	if len(opts.Args) == 0 && len(saved.Args) > 0 {
+		opts.Args = append([]string(nil), saved.Args...)
 	}
 
 	allowEntries := opts.Allowlist()

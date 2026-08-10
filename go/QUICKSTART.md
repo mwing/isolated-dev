@@ -233,7 +233,9 @@ dev2 agent run claude --clone
 
 Your uncommitted work is carried in; whatever the agent does stays in
 `~/.dev-envs/clones/<project>` and comes back through git when you want
-it. Worth making the habit early — it is the difference between reviewing
+it — see [USAGE.md](USAGE.md) for the full patch workflow. On a large
+repository add `--clone-depth 1`, which copies one commit of history
+instead of all of it. Worth making the habit early — it is the difference between reviewing
 a diff and restoring from a stash.
 
 ---

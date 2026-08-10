@@ -69,7 +69,98 @@ inside the sandbox rather than copied, and git objects are copied rather
 than hardlinked — a hardlinked object store is still your repository's own
 data, which is the thing being protected here.
 
+For a large repository, copy only the history the run needs:
+
+```sh
+dev2 agent run claude --clone-depth 1
+```
+
+`--clone-depth` implies `--clone`. It changes the transport git uses, not
+the guarantee: a shallow clone is fetched over `file://`, which copies
+objects rather than sharing them, so the project's own object store is
+still untouched. The cost is that `git log` is short and anything deriving
+a version from `git describe` will see less than the project does.
+
 Needs a git repository, and the repository root.
+
+---
+
+## Developing a patch in a clone, and landing it
+
+The clone is a real repository, so the whole change can be made, reviewed
+and merged without the sandbox ever touching your working tree. This is
+the workflow worth learning.
+
+**1. Do the work in the clone.**
+
+```sh
+dev2 agent run claude --clone-depth 1 -- "fix the retry logic in worker.py"
+```
+
+Or by hand, which is the same thing:
+
+```sh
+dev2 shell --clone
+# inside: edit, run tests, commit
+$ git checkout -b fix-retries
+$ git commit -am 'fix retry backoff'
+```
+
+Commit inside the clone. An uncommitted change is still recoverable, but a
+commit is what makes the next two steps one command each.
+
+**2. Look at what came out, from outside.**
+
+```sh
+CLONE=~/.dev-envs/clones/my-project
+
+git -C $CLONE log --oneline -5
+git -C $CLONE status
+git -C $CLONE diff HEAD~1        # or against whatever it started from
+```
+
+You are reading this with your own tools, on the host, with the sandbox
+gone. Nothing you are about to merge has run on your machine.
+
+**3. Bring it back.**
+
+```sh
+git fetch $CLONE fix-retries          # the branch, by name
+git log --oneline FETCH_HEAD -3       # confirm it is what you read
+git cherry-pick FETCH_HEAD            # one commit
+```
+
+For a series of commits, merge or rebase the fetched branch instead:
+
+```sh
+git fetch $CLONE fix-retries:fix-retries   # create the branch locally
+git rebase fix-retries                     # or: git merge fix-retries
+```
+
+If the agent worked on `HEAD` without a branch, `git fetch $CLONE HEAD`
+and cherry-pick `FETCH_HEAD` — the commits are reachable either way.
+
+**This works from a shallow clone too.** The new commits sit on top of a
+commit your repository already has, so fetching them needs nothing that
+was left behind. Verified by a test that shallow-clones, commits, fetches
+back and cherry-picks.
+
+**4. If it went badly, throw it away.**
+
+```sh
+rm -rf $CLONE
+```
+
+Nothing outside that directory changed. The next `--clone` run starts
+fresh — which is the point of running it there in the first place.
+
+### When you would not use a clone
+
+For your own interactive work, the plain bind mount is better: edits
+appear in your editor immediately, and there is no step 3. Reach for
+`--clone` when the run is unattended, when the thing running is not
+trustworthy, or when you want a change to arrive as a diff you approve
+rather than as edits already made.
 
 ---
 
