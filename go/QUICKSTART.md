@@ -26,11 +26,11 @@ dev2 status
 ```
 
 ```
-Project:  gosta (/Users/miso/Projects/gosta)
-Image:    dev-img-gosta
+Project:  acme-platform (~/code/acme-platform)
+Image:    dev-img-acme-platform
 Network:  allowlist (default)
   registries: registry.npmjs.org deb.debian.org security.debian.org
-  granted:    gostalabs.com
+  granted:    api.acme.example
 ```
 
 Two things are worth reading here. **What was detected** decides which
@@ -142,7 +142,7 @@ cd ../frontend && dev2 status  # node
 ```
 
 ```
-Project:  backend (/Users/miso/Projects/gosta/backend)
+Project:  backend (~/code/acme-platform/backend)
   registries: pypi.org files.pythonhosted.org deb.debian.org security.debian.org
 ```
 
@@ -176,7 +176,7 @@ a repo whose Dockerfile describes a dev environment — and wrong for the
 common case, where it describes a deployment artifact:
 
 ```
-Dockerfile: /Users/miso/Projects/gosta/backend/Dockerfile
+Dockerfile: ~/code/acme-platform/backend/Dockerfile
 ```
 
 If that file is a hardened multi-stage build ending in a slim runtime,
