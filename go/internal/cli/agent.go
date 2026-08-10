@@ -7,12 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/go/internal/agent"
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
+	"github.com/mwing/isolated-dev/go/internal/history"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 	"github.com/mwing/isolated-dev/go/internal/runner"
 	"github.com/mwing/isolated-dev/go/internal/trust"
@@ -32,6 +34,7 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentPolicyCmd(env))
 	cmd.AddCommand(newAgentAllowCmd(env))
 	cmd.AddCommand(newAgentRevokeCmd(env))
+	cmd.AddCommand(newAgentGrantsCmd(env))
 	cmd.AddCommand(newAgentConfigCmd(env))
 	cmd.AddCommand(newAgentAcceptCmd(env))
 	return cmd
@@ -434,8 +437,15 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if err != nil {
 		return err
 	}
+	rec := runRecord{
+		Path:    history.Path(store.Project.Path()),
+		Start:   time.Now(),
+		Command: []string{"agent " + a.Name},
+		Image:   image,
+		Network: "allowlist",
+	}
 	defer func() {
-		summary, err := side.Stop(context.WithoutCancel(ctx))
+		summary, err := finishRun(ctx, env, side, rec)
 		if err != nil {
 			fmt.Fprintf(env.Stderr, "\nwarning: reading egress log: %v\n", err)
 			return
@@ -452,6 +462,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")
 		fmt.Fprintf(env.Stderr, "Allow from now:   dev2 agent allow HOST\n")
 		fmt.Fprintf(env.Stderr, "Edit the file:    dev2 agent config edit\n")
+		fmt.Fprintf(env.Stderr, "Later:            dev2 history\n")
 	}()
 
 	// Live egress notices. A denial mid-run is actionable — the user can

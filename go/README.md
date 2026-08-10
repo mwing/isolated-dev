@@ -88,6 +88,8 @@ first.
 | `dev2 accept` | review what `.devenv.yaml` requests |
 | `dev2 agent run NAME` | run a coding agent in the sandbox |
 | `dev2 agent allow HOST` | grant an egress destination for this project |
+| `dev2 history` | what past runs reached, and what was blocked |
+| `dev2 agent grants` | granted destinations, and whether anything still uses them |
 | `dev2 policy` | show the rules this machine enforces on everyone |
 | `dev2 doctor` | diagnose the setup |
 | `dev2 devcontainer` | export this environment as a devcontainer.json for teammates without dev2 |

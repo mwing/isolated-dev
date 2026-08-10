@@ -14,6 +14,7 @@ import (
 
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/container"
+	"github.com/mwing/isolated-dev/go/internal/history"
 	"github.com/mwing/isolated-dev/go/internal/langs"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 	"github.com/mwing/isolated-dev/go/internal/project"
@@ -359,7 +360,13 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if err != nil {
 		return err
 	}
-	defer reportEgress(ctx, env, side)
+	defer reportEgress(ctx, env, side, runRecord{
+		Path:    history.Path(store.Project.Path()),
+		Start:   time.Now(),
+		Command: o.Command,
+		Image:   image,
+		Network: string(p.Network),
+	})
 
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
@@ -493,8 +500,8 @@ func watchEgress(ctx context.Context, env *Env, eng *container.Engine,
 	}()
 }
 
-func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar) {
-	summary, err := side.Stop(context.WithoutCancel(ctx))
+func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRecord) {
+	summary, err := finishRun(ctx, env, side, rec)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "\nwarning: reading egress log: %v\n", err)
 		return
@@ -510,4 +517,5 @@ func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar) {
 	fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")
 	fmt.Fprintf(env.Stderr, "Allow from now:   dev2 agent allow HOST\n")
 	fmt.Fprintf(env.Stderr, "Unrestricted:     --network open\n")
+	fmt.Fprintf(env.Stderr, "Later:            dev2 history\n")
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/mwing/isolated-dev/go/internal/config"
 	"github.com/mwing/isolated-dev/go/internal/console"
 	"github.com/mwing/isolated-dev/go/internal/container"
+	"github.com/mwing/isolated-dev/go/internal/history"
 	"github.com/mwing/isolated-dev/go/internal/netpolicy"
 	"github.com/mwing/isolated-dev/go/internal/project"
 	"github.com/mwing/isolated-dev/go/internal/runner"
@@ -227,6 +228,13 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		})
 	model.Term = term
 
+	rec := runRecord{
+		Path:    history.Path(store.Project.Path()),
+		Start:   time.Now(),
+		Command: command,
+		Image:   image,
+		Network: string(p.Network),
+	}
 	prog := tea.NewProgram(model, tea.WithContext(ctx))
 
 	go streamEvents(runCtx, eng, topo, prog)
@@ -239,7 +247,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	}
 
 	if _, err := prog.Run(); err != nil {
-		_, _ = side.Stop(context.WithoutCancel(ctx))
+		// A console that failed to start still ran a workload, so the
+		// record is written on this path too.
+		_, _ = finishRun(ctx, env, side, rec)
 		if strings.Contains(err.Error(), "/dev/tty") {
 			return fmt.Errorf("the console needs a terminal and this session has none; " +
 				"use `dev2 run --egress-prompt ask` for the same blocking prompts " +
@@ -248,7 +258,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		return err
 	}
 
-	summary, stopErr := side.Stop(context.WithoutCancel(ctx))
+	summary, stopErr := finishRun(ctx, env, side, rec)
 	for _, line := range summary {
 		fmt.Fprintf(env.Stderr, "  %s\n", line)
 	}

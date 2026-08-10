@@ -233,6 +233,20 @@ func (s *Sidecar) Grant(ctx context.Context, op, host string) error {
 // summary gathered from the sidecar's log, which is the report the user
 // actually cares about: what did the workload try to reach?
 func (s *Sidecar) Stop(ctx context.Context) ([]string, error) {
+	logs, err := s.StopAndLog(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return Summary(ParseDenials(logs)), nil
+}
+
+// StopAndLog tears everything down and returns the sidecar's raw log.
+//
+// The log has to be read before the container is removed and the caller
+// wants more from it than the denial summary — what was reached, not only
+// what was refused — so the two concerns are separated here rather than
+// each teardown path re-deriving the order.
+func (s *Sidecar) StopAndLog(ctx context.Context) (string, error) {
 	logs, logErr := s.Engine.Logs(ctx, s.Topology.SidecarName)
 
 	_ = s.Engine.Stop(ctx, s.Topology.SidecarName)
@@ -241,15 +255,22 @@ func (s *Sidecar) Stop(ctx context.Context) ([]string, error) {
 	_ = s.Engine.NetworkRemove(ctx, s.Topology.EgressNetwork)
 
 	if logErr != nil {
-		return nil, logErr
+		return "", logErr
 	}
-	return Summary(ParseDenials(logs)), nil
+	return logs, nil
 }
 
-// ParseDenials aggregates deny events from the sidecar's JSON log. Lines
-// that are not events (the sidecar's own diagnostics) are ignored.
+// ParseDenials aggregates deny events from the sidecar's JSON log.
 func ParseDenials(logs string) map[string]int {
-	out := map[string]int{}
+	_, denied := ParseEvents(logs)
+	return denied
+}
+
+// ParseEvents aggregates a sidecar log into what was reached and what was
+// refused, counted per destination. Lines that are not events (the
+// sidecar's own diagnostics) are ignored.
+func ParseEvents(logs string) (allowed, denied map[string]int) {
+	allowed, denied = map[string]int{}, map[string]int{}
 	sc := bufio.NewScanner(strings.NewReader(logs))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -261,17 +282,29 @@ func ParseDenials(logs string) map[string]int {
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			continue
 		}
-		if e.Action != "deny" {
-			continue
-		}
 		key := e.Host
 		if e.Port != 0 {
 			key = fmt.Sprintf("%s:%d", e.Host, e.Port)
 		}
-		if e.Method == "DNS" {
-			key = e.Host + " (DNS)"
+		switch e.Action {
+		case "deny":
+			// A refused name lookup and a refused connection are
+			// different events about the same intent; keeping the
+			// distinction is what makes a denial explainable.
+			if e.Method == "DNS" {
+				key = e.Host + " (DNS)"
+			}
+			denied[key]++
+		case "allow":
+			// A name resolved is not a destination reached. Counting
+			// both would report hosts as contacted that a workload only
+			// looked up, which is exactly the claim a grant review must
+			// not get wrong.
+			if e.Method == "DNS" {
+				continue
+			}
+			allowed[key]++
 		}
-		out[key]++
 	}
-	return out
+	return allowed, denied
 }

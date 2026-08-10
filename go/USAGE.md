@@ -40,6 +40,38 @@ written at all — a half-scaffolded directory is worse than a refusal, and
 
 ---
 
+## Reviewing what a project reached
+
+Every filtered run is recorded, so the summary that scrolls past is still
+there afterwards:
+
+```sh
+dev2 history              # recent runs: what each reached, what was blocked
+dev2 history --denied     # only the runs that hit the allowlist
+dev2 history hosts        # every destination, most recent first
+```
+
+This is the question worth asking after running something you did not
+write: not "was it blocked" during the run, but "what did it try to talk
+to" once you have time to look.
+
+Grants are then reviewable against it:
+
+```sh
+dev2 agent grants         # each grant, and when it was last actually used
+dev2 agent grants prune   # the ones nothing has reached; --apply to remove
+```
+
+An allowlist that only ever grows stops meaning anything. `prune` refuses
+to act on a thin history — "never used" across three runs is not a
+finding — and never touches hosts you accepted from `.devenv.yaml`, since
+withdrawing consent is a different act from tidying your own grants.
+
+Records live under `~/.dev-envs`, mode 0600, never in the repository: what
+your machine reached is not the repository's business.
+
+---
+
 ## Teammates who use an IDE instead of dev2
 
 A dev container gives them isolation without this tool:

@@ -92,6 +92,16 @@ type File struct {
 // Path returns where the file lives on disk.
 func (f *File) Path() string { return f.path }
 
+// Hosts returns the destinations this file grants for an agent. These are
+// the user's own grants, distinct from Accepted, which records consent to
+// what the project asked for.
+func (f *File) Hosts(agentName string) []string {
+	if f == nil {
+		return nil
+	}
+	return append([]string(nil), f.Agents[agentName].AllowHosts...)
+}
+
 // Store resolves configuration across the global file and one project.
 type Store struct {
 	Root    string // ~/.dev-envs
