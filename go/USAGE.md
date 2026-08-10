@@ -40,6 +40,32 @@ written at all — a half-scaffolded directory is worse than a refusal, and
 
 ---
 
+## Teammates who use an IDE instead of dev2
+
+A dev container gives them isolation without this tool:
+
+```sh
+dev2 devcontainer          # writes .devcontainer/, then commit it
+```
+
+The file describes the same image dev2 builds — same base, same digests
+if pinned, same tools, same unprivileged uid 1000 — so files written in
+either belong to the same user. Verified by building the generated file
+with plain `docker`: it produced the same image ID dev2 had built.
+
+It exports the **environment**, not the **sandbox**. Egress filtering
+lives in a proxy sidecar dev2 starts, and an editor will not start one, so
+an exported container has ordinary network access. The generated file says
+so in a comment; a teammate who assumes otherwise is worse off than one
+who never had the file.
+
+This is the opposite direction from the read side: dev2 already builds
+from a `devcontainer.json` when a project has one. After exporting, both
+tools build the same file — regenerate rather than edit it, and dev2 keeps
+applying pins, upgrades and tools on top.
+
+---
+
 ## Updating dependencies without trusting them
 
 A dependency update runs arbitrary code from strangers: install scripts,

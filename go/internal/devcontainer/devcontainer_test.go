@@ -138,3 +138,80 @@ func TestMalformedFileIsAnError(t *testing.T) {
 		t.Fatal("malformed file parsed")
 	}
 }
+
+func TestGenerateUsesImageWhenGiven(t *testing.T) {
+	g := Generate(Options{Name: "app", Image: "ghcr.io/acme/dev:1"})
+	js := g.Files[filepath.Join(".devcontainer", "devcontainer.json")]
+	if !strings.Contains(js, `"image": "ghcr.io/acme/dev:1"`) {
+		t.Fatalf("image not referenced: %s", js)
+	}
+	if _, ok := g.Files[filepath.Join(".devcontainer", "Dockerfile")]; ok {
+		t.Fatal("wrote a Dockerfile for a project that names an image")
+	}
+}
+
+func TestGenerateShipsDockerfileWhenThereIsNoImage(t *testing.T) {
+	g := Generate(Options{Name: "app", Dockerfile: "FROM debian\n"})
+	df, ok := g.Files[filepath.Join(".devcontainer", "Dockerfile")]
+	if !ok || df != "FROM debian\n" {
+		t.Fatalf("Dockerfile not written: %q", df)
+	}
+	js := g.Files[filepath.Join(".devcontainer", "devcontainer.json")]
+	if !strings.Contains(js, `"dockerfile": "Dockerfile"`) {
+		t.Fatalf("Dockerfile not referenced: %s", js)
+	}
+}
+
+// A generated file that an editor cannot parse is worse than none, and the
+// comments this writes are the part a strict JSON parser would reject.
+func TestGeneratedConfigParsesAsJSONC(t *testing.T) {
+	g := Generate(Options{Name: "app", Dockerfile: "FROM debian\n", Ports: []int{8000, 5000}})
+	path := filepath.Join(t.TempDir(), "devcontainer.json")
+	if err := os.WriteFile(path,
+		[]byte(g.Files[filepath.Join(".devcontainer", "devcontainer.json")]), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("cannot read back what we wrote: %v", err)
+	}
+	if cfg.Name != "app" {
+		t.Fatalf("name = %q", cfg.Name)
+	}
+	if len(cfg.ForwardPorts) != 2 || cfg.ForwardPorts[0] != 8000 {
+		t.Fatalf("ports = %v", cfg.ForwardPorts)
+	}
+	if cfg.WorkspaceFolder != "/workspace" {
+		t.Fatalf("workspace = %q", cfg.WorkspaceFolder)
+	}
+}
+
+// The exported container has ordinary network access. Someone who believes
+// otherwise is worse off than someone who never had the file, so both the
+// file and the command's output have to say it.
+func TestGenerateSaysEgressIsNotReproduced(t *testing.T) {
+	g := Generate(Options{Name: "app", Dockerfile: "FROM debian\n", EgressFiltered: true})
+	js := g.Files[filepath.Join(".devcontainer", "devcontainer.json")]
+	if !strings.Contains(js, "NOT reproduce") {
+		t.Fatalf("config does not mention it: %s", js)
+	}
+	var found bool
+	for _, n := range g.Notes {
+		if strings.Contains(n, "egress filtering is not reproduced") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("notes do not mention it: %v", g.Notes)
+	}
+}
+
+func TestGenerateRunsAsTheSameUnprivilegedUser(t *testing.T) {
+	js := Generate(Options{Name: "app", Dockerfile: "FROM debian\n"}).
+		Files[filepath.Join(".devcontainer", "devcontainer.json")]
+	for _, want := range []string{`"remoteUser": "1000"`, "--cap-drop=ALL", "no-new-privileges"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("missing %q in %s", want, js)
+		}
+	}
+}

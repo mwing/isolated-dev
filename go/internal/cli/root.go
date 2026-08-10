@@ -85,6 +85,7 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newPolicyCmd(env))
 	root.AddCommand(newUpdateCmd(env))
 	root.AddCommand(newNewCmd(env))
+	root.AddCommand(newDevcontainerCmd(env))
 
 	// Completion covers every command in the tree, so this has to run
 	// after the tree is built.
