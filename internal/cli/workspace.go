@@ -359,7 +359,19 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if err != nil {
 		return err
 	}
-	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, env.Stdin))
+
+	// Host access the user authorized. Resolved after the image is known
+	// because reading the group that owns a mounted socket needs a container
+	// to read it from.
+	grants, err := resolveGrants(ctx, env, eng, cfg, store, image)
+	if err != nil {
+		return err
+	}
+	for _, line := range describeGrants(grants) {
+		fmt.Fprintf(env.Stderr, "  granted  %s\n", line)
+	}
+
+	spec := p.RunSpec(cfg, grants, o.Command, wantTTY(o.TTY, env.Stdin))
 	spec.Image = image
 
 	if o.Clone || o.CloneDepth > 0 {

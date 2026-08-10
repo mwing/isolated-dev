@@ -183,18 +183,27 @@ func (h *harness) dockerRuns() [][]string {
 	return out
 }
 
-// workloadRun returns the invocation that started the user's own container.
-// The sidecar is detached and is the only other thing a run starts, so the
-// distinction is --detach; anything else present is a change worth failing
-// on rather than silently picking between.
-func (h *harness) workloadRun(t *testing.T) []string {
-	t.Helper()
-	var found [][]string
+// runsWithRole returns the runs carrying a given dev.role label. Every
+// container the tool starts says what it is for, so a test can name the one
+// it means rather than inferring it from the shape of the argv.
+func (h *harness) runsWithRole(role string) [][]string {
+	var out [][]string
 	for _, args := range h.dockerRuns() {
-		if !contains(args, "--detach") {
-			found = append(found, args)
+		if containsPair(args, "--label", "dev.role="+role) {
+			out = append(out, args)
 		}
 	}
+	return out
+}
+
+// workloadRun returns the invocation that started the user's own container:
+// their project, or the agent acting on it. The sidecar and the throwaway
+// probes the tool runs for its own bookkeeping are excluded by role, and
+// finding more or fewer than one is a change worth failing on rather than
+// silently picking between.
+func (h *harness) workloadRun(t *testing.T) []string {
+	t.Helper()
+	found := append(h.runsWithRole("workspace"), h.runsWithRole("agent")...)
 	if len(found) != 1 {
 		t.Fatalf("want exactly one workload `docker run`, got %d:\n%s",
 			len(found), strings.Join(h.fake.Lines(), "\n"))
@@ -207,10 +216,7 @@ func (h *harness) workloadRun(t *testing.T) []string {
 // builders cannot be asked about: it is assembled in the glue layer.
 func (h *harness) sidecarAllow(t *testing.T) []string {
 	t.Helper()
-	for _, args := range h.dockerRuns() {
-		if !contains(args, "--detach") {
-			continue
-		}
+	for _, args := range h.runsWithRole("egress-sidecar") {
 		for i, a := range args {
 			if a == "--allow" && i+1 < len(args) {
 				if args[i+1] == "" {
@@ -274,7 +280,7 @@ func TestDoctorFailsWhenBackendNotReady(t *testing.T) {
 
 func TestDoctorReportsGrantsRequestedByProjectConfig(t *testing.T) {
 	h := newHarness(t)
-	h.writeProject(t, `mount_ssh_keys: true
+	h.writeProject(t, `mount_git_config: true
 pass_env_vars:
   patterns:
     - AWS_*
@@ -285,7 +291,7 @@ pass_env_vars:
 	if !strings.Contains(out, "grants requested by config") {
 		t.Fatalf("grants not surfaced:\n%s", out)
 	}
-	if !strings.Contains(out, "~/.ssh") || !strings.Contains(out, "AWS_*") {
+	if !strings.Contains(out, "~/.gitconfig") || !strings.Contains(out, "AWS_*") {
 		t.Errorf("grant detail missing:\n%s", out)
 	}
 }
@@ -771,5 +777,18 @@ func TestUpdateAndPinAreBothPresent(t *testing.T) {
 		if !names[want] {
 			t.Errorf("%q missing from the command tree", want)
 		}
+	}
+}
+
+// acceptSettings records consent to project settings, which is what
+// `dev accept` writes.
+func (h *harness) acceptSettings(t *testing.T, asks ...trust.Ask) {
+	t.Helper()
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AcceptSettings(asks); err != nil {
+		t.Fatal(err)
 	}
 }

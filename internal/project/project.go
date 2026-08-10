@@ -196,12 +196,59 @@ func (p *Project) Pinned(dockerfile string, pins map[string]string) string {
 	return ApplyPins(dockerfile, pins)
 }
 
+// Grants are the host accesses a run has been authorized to receive.
+//
+// They are a separate argument from Config on purpose. A config file is a
+// request; a request that applied itself would make the consent prompt
+// decorative, which is how these four keys came to be described to users,
+// gated behind `dev accept`, reported by `doctor` — and never honored by
+// anything. Whoever builds a RunSpec has to have resolved the acceptance
+// first, and having to pass this in is what makes forgetting impossible.
+//
+// Nothing here reads the host: the caller resolves the paths and the
+// environment, so the spec builder stays a pure function of its arguments
+// and a test can state the whole world it runs in.
+type Grants struct {
+	// GitConfig is the host path of a FILTERED copy of the user's gitconfig,
+	// mounted read-only as the container's system-wide git configuration.
+	// Filtered rather than the original because a gitconfig carries more than
+	// identity: signing keys, credential helpers, and insteadOf rules that
+	// silently redirect a remote somewhere else.
+	GitConfig string
+	// DockerSocket is the host path of the docker socket to expose. This is
+	// root on the docker host and defeats the sandbox; it exists because the
+	// alternative is the user running docker outside the tool entirely.
+	DockerSocket string
+	// DockerSocketGID is the group that owns that socket as the container
+	// sees it, added as a supplementary group. Without it the mount is
+	// present and unusable, which is the half-honored grant this whole
+	// change exists to remove.
+	DockerSocketGID string
+	// Env are already-resolved NAME=VALUE pairs from the host environment.
+	Env []string
+}
+
+// Empty reports whether the run was granted nothing beyond the sandbox.
+func (g Grants) Empty() bool {
+	return g.GitConfig == "" && g.DockerSocket == "" && len(g.Env) == 0
+}
+
+// SystemGitConfig is where a granted gitconfig is mounted. Git's system-wide
+// file is used rather than a home-relative one because the workload's HOME
+// depends on the project's own image, and a grant that lands in a directory
+// git never reads is a grant that silently does nothing.
+const SystemGitConfig = "/etc/gitconfig"
+
+// DockerSocketPath is where a granted docker socket appears, matching the
+// host path so anything reading DOCKER_HOST's default finds it.
+const DockerSocketPath = "/var/run/docker.sock"
+
 // RunSpec builds the container specification for a run.
 //
 // The posture is the hardened baseline: the tool sets the uid rather than
 // trusting the image's USER, capabilities are dropped, and privilege
-// escalation is off. Only the workspace is writable.
-func (p *Project) RunSpec(cfg config.Config, command []string, tty bool) container.RunSpec {
+// escalation is off. Only the workspace is writable, plus whatever g adds.
+func (p *Project) RunSpec(cfg config.Config, g Grants, command []string, tty bool) container.RunSpec {
 	spec := container.Hardened()
 	spec.Image = p.Image
 	spec.WorkDir = "/workspace"
@@ -220,6 +267,31 @@ func (p *Project) RunSpec(cfg config.Config, command []string, tty bool) contain
 	}
 	if p.Network == NetworkNone {
 		spec.Network = "none"
+	}
+
+	// Granted access last, so it is visible in one place rather than woven
+	// through the baseline it deliberately widens.
+	//
+	// The environment goes on before anything the caller appends: the egress
+	// topology's proxy variables are added after this and docker takes the
+	// last --env for a name, so a granted variable cannot overwrite the
+	// settings that make egress control work.
+	spec.Env = append(spec.Env, g.Env...)
+	if g.GitConfig != "" {
+		spec.Mounts = append(spec.Mounts, container.Mount{
+			Source: g.GitConfig, Target: SystemGitConfig, ReadOnly: true,
+		})
+	}
+	if g.DockerSocket != "" {
+		spec.Mounts = append(spec.Mounts, container.Mount{
+			Source: g.DockerSocket, Target: DockerSocketPath,
+		})
+		// Reaching the socket through a supplementary group keeps the fixed
+		// uid intact; running as the socket's owner would hand the container
+		// the identity that owns the daemon.
+		if g.DockerSocketGID != "" {
+			spec.GroupAdd = append(spec.GroupAdd, g.DockerSocketGID)
+		}
 	}
 	return spec
 }

@@ -2,9 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -228,4 +231,211 @@ func TestSafeFlagShowsInTheDryRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Host access: the grants that used to authorize nothing (T4) ---
+
+// statSocket answers the throwaway container that reads the group owning a
+// mounted socket. Its spec is the only `docker run` with no --interactive.
+func (h *harness) statSocket(gid string) {
+	h.fake.Response[dockerKey("run", "--rm", "--network", "none")] =
+		runner.Result{Stdout: gid + "\n"}
+}
+
+// writeHostGitConfig writes the user's own gitconfig, which lives next to
+// ~/.dev-envs in the harness's fake home.
+func (h *harness) writeHostGitConfig(t *testing.T, body string) {
+	t.Helper()
+	home := filepath.Dir(h.paths.Home)
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAProjectMountIsRefusedUntilAccepted(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, "mount_git_config: true\n")
+
+	err := h.run(t, "run", "--tty", "off", "-c", "true")
+	if err == nil {
+		t.Fatal("a project's mount request applied itself")
+	}
+	if !strings.Contains(h.stderr.String(), "dev accept") {
+		t.Errorf("the refusal does not name the remedy:\n%s", h.stderr.String())
+	}
+}
+
+func TestAnAcceptedMountReachesTheContainer(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, "mount_git_config: true\n")
+	h.writeHostGitConfig(t, "[user]\n\tname = Real Person\n")
+	h.acceptSettings(t, trust.Ask{Key: "mount_git_config", Value: "true"})
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	args := h.workloadRun(t)
+	if !mountedAt(args, project.SystemGitConfig) {
+		t.Fatalf("the accepted gitconfig never reached the container:\n%s", argv(args))
+	}
+}
+
+func TestTheGrantedGitConfigIsFiltered(t *testing.T) {
+	// A gitconfig is not identity. It can name a signing key the container
+	// cannot use, a credential helper that hands out tokens, and insteadOf
+	// rules that rewrite a remote — which would route a push past the
+	// allowlist by changing the destination rather than reaching it.
+	h := newHarness(t)
+	h.writeHostGitConfig(t, `[user]
+	name = Real Person
+	email = real@example.com
+	signingkey = ABCD1234
+[commit]
+	gpgsign = true
+[credential]
+	helper = osxkeychain
+[url "git@evil.example:"]
+	insteadOf = https://github.com/
+`)
+
+	path, err := filterGitConfig(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, want := range []string{"Real Person", "real@example.com"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("identity was lost: %q missing from\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"signingkey", "gpgsign", "helper", "insteadOf", "evil.example"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("%q survived filtering:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestAnAcceptedDockerSocketArrivesUsable(t *testing.T) {
+	// The mount alone is not the grant: the socket is owned by a group the
+	// fixed uid is not in, so without --group-add it is present and
+	// unusable — the same half-honored grant in a new shape.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.statSocket("999")
+	h.writeProject(t, "mount_docker_socket: true\n")
+	h.acceptSettings(t, trust.Ask{Key: "mount_docker_socket", Value: "true"})
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	args := h.workloadRun(t)
+	if !mountedAt(args, project.DockerSocketPath) {
+		t.Errorf("the socket was not mounted:\n%s", argv(args))
+	}
+	if !containsPair(args, "--group-add", "999") {
+		t.Errorf("the socket's group was not added, so the mount is unusable:\n%s", argv(args))
+	}
+	if !strings.Contains(h.stderr.String(), "root on the docker host") {
+		t.Errorf("the worst grant in the tool was applied quietly:\n%s", h.stderr.String())
+	}
+}
+
+func TestAcceptedEnvPassthroughReachesTheContainer(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.env.Env = []string{"AWS_PROFILE=dev", "SECRET_TOKEN=hunter2"}
+	h.writeProject(t, "pass_env_vars:\n  patterns:\n    - AWS_*\n")
+	h.acceptSettings(t, trust.Ask{Key: "pass_env_vars", Value: "AWS_*"})
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	args := h.workloadRun(t)
+	if !containsPair(args, "--env", "AWS_PROFILE=dev") {
+		t.Errorf("the accepted variable never arrived:\n%s", argv(args))
+	}
+	if containsPair(args, "--env", "SECRET_TOKEN=hunter2") {
+		t.Errorf("a variable nobody asked for was copied in:\n%s", argv(args))
+	}
+}
+
+func TestAGrantedVariableCannotTurnOffEgressFiltering(t *testing.T) {
+	// A project could ask to pass HTTP_PROXY. docker takes the last --env
+	// for a name, so the sidecar's setting has to be the one that lands.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.env.Env = []string{"HTTP_PROXY=http://attacker.example"}
+	h.writeProject(t, "pass_env_vars:\n  explicit:\n    - HTTP_PROXY\n")
+	h.acceptSettings(t, trust.Ask{Key: "pass_env_vars", Value: "HTTP_PROXY"})
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	args := h.workloadRun(t)
+	var last string
+	for i, a := range args {
+		if a == "--env" && i+1 < len(args) && strings.HasPrefix(args[i+1], "HTTP_PROXY=") {
+			last = args[i+1]
+		}
+	}
+	if last != "HTTP_PROXY=http://172.31.0.2:3128" {
+		t.Fatalf("effective HTTP_PROXY = %q, want the sidecar's", last)
+	}
+}
+
+func TestTheUsersOwnGlobalConfigNeedsNoAcceptance(t *testing.T) {
+	// The global file is the user's own machine and nobody else asked. A
+	// prompt there would be the tool asking permission of the person who
+	// already gave it.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeHostGitConfig(t, "[user]\n\tname = Real Person\n")
+	if err := os.MkdirAll(filepath.Dir(h.paths.Global), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.paths.Global, []byte("mount_git_config: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	if !mountedAt(h.workloadRun(t), project.SystemGitConfig) {
+		t.Error("the user's own setting was ignored")
+	}
+}
+
+// mountedAt reports whether a rendered invocation mounts anything at target.
+func mountedAt(args []string, target string) bool {
+	for i, a := range args {
+		if a == "--mount" && i+1 < len(args) &&
+			strings.Contains(args[i+1], "target="+target) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPair(args []string, flag, value string) bool {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }

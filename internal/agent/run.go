@@ -297,22 +297,7 @@ func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string
 // sees it. Host file sharing remaps ownership, so the value cannot be
 // derived from a stat on the host.
 func (r *Runner) SocketGID(ctx context.Context, image, hostSock string) (string, error) {
-	spec := container.RunSpec{
-		Image:   image,
-		Remove:  true,
-		Network: "none",
-		Mounts:  []container.Mount{{Source: hostSock, Target: SSHSockPath}},
-		Command: []string{"stat", "-c", "%g", SSHSockPath},
-	}
-	var out strings.Builder
-	res, err := r.Engine.Run(ctx, spec, nil, &out, io.Discard)
-	if err != nil {
-		return "", err
-	}
-	if res.ExitCode != 0 {
-		return "", fmt.Errorf("inspecting the forwarded socket failed")
-	}
-	return strings.TrimSpace(out.String()), nil
+	return r.Engine.StatGroup(ctx, image, hostSock, SSHSockPath)
 }
 
 // EnsureVolume creates the agent's home volume if absent, adopting the one

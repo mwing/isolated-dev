@@ -27,18 +27,12 @@ func projectAsks(cfg config.Config) []trust.Ask {
 				"and nothing is reported as blocked because nothing is blocked",
 		})
 	}
-	if cfg.Origin("mount_ssh_keys") == config.OriginProject && cfg.MountSSHKeys {
-		asks = append(asks, trust.Ask{
-			Key: "mount_ssh_keys", Value: "true",
-			Effect: "mount ~/.ssh into the container, exposing your private keys to " +
-				"anything running in it",
-		})
-	}
 	if cfg.Origin("mount_git_config") == config.OriginProject && cfg.MountGitConfig {
 		asks = append(asks, trust.Ask{
 			Key: "mount_git_config", Value: "true",
-			Effect: "mount ~/.gitconfig, which may carry signing keys, credential " +
-				"helpers and insteadOf rules that redirect remotes",
+			Effect: "mount a filtered copy of ~/.gitconfig as the container's " +
+				"git configuration; signing, credential helpers and insteadOf " +
+				"rules that redirect remotes are removed from the copy",
 		})
 	}
 	if cfg.Origin("mount_docker_socket") == config.OriginProject && cfg.MountDockerSocket {

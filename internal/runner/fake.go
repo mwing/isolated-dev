@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 )
 
@@ -37,10 +38,30 @@ func (f *Fake) Run(_ context.Context, cmd Command) (Result, error) {
 	}
 	for k, res := range f.Response {
 		if matches(line, k) {
-			return res, nil
+			return deliver(cmd, res), nil
 		}
 	}
-	return f.Default, nil
+	return deliver(cmd, f.Default), nil
+}
+
+// deliver routes a canned response the way Exec routes a real one: output
+// goes to the writer the caller supplied, and Result carries it only when
+// there was nowhere else to put it.
+//
+// Without this the fake answered a caller that reads Result.Stdout and
+// silently gave nothing to one that passed a writer — so any code path
+// capturing a container's output looked like it produced none, which is
+// indistinguishable from a command that genuinely printed nothing.
+func deliver(cmd Command, res Result) Result {
+	if cmd.Stdout != nil && res.Stdout != "" {
+		_, _ = io.WriteString(cmd.Stdout, res.Stdout)
+		res.Stdout = ""
+	}
+	if cmd.Stderr != nil && res.Stderr != "" {
+		_, _ = io.WriteString(cmd.Stderr, res.Stderr)
+		res.Stderr = ""
+	}
+	return res
 }
 
 func matches(line, key string) bool {

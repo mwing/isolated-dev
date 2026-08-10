@@ -59,7 +59,7 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 		for _, line := range asks.Describe() {
 			fmt.Fprintf(out, "    • %s\n", line)
 		}
-		fmt.Fprintf(out, "    (v2 will confirm these on first use; see ROADMAP 4.2)\n")
+		fmt.Fprintf(out, "    (a request, not a grant: `dev accept` before any run honors it)\n")
 	}
 
 	for _, n := range cfg.Notes {

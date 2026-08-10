@@ -42,7 +42,8 @@ func (o Origin) String() string {
 }
 
 // PassEnv is the v1 pass_env_vars block: shell-glob patterns plus explicit
-// names. It carries over to v2 but is gated behind trust level.
+// names. It carries over to v2 but is a grant, honored only once the user
+// has accepted it when a project is the one asking.
 type PassEnv struct {
 	Patterns []string `yaml:"patterns"`
 	Explicit []string `yaml:"explicit"`
@@ -51,8 +52,62 @@ type PassEnv struct {
 // Empty reports whether the block requests nothing.
 func (p PassEnv) Empty() bool { return len(p.Patterns) == 0 && len(p.Explicit) == 0 }
 
+// Resolve turns the request into NAME=VALUE pairs read from environ.
+//
+// Only names the request actually matches are read, and an unset name is
+// left out rather than passed as an empty value: a variable that exists and
+// is empty means something different to a program than one that is absent,
+// and inventing the first from the second is a lie the container cannot see
+// through.
+//
+// Order is patterns first in environ order, then explicit names in the order
+// asked for, so the result is stable across runs and a diff of two rendered
+// invocations means something.
+func (p PassEnv) Resolve(environ []string) []string {
+	if p.Empty() {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	take := func(name, value string) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		out = append(out, name+"="+value)
+	}
+
+	for _, kv := range environ {
+		name, value, ok := strings.Cut(kv, "=")
+		if !ok || name == "" {
+			continue
+		}
+		for _, pattern := range p.Patterns {
+			// A malformed pattern matches nothing rather than everything.
+			if ok, err := filepath.Match(strings.TrimSpace(pattern), name); err == nil && ok {
+				take(name, value)
+				break
+			}
+		}
+	}
+
+	lookup := map[string]string{}
+	for _, kv := range environ {
+		if name, value, ok := strings.Cut(kv, "="); ok {
+			lookup[name] = value
+		}
+	}
+	for _, name := range p.Explicit {
+		name = strings.TrimSpace(name)
+		if value, ok := lookup[name]; ok && name != "" {
+			take(name, value)
+		}
+	}
+	return out
+}
+
 // File mirrors one YAML file. Pointer fields distinguish "absent" from
-// "set to the zero value" so that a project file saying `mount_ssh_keys:
+// "set to the zero value" so that a project file saying `mount_git_config:
 // false` overrides a global `true` instead of being treated as unset.
 type File struct {
 	VMName            *string  `yaml:"vm_name"`
@@ -64,7 +119,6 @@ type File struct {
 	CacheTTL          *int     `yaml:"cache_ttl"`
 	CacheMaxSize      *int     `yaml:"cache_max_size"`
 	MinDiskSpace      *int     `yaml:"min_disk_space"`
-	MountSSHKeys      *bool    `yaml:"mount_ssh_keys"`
 	MountGitConfig    *bool    `yaml:"mount_git_config"`
 	MountDockerSocket *bool    `yaml:"mount_docker_socket"`
 	ForwardPorts      *string  `yaml:"forward_ports"`
@@ -101,7 +155,6 @@ type Config struct {
 	CacheTTL          int
 	CacheMaxSize      int
 	MinDiskSpace      int
-	MountSSHKeys      bool
 	MountGitConfig    bool
 	MountDockerSocket bool
 	ForwardPorts      string
@@ -155,7 +208,6 @@ func Defaults() Config {
 		CacheTTL:          86400,
 		CacheMaxSize:      100,
 		MinDiskSpace:      5,
-		MountSSHKeys:      false,
 		MountGitConfig:    false,
 		MountDockerSocket: false,
 		ForwardPorts:      "",
@@ -217,10 +269,6 @@ func (c *Config) merge(f File, o Origin) {
 		c.MinDiskSpace = *f.MinDiskSpace
 		c.origins["min_disk_space"] = o
 	}
-	if f.MountSSHKeys != nil {
-		c.MountSSHKeys = *f.MountSSHKeys
-		c.origins["mount_ssh_keys"] = o
-	}
 	if f.MountGitConfig != nil {
 		c.MountGitConfig = *f.MountGitConfig
 		c.origins["mount_git_config"] = o
@@ -264,6 +312,23 @@ func (c *Config) merge(f File, o Origin) {
 // deadKeys are v1 keys that were parsed and validated but never affected
 // behavior. They are accepted so old files still load, and reported so the
 // user learns they do nothing. See ROADMAP section 6.
+// retiredKeys are keys v1 honored that v2 deliberately does not, with what
+// replaced them. They are distinct from deadKeys: a key that never worked is
+// a cleanup, whereas one that worked and was withdrawn is a decision, and the
+// user is owed the reasoning rather than a shrug.
+var retiredKeys = map[string]string{
+	"mount_ssh_keys": "not carried into v2: a private key inside the container " +
+		"is an exfiltratable secret, and a container that can read your key can " +
+		"copy it. Use ssh-agent forwarding instead (`dev agent run --allow-push`), " +
+		"which lets the container sign without ever seeing the key and makes " +
+		"revoking it a matter of killing the agent",
+}
+
+// RetiredNote returns the explanation for a retired key, empty if it is not
+// one. Commands that report configuration use this rather than matching on
+// note text.
+func RetiredNote(key string) string { return retiredKeys[key] }
+
 var deadKeys = map[string]string{
 	"network_mode":             "never implemented in v1; use `network:` in v2 (see ROADMAP 4.3)",
 	"auto_host_networking":     "never implemented in v1; no v2 equivalent",
@@ -283,7 +348,6 @@ var knownKeys = map[string]bool{
 	"cache_ttl":           true,
 	"cache_max_size":      true,
 	"min_disk_space":      true,
-	"mount_ssh_keys":      true,
 	"mount_git_config":    true,
 	"mount_docker_socket": true,
 	"forward_ports":       true,
@@ -302,6 +366,8 @@ func classify(path string, keys []string) []Note {
 	for _, k := range keys {
 		switch {
 		case knownKeys[k]:
+		case retiredKeys[k] != "":
+			notes = append(notes, Note{File: path, Key: k, Text: "ignored: " + retiredKeys[k]})
 		case deadKeys[k] != "":
 			notes = append(notes, Note{File: path, Key: k, Text: "ignored: " + deadKeys[k]})
 		default:
@@ -315,7 +381,6 @@ func classify(path string, keys []string) []Note {
 // access to something outside itself. The trust store hashes this set, not
 // the raw files, so that routine edits never re-prompt (ROADMAP 4.2).
 type SecurityAsks struct {
-	MountSSHKeys      bool
 	MountGitConfig    bool
 	MountDockerSocket bool
 	PassEnvPatterns   []string
@@ -326,7 +391,6 @@ type SecurityAsks struct {
 // Asks extracts the security-relevant grant set.
 func (c *Config) Asks() SecurityAsks {
 	return SecurityAsks{
-		MountSSHKeys:      c.MountSSHKeys,
 		MountGitConfig:    c.MountGitConfig,
 		MountDockerSocket: c.MountDockerSocket,
 		PassEnvPatterns:   append([]string(nil), c.PassEnvVars.Patterns...),
@@ -337,18 +401,15 @@ func (c *Config) Asks() SecurityAsks {
 
 // Empty reports whether the project asks for nothing beyond the sandbox.
 func (a SecurityAsks) Empty() bool {
-	return !a.MountSSHKeys && !a.MountGitConfig && !a.MountDockerSocket &&
+	return !a.MountGitConfig && !a.MountDockerSocket &&
 		len(a.PassEnvPatterns) == 0 && len(a.PassEnvExplicit) == 0 && a.ForwardPorts == ""
 }
 
 // Describe renders the asks as human-readable lines for a trust prompt.
 func (a SecurityAsks) Describe() []string {
 	var out []string
-	if a.MountSSHKeys {
-		out = append(out, "mount ~/.ssh into the container")
-	}
 	if a.MountGitConfig {
-		out = append(out, "mount ~/.gitconfig into the container")
+		out = append(out, "mount a filtered copy of ~/.gitconfig into the container")
 	}
 	if a.MountDockerSocket {
 		out = append(out, "mount the docker socket (root on the docker host)")

@@ -34,7 +34,7 @@ func TestLoadDefaultsWhenNoFiles(t *testing.T) {
 	if !cfg.AutoStartVM {
 		t.Error("AutoStartVM should default true")
 	}
-	if cfg.MountSSHKeys || cfg.MountGitConfig || cfg.MountDockerSocket {
+	if cfg.MountGitConfig || cfg.MountDockerSocket {
 		t.Error("mounts must default to false")
 	}
 	if !cfg.PassEnvVars.Empty() {
@@ -71,14 +71,14 @@ func TestProjectOverridesGlobal(t *testing.T) {
 func TestExplicitFalseOverridesGlobalTrue(t *testing.T) {
 	// The reason File uses pointers: `false` is a decision, not an absence.
 	p := testPaths(t)
-	write(t, p.Global, "mount_ssh_keys: true\n")
-	write(t, p.Project, "mount_ssh_keys: false\n")
+	write(t, p.Global, "mount_git_config: true\n")
+	write(t, p.Project, "mount_git_config: false\n")
 
 	cfg, err := Load(p, nil)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MountSSHKeys {
+	if cfg.MountGitConfig {
 		t.Fatal("project `false` must override global `true`")
 	}
 }
@@ -199,7 +199,7 @@ func TestMalformedYAMLIsAnError(t *testing.T) {
 func TestAsksExtractsOnlySecurityRelevantFields(t *testing.T) {
 	p := testPaths(t)
 	write(t, p.Project, `container_prefix: irrelevant
-mount_ssh_keys: true
+mount_git_config: true
 pass_env_vars:
   patterns:
     - AWS_*
@@ -212,12 +212,12 @@ pass_env_vars:
 	if asks.Empty() {
 		t.Fatal("asks should not be empty")
 	}
-	if !asks.MountSSHKeys || len(asks.PassEnvPatterns) != 1 {
+	if !asks.MountGitConfig || len(asks.PassEnvPatterns) != 1 {
 		t.Fatalf("asks = %+v", asks)
 	}
 
 	desc := strings.Join(asks.Describe(), "\n")
-	if !strings.Contains(desc, "~/.ssh") || !strings.Contains(desc, "AWS_*") {
+	if !strings.Contains(desc, "~/.gitconfig") || !strings.Contains(desc, "AWS_*") {
 		t.Errorf("Describe() = %q", desc)
 	}
 	if strings.Contains(desc, "irrelevant") {
@@ -229,9 +229,9 @@ func TestAsksIgnoreCosmeticChanges(t *testing.T) {
 	// ROADMAP 4.2: editing a non-security key must not change the grant
 	// set, or every prompt becomes noise the user learns to click through.
 	p1 := testPaths(t)
-	write(t, p1.Project, "mount_ssh_keys: true\ncontainer_prefix: one\n")
+	write(t, p1.Project, "mount_git_config: true\ncontainer_prefix: one\n")
 	p2 := testPaths(t)
-	write(t, p2.Project, "mount_ssh_keys: true\ncontainer_prefix: two\nmemory_limit: 2g\n")
+	write(t, p2.Project, "mount_git_config: true\ncontainer_prefix: two\nmemory_limit: 2g\n")
 
 	c1, err := Load(p1, nil)
 	if err != nil {
@@ -255,4 +255,63 @@ func hasNote(c Config, key string) bool {
 		}
 	}
 	return false
+}
+
+func TestPassEnvResolvesOnlyWhatWasAskedFor(t *testing.T) {
+	p := PassEnv{
+		Patterns: []string{"AWS_*"},
+		Explicit: []string{"CI", "NOT_SET"},
+	}
+	got := p.Resolve([]string{
+		"AWS_PROFILE=dev",
+		"AWS_REGION=eu-west-1",
+		"SECRET_TOKEN=hunter2",
+		"CI=true",
+	})
+
+	want := []string{"AWS_PROFILE=dev", "AWS_REGION=eu-west-1", "CI=true"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("Resolve = %v, want %v", got, want)
+	}
+	// An unset explicit name is absent, not empty: a variable that exists
+	// and is empty means something different to a program.
+	for _, kv := range got {
+		if strings.HasPrefix(kv, "NOT_SET") {
+			t.Errorf("an unset name was invented: %q", kv)
+		}
+	}
+}
+
+func TestPassEnvIgnoresAMalformedPattern(t *testing.T) {
+	// A pattern that cannot be parsed must match nothing. Falling back to
+	// matching everything would turn a typo into whole-environment
+	// passthrough.
+	p := PassEnv{Patterns: []string{"[unclosed"}}
+	if got := p.Resolve([]string{"SECRET=x"}); len(got) != 0 {
+		t.Fatalf("Resolve = %v, want nothing", got)
+	}
+}
+
+func TestMountSSHKeysIsRetiredWithAnExplanation(t *testing.T) {
+	// It worked in v1 and v2 will not carry it: a key inside the container
+	// is an exfiltratable secret. A withdrawn key needs the reasoning, not
+	// silence, so it is reported rather than merely ignored.
+	p := testPaths(t)
+	write(t, p.Project, "mount_ssh_keys: true\n")
+	cfg, err := Load(p, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if RetiredNote("mount_ssh_keys") == "" {
+		t.Fatal("no explanation recorded for a retired key")
+	}
+	var found bool
+	for _, n := range cfg.Notes {
+		if n.Key == "mount_ssh_keys" && strings.Contains(n.Text, "ssh-agent") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the retired key was not reported with its replacement: %v", cfg.Notes)
+	}
 }

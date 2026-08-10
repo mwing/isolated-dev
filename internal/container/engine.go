@@ -328,6 +328,35 @@ func (e *Engine) VolumeExists(ctx context.Context, name string) (bool, error) {
 	return res.ExitCode == 0, nil
 }
 
+// StatGroup reports the group owning a path as a container sees it.
+//
+// Host file sharing remaps ownership, so the value cannot be derived from a
+// stat on the host: a socket owned by root:docker outside may appear owned by
+// something else inside, and a supplementary group added from the wrong
+// number is a mount that is present and unusable.
+func (e *Engine) StatGroup(ctx context.Context, image, source, target string) (string, error) {
+	spec := RunSpec{
+		Image:   image,
+		Remove:  true,
+		Network: "none",
+		Mounts:  []Mount{{Source: source, Target: target}},
+		Command: []string{"stat", "-c", "%g", target},
+		// Labelled so it is distinguishable from the user's own container by
+		// anything reading the daemon — `dev status`, a cleanup, or a test
+		// asserting on what the workload was given.
+		Labels: map[string]string{"dev.role": "probe"},
+	}
+	var out strings.Builder
+	res, err := e.Run(ctx, spec, nil, &out, io.Discard)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("could not read the group owning %s inside the container", source)
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
 // CopyIn copies a host file into a container path.
 func (e *Engine) CopyIn(ctx context.Context, hostPath, container, target string) error {
 	res, err := e.docker(ctx, "cp", hostPath, container+":"+target)

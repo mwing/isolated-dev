@@ -132,7 +132,15 @@ assert each of `--allow-host evil.example`, the interactive grant, and
 `dev agent accept` refuses. Then either the sentence "every route in" is
 true, or it gets edited.
 
-## T4. Consent that grants nothing  **[verified]**
+## T4. Consent that grants nothing  **[verified] [DONE]**
+
+Resolved per key rather than in one direction: `mount_git_config`,
+`mount_docker_socket` and `pass_env_vars` are implemented behind the
+acceptance; `mount_ssh_keys` is retired, because ROADMAP 4.1 promises "socket
+only, never key files" and implementing the mount would have meant weakening
+a security sentence to satisfy a key nobody had honored. ROADMAP 4.1 now
+states what the code does about trust levels, which is that there are none.
+
 
 `mount_ssh_keys`, `mount_git_config`, `mount_docker_socket` and
 `pass_env_vars` are parsed in `internal/config/config.go`, described to the

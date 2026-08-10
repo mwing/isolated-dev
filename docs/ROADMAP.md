@@ -122,6 +122,28 @@ Key design decisions:
 
 ### 4.1 Trust levels
 
+**What the binary actually does, as of the T4 work in `docs/TASKS.md`:**
+there are no three named levels in the code, and there is no `dev trust`
+command. What exists is the untrusted column plus a per-setting acceptance:
+`mount_git_config`, `mount_docker_socket` and `pass_env_vars` are honored
+once this user has accepted them for this project (`dev accept`), or
+immediately when they come from the user's own global config rather than
+from a project file. Read the table below as the design's vocabulary and the
+following paragraph as the behavior:
+
+- **untrusted** is every run that has accepted nothing. It is the default and
+  the common case.
+- **trusted** and **privileged** are not states a project is in; they are
+  what accepting a particular setting buys, one setting at a time. Accepting
+  `mount_docker_socket` does not also open egress.
+- **ssh keys are never mounted, at any level.** `mount_ssh_keys` is retired
+  with a note pointing at ssh-agent forwarding (`--allow-push`), which is
+  what the "socket only, never key files" row below means.
+- **gitconfig** is a filtered host copy when granted, mounted read-only at
+  `/etc/gitconfig`. It is not generated per-level; an ungranted run gets no
+  git configuration at all, and `dev agent run` sets only user.name and
+  user.email as environment variables.
+
 Every project runs at one of three levels. The level is chosen automatically
 (untrusted by default) and raised only by explicit user action.
 
@@ -661,7 +683,10 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
 - Config: keys that describe real behavior carry over; v1's never-implemented
   keys (network_mode, auto_host_networking, port_range, port health checks)
   are dropped with a loud migration note. `pass_env_vars` carries over but is
-  gated behind trust level.
+  a grant: a project asking for it needs `dev accept` before any run honors
+  it. `mount_ssh_keys` is the one key v1 honored that v2 withdraws — a
+  private key inside a container is an exfiltratable secret — and `dev
+  migrate` says so, naming ssh-agent forwarding as the replacement.
 - CLI: no compatibility promise. The binary ships as `dev` during M1-M2 and
   takes over the `dev` name when v1 is retired (installer keeps `dev` as an
   alias to `dev` from M2 on).

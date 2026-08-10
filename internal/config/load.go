@@ -174,22 +174,26 @@ func fromEnv(env []string) (File, []Note) {
 	f.CacheTTL = number("DEV_CACHE_TTL")
 	f.CacheMaxSize = number("DEV_CACHE_MAX_SIZE")
 	f.MinDiskSpace = number("DEV_MIN_DISK_SPACE")
-	f.MountSSHKeys = boolean("DEV_MOUNT_SSH_KEYS")
 	f.MountGitConfig = boolean("DEV_MOUNT_GIT_CONFIG")
 	f.MountDockerSocket = boolean("DEV_MOUNT_DOCKER_SOCKET")
 	f.ForwardPorts = str("DEV_FORWARD_PORTS")
 	f.Network = str("DEV_NETWORK")
 
-	for name := range deadEnvKeys {
+	for name, key := range deadEnvKeys {
 		if _, ok := get(name); ok {
+			why := retiredKeys[key]
+			if why == "" {
+				why = deadKeys[key]
+			}
 			notes = append(notes, Note{File: "environment", Key: name,
-				Text: "ignored: " + deadKeys[deadEnvKeys[name]]})
+				Text: "ignored: " + why})
 		}
 	}
 	return f, notes
 }
 
 var deadEnvKeys = map[string]string{
+	"DEV_MOUNT_SSH_KEYS":           "mount_ssh_keys",
 	"DEV_NETWORK_MODE":             "network_mode",
 	"DEV_AUTO_HOST_NETWORKING":     "auto_host_networking",
 	"DEV_PORT_RANGE":               "port_range",

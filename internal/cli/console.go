@@ -143,6 +143,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		image     string
 		agentOpts *agent.Options
 		allowed   []string
+		grants    project.Grants
 	)
 	if agentName != "" {
 		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command)
@@ -158,6 +159,13 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 			return err
 		}
 		allowed = workspaceAllowlist(cfg, p, store)
+		// The console is a view over the same run, so it honors the same
+		// grants. An agent deliberately gets none of them: it runs at the
+		// untrusted level whatever the project's own trust.
+		grants, err = resolveGrants(ctx, env, eng, cfg, store, image)
+		if err != nil {
+			return err
+		}
 	}
 	allowed = append(allowed, extraHosts...)
 
@@ -241,9 +249,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if term != nil && agentOpts != nil {
 		go runAgentInteractive(runCtx, eng, *agentOpts, topo, prog, term, workloadName)
 	} else if term != nil {
-		go runInteractive(runCtx, eng, p, cfg, command, topo, prog, image, term, workloadName)
+		go runInteractive(runCtx, eng, p, cfg, grants, command, topo, prog, image, term, workloadName)
 	} else {
-		go runWorkload(runCtx, eng, p, cfg, command, topo, prog, image)
+		go runWorkload(runCtx, eng, p, cfg, grants, command, topo, prog, image)
 	}
 
 	if _, err := prog.Run(); err != nil {
@@ -406,9 +414,9 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 // screen into the console's emulator, so a shell behaves like a shell
 // while the console keeps the surrounding layout.
 func runInteractive(ctx context.Context, eng *container.Engine, p *project.Project,
-	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program,
-	image string, term *console.Terminal, name string) {
-	spec := p.RunSpec(cfg, command, true)
+	cfg config.Config, grants project.Grants, command []string, topo netpolicy.Topology,
+	prog *tea.Program, image string, term *console.Terminal, name string) {
+	spec := p.RunSpec(cfg, grants, command, true)
 	spec.Name = name
 	spec.Image = image
 	spec.Network = topo.InternalNetwork
@@ -469,9 +477,9 @@ func repaint(ctx context.Context, prog *tea.Program, dirty *atomic.Bool) {
 
 // runWorkload runs the container, forwarding its output line by line.
 func runWorkload(ctx context.Context, eng *container.Engine, p *project.Project,
-	cfg config.Config, command []string, topo netpolicy.Topology, prog *tea.Program,
-	image string) {
-	spec := p.RunSpec(cfg, command, false)
+	cfg config.Config, grants project.Grants, command []string, topo netpolicy.Topology,
+	prog *tea.Program, image string) {
+	spec := p.RunSpec(cfg, grants, command, false)
 	spec.Image = image
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}

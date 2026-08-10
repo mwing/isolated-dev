@@ -159,7 +159,7 @@ func TestRunSpecIsHardenedAndMountsOnlyTheWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := p.RunSpec(config.Defaults(), []string{"echo", "hi"}, false)
+	spec := p.RunSpec(config.Defaults(), Grants{}, []string{"echo", "hi"}, false)
 
 	args := strings.Join(spec.Args(), " ")
 	for _, want := range []string{"--user 1000:1000", "--cap-drop ALL", "--security-opt no-new-privileges:true"} {
@@ -181,7 +181,7 @@ func TestPortsComeFromThePluginAndPublishToLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := p.RunSpec(config.Defaults(), nil, false)
+	spec := p.RunSpec(config.Defaults(), Grants{}, nil, false)
 	if len(spec.Ports) != 1 || spec.Ports[0].Container != 8080 {
 		t.Fatalf("ports = %+v", spec.Ports)
 	}
@@ -396,5 +396,82 @@ func TestUpgradeCoversEachPackageManager(t *testing.T) {
 func TestUpgradeLeavesADockerfileWithoutFromAlone(t *testing.T) {
 	if got := WithPackageUpgrade("RUN echo hi\n"); strings.Contains(got, UpgradeStep) {
 		t.Error("inserted an upgrade into a Dockerfile with no stage to put it in")
+	}
+}
+
+func TestRunSpecAppliesOnlyTheGrantsItIsGiven(t *testing.T) {
+	// The four host-access config keys were parsed, prompted for, and never
+	// consumed. This is the test that would have caught that: the spec is
+	// asked what it does with a grant, and what it does without one.
+	dir := projectDir(t, map[string]string{"go.mod": "module x\n"})
+	p, err := Resolve(dir, config.Defaults(), loadSet(t, goPlugin))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bare := p.RunSpec(config.Defaults(), Grants{}, nil, false)
+	if len(bare.Mounts) != 1 {
+		t.Fatalf("an ungranted run mounted more than the workspace: %+v", bare.Mounts)
+	}
+	if len(bare.GroupAdd) != 0 || len(bare.Env) != 0 {
+		t.Errorf("an ungranted run gained groups or environment: %+v %v",
+			bare.GroupAdd, bare.Env)
+	}
+
+	granted := p.RunSpec(config.Defaults(), Grants{
+		GitConfig:       "/host/tmp/gitconfig",
+		DockerSocket:    DockerSocketPath,
+		DockerSocketGID: "999",
+		Env:             []string{"AWS_PROFILE=dev"},
+	}, nil, false)
+
+	args := strings.Join(granted.Args(), " ")
+	for _, want := range []string{
+		"type=bind,source=/host/tmp/gitconfig,target=" + SystemGitConfig + ",readonly",
+		"type=bind,source=" + DockerSocketPath + ",target=" + DockerSocketPath,
+		"--group-add 999",
+		"--env AWS_PROFILE=dev",
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("missing %q in %s", want, args)
+		}
+	}
+	// The gitconfig is read-only and the socket is not: one is a value being
+	// read, the other is a protocol being spoken.
+	for _, m := range granted.Mounts {
+		if m.Target == DockerSocketPath && m.ReadOnly {
+			t.Error("a read-only docker socket cannot be used")
+		}
+		if m.Target == SystemGitConfig && !m.ReadOnly {
+			t.Error("the granted gitconfig must not be writable from inside")
+		}
+	}
+	if err := granted.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestGrantedEnvComesBeforeAnythingTheCallerAppends(t *testing.T) {
+	// docker takes the last --env for a name. The egress topology's proxy
+	// settings are appended after RunSpec returns, so a granted variable
+	// must not be able to land after them and turn filtering off.
+	dir := projectDir(t, map[string]string{"go.mod": "module x\n"})
+	p, err := Resolve(dir, config.Defaults(), loadSet(t, goPlugin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := p.RunSpec(config.Defaults(), Grants{
+		Env: []string{"HTTP_PROXY=http://attacker.example"},
+	}, nil, false)
+	spec.Env = append(spec.Env, "HTTP_PROXY=http://sidecar:3128")
+
+	var last string
+	for _, kv := range spec.Env {
+		if strings.HasPrefix(kv, "HTTP_PROXY=") {
+			last = kv
+		}
+	}
+	if last != "HTTP_PROXY=http://sidecar:3128" {
+		t.Fatalf("effective HTTP_PROXY = %q", last)
 	}
 }

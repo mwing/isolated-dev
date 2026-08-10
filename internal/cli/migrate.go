@@ -55,6 +55,24 @@ func migrate(_ context.Context, env *Env, write bool) error {
 		fmt.Fprintln(env.Stdout)
 	}
 
+	// 1b. Keys v1 honored that v2 withdrew. A key that worked and was taken
+	// away is a decision, not a cleanup, so it comes with the reasoning:
+	// someone relying on it needs to know what to use instead.
+	var retired []config.Note
+	for _, n := range cfg.Notes {
+		if config.RetiredNote(n.Key) != "" {
+			retired = append(retired, n)
+		}
+	}
+	if len(retired) > 0 {
+		fmt.Fprintln(env.Stdout, "Keys v1 honored that v2 deliberately does not:")
+		for _, n := range retired {
+			fmt.Fprintf(env.Stdout, "  %s\n", n.Key)
+			fmt.Fprintf(env.Stdout, "      %s\n", config.RetiredNote(n.Key))
+		}
+		fmt.Fprintln(env.Stdout)
+	}
+
 	// 2. Settings whose meaning changed. This is the part that matters:
 	// a key that still parses but now behaves differently is worse than
 	// one that was removed, because nothing forces the user to look at it.
@@ -74,8 +92,8 @@ func migrate(_ context.Context, env *Env, write bool) error {
 		names := append(append([]string(nil), cfg.PassEnvVars.Patterns...), cfg.PassEnvVars.Explicit...)
 		report("  pass_env_vars: %s\n", strings.Join(names, " "))
 		fmt.Fprintf(env.Stdout, "      v1 copied these into every container. In v2 environment\n")
-		fmt.Fprintf(env.Stdout, "      passthrough is a grant, not a default, and is not honored\n")
-		fmt.Fprintf(env.Stdout, "      at the untrusted level a normal run uses.\n")
+		fmt.Fprintf(env.Stdout, "      passthrough is a grant: set in a project file it needs\n")
+		fmt.Fprintf(env.Stdout, "      `dev accept` before any run honors it.\n")
 		if cfg.Origin("pass_env_vars") == config.OriginGlobal {
 			fmt.Fprintf(env.Stdout, "      This is in your GLOBAL config, so it applied to every\n")
 			fmt.Fprintf(env.Stdout, "      project you ever ran. Worth deleting if you did not mean it.\n")
@@ -85,7 +103,6 @@ func migrate(_ context.Context, env *Env, write bool) error {
 		key string
 		on  bool
 	}{
-		{"mount_ssh_keys", cfg.MountSSHKeys},
 		{"mount_git_config", cfg.MountGitConfig},
 		{"mount_docker_socket", cfg.MountDockerSocket},
 	} {
@@ -94,7 +111,7 @@ func migrate(_ context.Context, env *Env, write bool) error {
 		}
 		report("  %s: true\n", m.key)
 		fmt.Fprintf(env.Stdout, "      A mount is a grant in v2. Set in a project file it now needs\n")
-		fmt.Fprintf(env.Stdout, "      `dev accept`; ssh keys are replaced by agent forwarding.\n")
+		fmt.Fprintf(env.Stdout, "      `dev accept` before any run honors it.\n")
 	}
 	if !changed {
 		fmt.Fprintln(env.Stdout, "  none")
