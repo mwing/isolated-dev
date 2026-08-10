@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/netpolicy"
 	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -35,6 +37,10 @@ func newHarness(t *testing.T) *harness {
 		fake:   runner.NewFake(),
 		paths:  paths,
 	}
+	// Stdin is left nil: no terminal, so egress prompting resolves to
+	// reporting and nothing waits for an answer nobody is there to give.
+	// Inheriting the test binary's stdin would not do — `go test` supplies
+	// /dev/null, which is a character device and so looks like a terminal.
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
@@ -81,7 +87,130 @@ func (h *harness) readyBackend() {
 	}
 }
 
-const proxyInspect = "orb -m dev-vm-docker-host sudo docker image inspect dev-proxy:latest"
+// vmName is the VM the default configuration targets, and therefore what
+// every rendered command line carries.
+const vmName = "dev-vm-docker-host"
+
+// dockerKey renders a Response key for a docker call the way the backend
+// actually spawns it: the `orb -m <vm> sudo docker` wrapper included, and
+// quoted exactly as the runner quotes it. Writing keys by hand meant
+// guessing at that quoting, and a key that does not match falls through to
+// Default — whose zero value is exit 0, which reads as success.
+func dockerKey(args ...string) string {
+	return runner.Command{
+		Path: "orb",
+		Args: append([]string{"-m", vmName, "sudo", "docker"}, args...),
+	}.String()
+}
+
+var proxyInspect = dockerKey("image", "inspect", proxyImageTag)
+
+// The sidecar and its networks are named after the project directory. The
+// harness fixes that directory at <tmp>/project, and both `dev run` and
+// `dev agent run` derive the same names from its base.
+const (
+	sidecarName     = "dev-project-proxy"
+	internalNetwork = "dev-project-internal"
+)
+
+// readySidecar makes the fake runner look like a daemon that can bring the
+// egress sidecar up: the image is present, the container reports itself
+// listening, and it has an address on the internal network.
+//
+// Without this a run stops inside Sidecar.Start, which is below the glue
+// layer these tests exist to cover.
+func (h *harness) readySidecar() {
+	h.fake.Response[proxyInspect] = runner.Result{Stdout: "[]\n"}
+	h.fake.Response[dockerKey("logs", sidecarName)] = runner.Result{
+		Stdout: netpolicy.ReadyLine + "\n",
+	}
+	h.fake.Response[dockerKey("inspect", "--format",
+		fmt.Sprintf("{{ (index .NetworkSettings.Networks %q).IPAddress }}", internalNetwork),
+		sidecarName)] = runner.Result{Stdout: "172.31.0.2\n"}
+}
+
+// dockerArgs returns the argument vector of every docker invocation, with
+// the backend's wrapper stripped. Assertions work on the vector rather than
+// on a rendered line: the argv is the behavior, and a rendered line has to
+// be un-quoted before it can be compared.
+func (h *harness) dockerArgs() [][]string {
+	var out [][]string
+	for _, c := range h.fake.Calls {
+		for i, a := range c.Args {
+			if a == "docker" {
+				out = append(out, c.Args[i+1:])
+				break
+			}
+		}
+	}
+	return out
+}
+
+// dockerRuns returns the arguments of each `docker run`, without the
+// leading "run".
+func (h *harness) dockerRuns() [][]string {
+	var out [][]string
+	for _, args := range h.dockerArgs() {
+		if len(args) > 0 && args[0] == "run" {
+			out = append(out, args[1:])
+		}
+	}
+	return out
+}
+
+// workloadRun returns the invocation that started the user's own container.
+// The sidecar is detached and is the only other thing a run starts, so the
+// distinction is --detach; anything else present is a change worth failing
+// on rather than silently picking between.
+func (h *harness) workloadRun(t *testing.T) []string {
+	t.Helper()
+	var found [][]string
+	for _, args := range h.dockerRuns() {
+		if !contains(args, "--detach") {
+			found = append(found, args)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("want exactly one workload `docker run`, got %d:\n%s",
+			len(found), strings.Join(h.fake.Lines(), "\n"))
+	}
+	return found[0]
+}
+
+// sidecarAllow returns the allowlist the sidecar was started with. This is
+// the value every egress promise rests on, and it is the one thing the spec
+// builders cannot be asked about: it is assembled in the glue layer.
+func (h *harness) sidecarAllow(t *testing.T) []string {
+	t.Helper()
+	for _, args := range h.dockerRuns() {
+		if !contains(args, "--detach") {
+			continue
+		}
+		for i, a := range args {
+			if a == "--allow" && i+1 < len(args) {
+				if args[i+1] == "" {
+					return nil
+				}
+				return strings.Split(args[i+1], ",")
+			}
+		}
+	}
+	t.Fatalf("no sidecar was started with an allowlist:\n%s",
+		strings.Join(h.fake.Lines(), "\n"))
+	return nil
+}
+
+func contains(hay []string, needle string) bool {
+	for _, v := range hay {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// argv renders an argument vector for a failure message.
+func argv(args []string) string { return strings.Join(args, " ") }
 
 func TestVersionShort(t *testing.T) {
 	h := newHarness(t)

@@ -21,6 +21,12 @@ import (
 type Env struct {
 	Stdout io.Writer
 	Stderr io.Writer
+	// Stdin is the process's standard input, nil when there is none to give.
+	// Whether it is a terminal decides whether a blocking prompt can be
+	// asked and whether a container is given a keyboard, so it is injected
+	// rather than read from os: `go test` hands the process /dev/null, which
+	// is a character device and so reads as a terminal to the naive check.
+	Stdin  *os.File
 	Env    []string
 	Paths  config.Paths
 	Runner runner.Runner
@@ -33,6 +39,20 @@ type Env struct {
 
 // Verbose reports whether --verbose was given.
 func (e *Env) Verbose() bool { return e.verbose }
+
+// stdin returns the reader to attach to a container, or nil when there is
+// nothing to attach. A typed nil *os.File would be a non-nil io.Reader that
+// fails on the first read, which is worse than no stdin at all.
+func (e *Env) stdin() io.Reader {
+	if e.Stdin == nil {
+		return nil
+	}
+	return e.Stdin
+}
+
+// stdinIsTerminal reports whether standard input is an interactive terminal,
+// which is what makes asking the user a question possible.
+func (e *Env) stdinIsTerminal() bool { return isTerminal(e.Stdin) }
 
 // driver builds the container backend for a VM, carrying the injected PATH
 // lookup so every command probes the host the same way.
@@ -128,6 +148,7 @@ func run(ctx context.Context, args []string) int {
 	env := &Env{
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
+		Stdin:  os.Stdin,
 		Env:    os.Environ(),
 		Paths:  paths,
 		Runner: runner.New(false),

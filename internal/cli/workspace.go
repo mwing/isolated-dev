@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -342,7 +341,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if err != nil {
 		return err
 	}
-	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, os.Stdin))
+	spec := p.RunSpec(cfg, o.Command, wantTTY(o.TTY, env.Stdin))
 	spec.Image = image
 
 	if o.Clone || o.CloneDepth > 0 {
@@ -378,7 +377,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		return err
 	}
 	workloadOwnsStdin := len(o.Command) == 0 || spec.TTY
-	resolved := mode.Resolve(isTerminal(os.Stdin) && !workloadOwnsStdin)
+	resolved := mode.Resolve(env.stdinIsTerminal() && !workloadOwnsStdin)
 	if mode == EgressAsk && workloadOwnsStdin {
 		fmt.Fprintf(env.Stderr,
 			"⚠  --egress-prompt ask needs stdin, which this session gives to the\n"+
@@ -425,7 +424,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	}
 	watchEgress(ctx, env, eng, topo, ask)
 
-	stdin := io.Reader(os.Stdin)
+	stdin := env.stdin()
 	if ask != nil {
 		stdin = nil
 	}
@@ -434,7 +433,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 
 func streamRun(ctx context.Context, env *Env, eng *container.Engine,
 	spec container.RunSpec, fallback []string) error {
-	return streamRunWith(ctx, env, eng, spec, fallback, os.Stdin)
+	return streamRunWith(ctx, env, eng, spec, fallback, env.stdin())
 }
 
 func streamRunWith(ctx context.Context, env *Env, eng *container.Engine,

@@ -185,7 +185,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				// A TTY is only valid when stdin is one AND the backend
 				// transport carries it through. Auto-detection covers the
 				// common cases; --tty overrides it when it guesses wrong.
-				Interactive: wantTTY(tty, os.Stdin),
+				Interactive: wantTTY(tty, env.Stdin),
 				Memory:      memory,
 				CPUs:        cpus,
 				Args:        args[1:],
@@ -511,7 +511,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 
 	spec := agent.Spec(opts, live)
 	var errBuf strings.Builder
-	res, err := eng.Run(ctx, spec, os.Stdin, env.Stdout, io.MultiWriter(env.Stderr, &errBuf))
+	res, err := eng.Run(ctx, spec, env.stdin(), env.Stdout, io.MultiWriter(env.Stderr, &errBuf))
 	if err != nil {
 		return err
 	}

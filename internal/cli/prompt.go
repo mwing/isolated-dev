@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -73,10 +72,14 @@ type prompter struct {
 }
 
 func newPrompter(env *Env, side *netpolicy.Sidecar, store *trust.Store, project string) *prompter {
+	var in *bufio.Reader
+	if r := env.stdin(); r != nil {
+		in = bufio.NewReader(r)
+	}
 	return &prompter{
 		env: env, side: side, store: store, project: project,
 		asked: map[string]bool{},
-		in:    bufio.NewReader(os.Stdin),
+		in:    in,
 	}
 }
 
@@ -126,6 +129,9 @@ func (p *prompter) Handle(ctx context.Context, e netpolicy.Event) {
 // readAnswer reads a single line. A held connection has a deadline of its
 // own, so an unanswered prompt resolves by timing out rather than here.
 func (p *prompter) readAnswer() string {
+	if p.in == nil {
+		return "n"
+	}
 	line, err := p.in.ReadString('\n')
 	if err != nil {
 		return "n"
