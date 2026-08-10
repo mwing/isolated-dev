@@ -71,11 +71,16 @@ func (d *Driver) Probe(ctx context.Context) (backend.Status, error) {
 
 	st.VMExists, st.VMRunning = parseVMState(list.Stdout, d.VM)
 	if !st.VMExists {
-		st.Detail = "VM not found; create it with `dev env up docker-host`"
+		// Making and destroying VMs is OrbStack's job, not this tool's
+		// (docs/PARITY.md), so the remedy is orb's own command rather than
+		// one of ours.
+		st.Detail = "VM not found; create it with `orb create ubuntu " + d.VM + "`"
 		return st, nil
 	}
 	if !st.VMRunning {
-		st.Detail = "VM exists but is not running; start it with `orb start " + d.VM + "`"
+		// `dev vm start`, not a bare `orb start`: it checks the result,
+		// which is the whole reason this tool wraps it.
+		st.Detail = "VM exists but is not running; start it with `dev vm start`"
 		return st, nil
 	}
 

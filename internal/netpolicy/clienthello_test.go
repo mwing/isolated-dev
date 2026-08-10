@@ -226,16 +226,10 @@ func TestSNIThatDiffersFromTheConnectTargetIsRefused(t *testing.T) {
 		t.Errorf("the refusal did not reach the client as one: %v", err)
 	}
 
-	var denied *Event
-	for _, e := range c.all() {
-		if e.Action == "deny" {
-			e := e
-			denied = &e
-		}
-	}
-	if denied == nil {
-		t.Fatal("nothing was recorded as blocked")
-	}
+	// The client learns first: the alert is written before the decision is
+	// recorded, so a read of the log the moment the handshake fails can
+	// legitimately be empty.
+	denied := awaitDeny(t, c)
 	// The summary has to name where the workload was actually going. The
 	// CONNECT target is the wrong answer: that one was allowed.
 	if denied.Host != "evil.example.com" {
@@ -352,6 +346,26 @@ func TestAnUpstreamThatSpeaksFirstIsNotHeldUp(t *testing.T) {
 	}
 	if !strings.Contains(banner, "ESMTP") {
 		t.Fatalf("banner = %q", banner)
+	}
+}
+
+// awaitDeny waits for the proxy to record a refusal. Polling rather than
+// reading once: the alert reaches the client before the handler that sent
+// it gets to the log, so the two are ordered the way they should be and the
+// test has to follow rather than assume.
+func awaitDeny(t *testing.T, c *collector) Event {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		for _, e := range c.all() {
+			if e.Action == "deny" {
+				return e
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("nothing was recorded as blocked; events = %+v", c.all())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 

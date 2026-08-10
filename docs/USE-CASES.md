@@ -395,6 +395,11 @@ on the host; with a hardware or biometric agent (1Password, a YubiKey)
 every signature still needs your approval. Understand that this is the one
 grant that lets the agent write to a remote as you.
 
+The host it opens is your project's own `origin`, on the port that remote
+names — not a fixed `github.com:22`. An `https` origin is refused rather
+than translated: an ssh-agent cannot push over it, and this tool carries no
+token into the container to push with.
+
 **Running the agent with live prompts:**
 
 ```sh

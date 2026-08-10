@@ -462,8 +462,10 @@ Two things this surfaced that the design had not accounted for:
 - ssh does not speak HTTP proxying, and the workload has no other route
   out, so a forwarded agent alone produced "network unreachable". ssh is
   now routed through the same CONNECT proxy, which means git is subject to
-  the allowlist like everything else: github.com:22 works under the grant,
-  gitlab.com:22 is blocked and reported. Punching a hole for ssh instead
+  the allowlist like everything else: the project's own origin host works
+  under the grant — read from `git remote get-url origin`, on the port that
+  remote names — and every other host is blocked and reported. Punching a
+  hole for ssh instead
   would have been invisible to the policy, since traffic that never reaches
   the proxy is never reported as blocked.
 

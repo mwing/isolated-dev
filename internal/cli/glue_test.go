@@ -444,6 +444,139 @@ func containsPair(args []string, flag, value string) bool {
 	return false
 }
 
+// --- Small correctness (T13) ---
+
+func TestEgressNotifyIsValidated(t *testing.T) {
+	// Anything that was not exactly "off" meant on, so `--egress-notify of`
+	// silently did the opposite of what was typed. --egress-prompt has been
+	// validated since it was added; this is the same flag shape.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+
+	err := h.run(t, "agent", "run", "claude", "--tty", "off", "--egress-notify", "of")
+	if err == nil {
+		t.Fatal("a misspelled --egress-notify was accepted")
+	}
+	if !strings.Contains(err.Error(), "of") {
+		t.Errorf("the error does not quote what was typed: %v", err)
+	}
+	for _, ok := range []string{"live", "off"} {
+		h := newHarness(t)
+		h.readyBackend()
+		h.readySidecar()
+		if err := h.run(t, "agent", "run", "claude", "--tty", "off",
+			"--egress-notify", ok); err != nil {
+			t.Errorf("--egress-notify %s was rejected: %v", ok, err)
+		}
+	}
+}
+
+func TestADryRunTouchesNothingOnDisk(t *testing.T) {
+	// --dry-run is what a cautious person runs first. It was checked after
+	// the clone had already been created, so the safe-looking command was
+	// the one that copied a repository.
+	h := newHarness(t)
+	h.readyBackend()
+
+	if err := h.run(t, "agent", "run", "claude", "--clone", "--dry-run"); err != nil {
+		t.Fatalf("dry run: %v\n%s", err, h.stderr.String())
+	}
+	// Reading the host's git identity is a read and belongs in a dry run:
+	// the invocation it prints carries that identity. Copying a repository
+	// is not.
+	for _, line := range h.fake.Lines() {
+		if strings.Contains(line, "rev-parse") || strings.Contains(line, "clone") {
+			t.Errorf("a dry run started preparing the clone: %s", line)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(h.paths.Home, "clones"))
+	if err == nil && len(entries) > 0 {
+		t.Errorf("a dry run left %d entries under clones/", len(entries))
+	}
+	// It still has to say what it would do, or it is not a dry run.
+	if !strings.Contains(h.stdout.String(), "clone") &&
+		!strings.Contains(h.stderr.String(), "clone") {
+		t.Errorf("the dry run never mentioned the clone:\n%s", h.stdout.String())
+	}
+}
+
+func TestAllowPushDerivesTheHostFromTheRemote(t *testing.T) {
+	// It granted github.com:22 and warned about github.com whatever the
+	// remote was: wrong in both directions for anyone on a company host,
+	// and the warning named the wrong place to look.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.statSocket("999")
+	sock := filepath.Join(t.TempDir(), "agent.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.env.Env = []string{"SSH_AUTH_SOCK=" + sock}
+	h.fake.Response["git -C "+h.paths.ProjectDir+" remote get-url origin"] =
+		runner.Result{Stdout: "git@git.example.com:team/repo.git\n"}
+
+	if err := h.run(t, "agent", "run", "claude", "--tty", "off", "--allow-push"); err != nil {
+		t.Fatalf("agent run: %v\n%s", err, h.stderr.String())
+	}
+	allow := h.sidecarAllow(t)
+	if !contains(allow, "git.example.com:22") {
+		t.Errorf("the project's own git host was not allowed: %v", allow)
+	}
+	if contains(allow, "github.com:22") {
+		t.Errorf("a host the project does not use was opened: %v", allow)
+	}
+	if !strings.Contains(h.stderr.String(), "git.example.com") {
+		t.Errorf("the warning names the wrong host:\n%s", h.stderr.String())
+	}
+}
+
+func TestAllowPushReadsAPortOutOfTheRemote(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.statSocket("999")
+	sock := filepath.Join(t.TempDir(), "agent.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.env.Env = []string{"SSH_AUTH_SOCK=" + sock}
+	h.fake.Response["git -C "+h.paths.ProjectDir+" remote get-url origin"] =
+		runner.Result{Stdout: "ssh://git@git.example.com:2222/team/repo.git\n"}
+
+	if err := h.run(t, "agent", "run", "claude", "--tty", "off", "--allow-push"); err != nil {
+		t.Fatalf("agent run: %v", err)
+	}
+	if allow := h.sidecarAllow(t); !contains(allow, "git.example.com:2222") {
+		t.Errorf("the remote's own port was not honored: %v", allow)
+	}
+}
+
+func TestAllowPushRefusesARemoteItCannotPushTo(t *testing.T) {
+	// Forwarding an ssh-agent for an https remote grants a socket the push
+	// will never use and opens a port for nothing. The tool deliberately
+	// carries no token, so this cannot be made to work by trying harder.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	sock := filepath.Join(t.TempDir(), "agent.sock")
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.env.Env = []string{"SSH_AUTH_SOCK=" + sock}
+	h.fake.Response["git -C "+h.paths.ProjectDir+" remote get-url origin"] =
+		runner.Result{Stdout: "https://github.com/team/repo.git\n"}
+
+	err := h.run(t, "agent", "run", "claude", "--tty", "off", "--allow-push")
+	if err == nil {
+		t.Fatal("an https remote was granted an ssh-agent it cannot use")
+	}
+	if !strings.Contains(err.Error(), "ssh") {
+		t.Errorf("the refusal does not explain itself: %v", err)
+	}
+}
+
 // --- Exit codes (T9) ---
 
 // workloadKey matches the `docker run` that starts the user's own

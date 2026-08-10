@@ -2,6 +2,7 @@ package orbstack
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/mwing/isolated-dev/internal/backend"
@@ -170,5 +171,35 @@ func TestProbeHandlesUnreachableDaemon(t *testing.T) {
 	}
 	if st.DaemonUp || st.Ready() {
 		t.Errorf("status = %+v", st)
+	}
+}
+
+func TestProbeNamesCommandsThatExist(t *testing.T) {
+	// The remedy printed for a missing VM was `dev env up docker-host`,
+	// which this tool has never had. A remedy that does not exist is worse
+	// than none: it sends the reader looking for a bug in their typing.
+	f := runner.NewFake()
+	f.Response["orb list"] = runner.Result{Stdout: orbList}
+
+	missing, err := newTestDriver("nonexistent-vm", f, true).Probe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, err := newTestDriver("dev-vm-other", f, true).Probe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range []backend.Status{missing, stopped} {
+		if strings.Contains(st.Detail, "dev env") {
+			t.Errorf("names a command that does not exist: %q", st.Detail)
+		}
+	}
+	// Creating a VM is OrbStack's job (PARITY); starting one is this tool's,
+	// and `dev vm start` checks the result where a bare `orb start` did not.
+	if !strings.Contains(missing.Detail, "orb create") {
+		t.Errorf("missing VM: %q does not say how to make one", missing.Detail)
+	}
+	if !strings.Contains(stopped.Detail, "dev vm start") {
+		t.Errorf("stopped VM: %q does not name this tool's own command", stopped.Detail)
 	}
 }

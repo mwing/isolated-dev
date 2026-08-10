@@ -182,6 +182,10 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			notifyMode, err := ParseNotifyMode(notify)
+			if err != nil {
+				return err
+			}
 
 			opts := agent.Options{
 				Agent:      a,
@@ -206,23 +210,32 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 			// history, and only the working tree it can damage changes.
 			if useCloneDir || cloneDepth > 0 {
 				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
-				res, err := clone.Prepare(cmd.Context(), env.Runner, clone.Options{
-					Project: opts.Project, Dest: dest, Depth: cloneDepth,
-				})
-				if err != nil {
-					return err
+				// A dry run says what would happen and does none of it. This
+				// was the one place it did: the clone was copied before the
+				// flag was ever looked at, so the cautious command was the
+				// expensive one.
+				if dryRun {
+					opts.Workspace = dest
+					fmt.Fprintf(env.Stdout, "Clone:     would prepare %s\n", dest)
+				} else {
+					res, err := clone.Prepare(cmd.Context(), env.Runner, clone.Options{
+						Project: opts.Project, Dest: dest, Depth: cloneDepth,
+					})
+					if err != nil {
+						return err
+					}
+					opts.Workspace = res.Path
+					fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
+					for _, note := range res.Notes {
+						fmt.Fprintf(env.Stdout, "           %s\n", note)
+					}
+					fmt.Fprintf(env.Stdout, "Bring back: git -C %s fetch %s\n",
+						opts.Project, res.Path)
 				}
-				opts.Workspace = res.Path
-				fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
-				for _, note := range res.Notes {
-					fmt.Fprintf(env.Stdout, "           %s\n", note)
-				}
-				fmt.Fprintf(env.Stdout, "Bring back: git -C %s fetch %s\n",
-					opts.Project, res.Path)
 			}
 
 			if allowPush {
-				if err := grantPush(env, &opts); err != nil {
+				if err := grantPush(cmd.Context(), env, &opts); err != nil {
 					return err
 				}
 			}
@@ -235,7 +248,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				opts.AuthEnv = resolved
 			}
 
-			return runAgent(cmd.Context(), env, cfg, opts, rebuild, dryRun, notify)
+			return runAgent(cmd.Context(), env, cfg, opts, rebuild, dryRun, notifyMode)
 		},
 	}
 
@@ -314,7 +327,7 @@ func gitIdentity(env *Env) [2]string {
 	return out
 }
 
-func grantPush(env *Env, opts *agent.Options) error {
+func grantPush(ctx context.Context, env *Env, opts *agent.Options) error {
 	sock := lookupEnv(env.Env, "SSH_AUTH_SOCK")
 	if sock == "" {
 		return fmt.Errorf("--allow-push needs a running ssh-agent (SSH_AUTH_SOCK is unset)")
@@ -322,19 +335,92 @@ func grantPush(env *Env, opts *agent.Options) error {
 	if _, err := os.Stat(sock); err != nil {
 		return fmt.Errorf("--allow-push: ssh-agent socket %s: %w", sock, err)
 	}
+	// The destination comes from the project's own remote. It used to be
+	// github.com:22 whatever the remote was, which opened a host the project
+	// may not use, left the one it does use blocked, and named the wrong
+	// place in the warning — three wrong answers from one constant.
+	dest, err := pushDestination(ctx, env, opts.Project)
+	if err != nil {
+		return err
+	}
 	opts.SSHAuthSock = sock
-	// Pushing over ssh needs the git host on port 22, which a bare
+	// Pushing over ssh needs the git host on its ssh port, which a bare
 	// hostname rule deliberately does not cover.
-	opts.ExtraHosts = append(opts.ExtraHosts, "github.com:22")
+	opts.ExtraHosts = append(opts.ExtraHosts, dest)
 
 	fmt.Fprintf(env.Stderr,
-		"⚠  --allow-push: forwarding your ssh-agent and allowing github.com:22.\n"+
+		"⚠  --allow-push: forwarding your ssh-agent and allowing %s.\n"+
 			"   The agent can push as you for this run. Section 4.4's\n"+
-			"   untrusted-default posture does not hold while it is on.\n\n")
+			"   untrusted-default posture does not hold while it is on.\n\n", dest)
 	return nil
 }
 
-func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Options, rebuild, dryRun bool, notify string) error {
+// pushDestination reads the project's origin remote and returns the
+// host:port an ssh push would reach.
+//
+// An https remote is refused rather than translated. Forwarding an
+// ssh-agent for one grants a socket the push will never use and opens a
+// port for nothing, and it cannot be made to work by trying harder: the
+// tool deliberately carries no token into the container (ROADMAP 4.1), so
+// there is nothing for an https push to authenticate with.
+func pushDestination(ctx context.Context, env *Env, projectDir string) (string, error) {
+	res, err := env.Runner.Run(ctx, runner.Command{
+		Path: "git", Args: []string{"-C", projectDir, "remote", "get-url", "origin"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("--allow-push: reading the origin remote: %w", err)
+	}
+	url := strings.TrimSpace(res.Stdout)
+	if res.ExitCode != 0 || url == "" {
+		return "", fmt.Errorf("--allow-push: %s has no origin remote, so there is no host to allow; "+
+			"name one with --allow-host HOST:22", projectDir)
+	}
+
+	host, ok := sshHostOf(url)
+	if !ok {
+		return "", fmt.Errorf("--allow-push forwards an ssh-agent, which the origin remote %s "+
+			"cannot use; switch the remote to ssh (git remote set-url) or allow the host "+
+			"yourself with --allow-host", url)
+	}
+	return host, nil
+}
+
+// sshHostOf returns the host:port of a git remote that ssh can push to, and
+// false for anything else. Both spellings are handled: scp-style
+// `git@host:path`, and a `ssh://` URL, which is the one that can carry a
+// port of its own.
+func sshHostOf(url string) (string, bool) {
+	if rest, found := strings.CutPrefix(url, "ssh://"); found {
+		if _, after, ok := strings.Cut(rest, "@"); ok {
+			rest = after
+		}
+		authority, _, _ := strings.Cut(rest, "/")
+		if authority == "" {
+			return "", false
+		}
+		if _, port, ok := strings.Cut(authority, ":"); ok && port != "" {
+			return authority, true
+		}
+		return authority + ":22", true
+	}
+	// Anything naming a scheme other than ssh is not an ssh remote. A
+	// scp-style address has no scheme, and its colon separates the path.
+	if strings.Contains(url, "://") {
+		return "", false
+	}
+	_, after, ok := strings.Cut(url, "@")
+	if !ok {
+		return "", false
+	}
+	host, _, ok := strings.Cut(after, ":")
+	if !ok || host == "" {
+		return "", false
+	}
+	return host + ":22", true
+}
+
+func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Options,
+	rebuild, dryRun bool, notify NotifyMode) error {
 	a := opts.Agent
 	eng := container.New(env.driver(cfg.VMName))
 
@@ -557,7 +643,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
 	var watcher *netpolicy.Watcher
-	if notify != "off" {
+	if notify != NotifyOff {
 		watcher = netpolicy.NewWatcher(func(n netpolicy.Notice) {
 			fmt.Fprintf(env.Stderr, "\r\n  \u26d4 egress %s\n", n.String())
 		})

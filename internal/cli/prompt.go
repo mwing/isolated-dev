@@ -42,6 +42,32 @@ func ParseEgressMode(s string) (EgressMode, error) {
 	}
 }
 
+// NotifyMode decides whether blocked destinations are reported as they
+// happen or only summarized when the run ends.
+type NotifyMode string
+
+const (
+	// NotifyLive prints each denial while the run is still going, which is
+	// the only time the user can do anything about it.
+	NotifyLive NotifyMode = "live"
+	// NotifyOff waits for the summary.
+	NotifyOff NotifyMode = "off"
+)
+
+// ParseNotifyMode validates the flag. It exists because the check used to
+// be `notify != "off"`, so every typo — `--egress-notify of` — meant on,
+// which is the opposite of what the person typing it was reaching for.
+func ParseNotifyMode(s string) (NotifyMode, error) {
+	switch NotifyMode(strings.TrimSpace(strings.ToLower(s))) {
+	case "", NotifyLive:
+		return NotifyLive, nil
+	case NotifyOff:
+		return NotifyOff, nil
+	default:
+		return "", fmt.Errorf("unknown egress notify mode %q (want live or off)", s)
+	}
+}
+
 // Resolve turns auto into a concrete mode.
 func (m EgressMode) Resolve(interactive bool) EgressMode {
 	if m != EgressAuto {

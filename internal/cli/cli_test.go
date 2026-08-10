@@ -824,3 +824,34 @@ func (h *harness) acceptSettings(t *testing.T, asks ...trust.Ask) {
 		t.Fatal(err)
 	}
 }
+
+func TestSSHHostOfEveryRemoteSpelling(t *testing.T) {
+	// The two spellings git actually uses, and the ones an ssh-agent cannot
+	// push over. A wrong answer here either opens a host the project does
+	// not use or blocks the one it does.
+	for _, tc := range []struct {
+		url  string
+		want string
+	}{
+		{"git@github.com:org/repo.git", "github.com:22"},
+		{"git@git.example.com:team/repo", "git.example.com:22"},
+		{"ssh://git@git.example.com/team/repo.git", "git.example.com:22"},
+		{"ssh://git@git.example.com:2222/team/repo.git", "git.example.com:2222"},
+		{"https://github.com/org/repo.git", ""},
+		{"http://git.example.com/repo", ""},
+		{"git://git.example.com/repo", ""},
+		{"/srv/git/repo.git", ""},
+		{"", ""},
+	} {
+		got, ok := sshHostOf(tc.url)
+		if tc.want == "" {
+			if ok {
+				t.Errorf("%q was taken for an ssh remote (%q)", tc.url, got)
+			}
+			continue
+		}
+		if !ok || got != tc.want {
+			t.Errorf("sshHostOf(%q) = %q, %v; want %q", tc.url, got, ok, tc.want)
+		}
+	}
+}

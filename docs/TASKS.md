@@ -364,7 +364,23 @@ aliases so nothing breaks mid-transition. Update the hint text, the
 completions and every doc that names them (`docs/COMMANDS.md`,
 `docs/CONCEPTS.md`, `docs/USE-CASES.md`, `README.md`).
 
-## T13. Small correctness  **[all verified]**
+## T13. Small correctness  **[all verified] [DONE]**
+
+All four, with one departure. The VM messages: creating a VM is OrbStack's
+job (PARITY), so a missing VM now names `orb create`, and a stopped one
+names `dev vm start` rather than the bare `orb start` it used to print —
+`dev vm start` is the one that checks the result. `dev env up docker-host`
+appears nowhere outside `v1/`.
+
+`--egress-notify` parses like `--egress-prompt`. `--dry-run` is checked
+before the clone is prepared and says what it would have prepared.
+
+`--allow-push` reads `git remote get-url origin` and allows that host on
+the port the remote names. The departure: an `https` origin is refused
+rather than translated to port 443. Forwarding an ssh-agent for one grants
+a socket the push can never use, and the tool deliberately carries no token
+into the container, so there is nothing an https push could authenticate
+with. Refusing says that; granting 443 would have looked like it worked.
 
 - `internal/backend/orbstack/orbstack.go:74` tells the user to run
   `dev env up docker-host`. There is no `dev env` command. It should name
@@ -550,7 +566,7 @@ Done means all six of these are true at once:
 | T10 | `Close()` returns within a bounded time with an idle forwarded connection open |
 | T11 | approving `host:8080` grants 8080 and does not grant 80/443 |
 | T12 | `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |
-| T13 | each of the four is corrected, and `--egress-notify of` is rejected rather than silently accepted |
+| T13 | done — each of the four is corrected, and `--egress-notify of` is rejected rather than silently accepted |
 | T14 | `languages/README.md` names no command or flag that does not exist |
 | T15 | the CLI suite fails when any of T1–T5 is reverted |
 | T16 | `*.co.uk` is refused or warned about; an over-long QNAME under a wildcard grant is refused; a dial to 169.254.169.254 is refused unless a rule names it |
