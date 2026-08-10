@@ -293,6 +293,20 @@ has reached since.
 
 ---
 
+## When a port is "already allocated"
+
+A run killed before it could tear itself down — a closed terminal, piped
+output, `kill -9` — leaves its sidecar holding the ports it published. The
+next project wanting one of those ports fails, and the daemon's message
+names neither the culprit nor the fix. dev2 names both:
+
+```
+dev2: port 8000 is already published by dev2-other-proxy (other-project).
+  Free it:  dev2 clean --all
+```
+
+---
+
 ## What dev2 will not do for you
 
 Worth knowing before you plan around it:

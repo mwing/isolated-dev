@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mwing/isolated-dev/go/internal/clone"
 	"github.com/mwing/isolated-dev/go/internal/container"
@@ -40,4 +41,32 @@ func useClone(ctx context.Context, env *Env, p *project.Project, spec *container
 	fmt.Fprintf(env.Stderr, "Bring back: git -C %s fetch %s && git -C %s log FETCH_HEAD\n\n",
 		p.Dir, res.Path, p.Dir)
 	return nil
+}
+
+// explainPortConflict turns the daemon's bind failure into something
+// actionable.
+//
+// "Bind for 127.0.0.1:5000 failed: port is already allocated" names the
+// port and nothing else. The usual cause is a sidecar from another project
+// that outlived its run — killed before teardown — and the user has no way
+// to know which project that was, or that `dev2 clean` is the fix.
+func explainPortConflict(ctx context.Context, eng *container.Engine, err error, ports []int) error {
+	if err == nil || !strings.Contains(err.Error(), "already allocated") {
+		return err
+	}
+	for _, port := range ports {
+		holders, lerr := eng.PublishedBy(ctx, port)
+		if lerr != nil || len(holders) == 0 {
+			continue
+		}
+		h := holders[0]
+		project := h.Label("dev2.project")
+		if project == "" {
+			project = "another project"
+		}
+		return fmt.Errorf("port %d is already published by %s (%s).\n"+
+			"  Free it:  dev2 clean --all\n"+
+			"  %w", port, h.Names, project, err)
+	}
+	return err
 }

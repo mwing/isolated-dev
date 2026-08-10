@@ -392,7 +392,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	spec.Name = p.Container
 	side, topo, err := startSidecarWithPorts(ctx, eng, p, allowed, resolved, p.Ports)
 	if err != nil {
-		return err
+		return explainPortConflict(ctx, eng, err, p.Ports)
 	}
 	defer reportEgress(ctx, env, side, runRecord{
 		Path:    history.Path(store.Project.Path()),

@@ -124,17 +124,67 @@ func truncate(s string, n int) string {
 }
 
 func newCleanCmd(env *Env) *cobra.Command {
-	var images bool
+	var images, all bool
 	cmd := &cobra.Command{
 		Use:   "clean",
 		Short: "Remove this project's containers, networks and sidecar",
-		Args:  cobra.NoArgs,
+		Long: "Removes what this project left running.\n\n" +
+			"--all sweeps every project's. A run killed before it could tear\n" +
+			"itself down leaves a sidecar holding the ports it published, and\n" +
+			"the next project to want one of those ports fails on a message\n" +
+			"from the daemon that names neither the culprit nor the fix.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if all {
+				return cleanAll(cmd.Context(), env)
+			}
 			return clean(cmd.Context(), env, images)
 		},
 	}
 	cmd.Flags().BoolVar(&images, "images", false, "also remove the project image")
+	cmd.Flags().BoolVar(&all, "all", false, "remove every project's containers and networks")
 	return cmd
+}
+
+// cleanAll sweeps everything this tool started, anywhere.
+//
+// Images are never removed here: they are expensive to rebuild, they hold
+// nothing that leaks, and a sweep that also deleted them would be a very
+// slow surprise.
+func cleanAll(ctx context.Context, env *Env) error {
+	cfg, err := config.Load(env.Paths, env.Env)
+	if err != nil {
+		return err
+	}
+	eng := container.New(env.driver(cfg.VMName))
+
+	containers, err := eng.List(ctx, "dev2.role")
+	if err != nil {
+		return err
+	}
+	for _, c := range containers {
+		if err := eng.Remove(ctx, c.Names); err != nil {
+			fmt.Fprintf(env.Stderr, "  ⚠ %v\n", err)
+			continue
+		}
+		fmt.Fprintf(env.Stdout, "  removed container %s\n", c.Names)
+	}
+
+	nets, err := eng.Networks(ctx, "dev2-")
+	if err != nil {
+		return err
+	}
+	for _, n := range nets {
+		if err := eng.NetworkRemove(ctx, n); err != nil {
+			continue
+		}
+		fmt.Fprintf(env.Stdout, "  removed network %s\n", n)
+	}
+
+	if len(containers) == 0 && len(nets) == 0 {
+		fmt.Fprintln(env.Stdout, "Nothing left running.")
+	}
+	return nil
 }
 
 func clean(ctx context.Context, env *Env, images bool) error {

@@ -373,6 +373,34 @@ func (e *Engine) List(ctx context.Context, label string) ([]Info, error) {
 	return out, nil
 }
 
+// PublishedBy returns the containers publishing a host port.
+//
+// Used to explain a bind failure. The daemon's own message names the port
+// and nothing else, which leaves the user to work out that a container
+// from an unrelated project is holding it.
+func (e *Engine) PublishedBy(ctx context.Context, port int) ([]Info, error) {
+	res, err := e.docker(ctx, "ps", "--filter", fmt.Sprintf("publish=%d", port),
+		"--format", "{{json .}}")
+	if err != nil {
+		return nil, err
+	}
+	if err := check(res, nil, "listing containers"); err != nil {
+		return nil, err
+	}
+	var out []Info
+	for _, line := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var info Info
+		if err := json.Unmarshal([]byte(line), &info); err != nil {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 // Networks returns network names matching a prefix.
 func (e *Engine) Networks(ctx context.Context, prefix string) ([]string, error) {
 	res, err := e.docker(ctx, "network", "ls", "--format", "{{.Name}}")

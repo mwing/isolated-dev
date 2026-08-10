@@ -88,7 +88,7 @@ first.
 | `dev2 build` | build the project image |
 | `dev2 console` | full-screen view: workload, egress events, live prompts |
 | `dev2 status` | what is running, what is allowed, what was blocked |
-| `dev2 clean` | remove containers, networks and the sidecar |
+| `dev2 clean` | remove containers, networks and the sidecar (`--all` for every project) |
 | `dev2 tools search TERM` | find what the image's package index has |
 | `dev2 tools add TOOL` | add a tool to this project's environment, permanently |
 | `dev2 tools add --shared TOOL` | add it to `.devenv.yaml` so the team gets it too |
