@@ -351,6 +351,11 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		}
 		p.Network = mode
 	}
+	// So is --allow-host: it widens what this run may reach, which is
+	// exactly what deny_hosts is about.
+	if err := pol.CheckHosts(o.ExtraHosts); err != nil {
+		return err
+	}
 	// Limits the policy requires are applied last, so nothing lower can
 	// relax them.
 	if pol.Require.Memory != "" {
@@ -411,7 +416,8 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	}
 
 	// Allowlist mode: the same enforcement agents get.
-	allowed := append(workspaceAllowlist(cfg, p, store), o.ExtraHosts...)
+	allowed := permittedHosts(env, pol,
+		append(workspaceAllowlist(cfg, p, store), o.ExtraHosts...))
 
 	if len(allowed) == 0 {
 		fmt.Fprintf(env.Stderr,
@@ -467,7 +473,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 
 	var ask *prompter
 	if resolved == EgressAsk {
-		ask = newPrompter(env, side, store, p.Dir)
+		ask = newPrompter(env, side, store, p.Dir, pol)
 		// Only one reader can own stdin. The prompt needs it to take an
 		// answer, so the workload does without: in ask mode the command is
 		// one that does not read input anyway, which is the same condition

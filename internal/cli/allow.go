@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -41,14 +42,8 @@ func newAgentAllowCmd(env *Env) *cobra.Command {
 			if _, err := netpolicy.Parse(args); err != nil {
 				return err
 			}
-			pol, err := loadPolicy(env)
-			if err != nil {
+			if err := checkHosts(env, args); err != nil {
 				return err
-			}
-			for _, host := range args {
-				if verr := pol.CheckHost(host); verr != nil {
-					return verr
-				}
 			}
 			store, err := trust.Load(env.Paths.Home, env.Paths.ProjectDir)
 			if err != nil {
@@ -171,8 +166,30 @@ func newConfigEditCmd(env *Env) *cobra.Command {
 
 			// Parse immediately: a typo should surface now, not on the
 			// next agent run when the user has moved on.
-			if _, err := trust.ReadProjectFile(path); err != nil {
+			f, err := trust.ReadProjectFile(path)
+			if err != nil {
 				return fmt.Errorf("%w\n(the file was saved; fix it and run edit again)", err)
+			}
+			// The editor is the one route the policy cannot refuse: the file
+			// is already written by the time this is reached. It is dropped
+			// from the allowlist at the run instead, so the only thing owed
+			// here is saying so now rather than letting it look granted.
+			pol, err := loadPolicy(env)
+			if err != nil {
+				return err
+			}
+			var denied []string
+			for _, cfg := range f.Agents {
+				for _, h := range cfg.AllowHosts {
+					if verr := pol.CheckHost(h); verr != nil {
+						denied = append(denied, verr.Error())
+					}
+				}
+			}
+			sort.Strings(denied) // the map above has no order of its own
+			for _, line := range denied {
+				fmt.Fprintf(env.Stderr,
+					"⚠  %s\n   It stays in the file and is dropped from every run.\n", line)
 			}
 			fmt.Fprintf(env.Stdout, "Saved %s\n", path)
 			return nil
@@ -352,9 +369,20 @@ func newAgentAcceptCmd(env *Env) *cobra.Command {
 			}
 
 			if !all && len(args) == 0 {
+				pol, err := loadPolicy(env)
+				if err != nil {
+					return err
+				}
 				fmt.Fprintf(env.Stdout, "%s requests these destinations for %s:\n\n",
 					env.Paths.Project, agentName)
 				for _, h := range pending {
+					// Said here rather than only on the way out: offering a
+					// destination for acceptance and then refusing it is the
+					// prompt teaching the user that prompts do not mean much.
+					if verr := pol.CheckHost(h); verr != nil {
+						fmt.Fprintf(env.Stdout, "  %s  (cannot be accepted: %v)\n", h, verr)
+						continue
+					}
 					fmt.Fprintf(env.Stdout, "  %s\n", h)
 				}
 				fmt.Fprintf(env.Stdout, "\nEach one is a destination the agent may reach, and any host\n")
@@ -367,6 +395,13 @@ func newAgentAcceptCmd(env *Env) *cobra.Command {
 			toAccept := args
 			if all {
 				toAccept = pending
+			}
+			// Accepting is a route in like any other: a project asks, the
+			// user says yes, and the destination is granted from then on.
+			// Without this the deny list was walked around by writing the
+			// host into a .devenv.yaml and accepting it.
+			if err := checkHosts(env, toAccept); err != nil {
+				return err
 			}
 			added, err := store.Accept(agentName, toAccept)
 			if err != nil {

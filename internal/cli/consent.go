@@ -127,10 +127,23 @@ func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
 		return nil
 	}
 
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+
 	if !all && len(keys) == 0 {
 		fmt.Fprintf(env.Stdout, "%s requests:\n\n", env.Paths.Project)
 		for _, a := range pending {
 			fmt.Fprintf(env.Stdout, "  %s: %s\n", a.Key, a.Value)
+			// USE-CASES says a project requesting something forbidden is
+			// refused rather than offered for acceptance. It was offered,
+			// accepted, recorded, and only refused later at the run — which
+			// is the promise arriving one step too late to be believed.
+			if verr := pol.CheckSetting(a.Key); verr != nil {
+				fmt.Fprintf(env.Stdout, "      cannot be accepted: %v\n\n", verr)
+				continue
+			}
 			fmt.Fprintf(env.Stdout, "      %s\n\n", a.Effect)
 		}
 		fmt.Fprintf(env.Stdout, "Accept all:  dev accept --all\n")
@@ -150,6 +163,11 @@ func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
 		}
 		if len(wanted) == 0 {
 			return fmt.Errorf("none of %s is pending", strings.Join(keys, ", "))
+		}
+	}
+	for _, a := range wanted {
+		if verr := pol.CheckSetting(a.Key); verr != nil {
+			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, a.Key, verr)
 		}
 	}
 

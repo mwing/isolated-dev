@@ -12,6 +12,7 @@ import (
 
 	"github.com/mwing/isolated-dev/internal/config"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/policy"
 	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -145,6 +146,19 @@ func (h *harness) readySidecar() {
 	h.fake.Response[dockerKey("inspect", "--format",
 		fmt.Sprintf("{{ (index .NetworkSettings.Networks %q).IPAddress }}", internalNetwork),
 		sidecarName)] = runner.Result{Stdout: "172.31.0.2\n"}
+}
+
+// writePolicy installs the machine policy. It is the one file the tool
+// reads that answers to someone other than the person running the command,
+// so a test that drives it has to write it where `loadPolicy` looks.
+func (h *harness) writePolicy(t *testing.T, body string) {
+	t.Helper()
+	if err := os.MkdirAll(h.paths.Home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(policy.DefaultPath(h.paths.Home), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // acceptHosts records this user's acceptance of destinations the project

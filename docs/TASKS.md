@@ -108,7 +108,32 @@ asserts it appears in the allowlist handed to the sidecar for `dev run`.
 Check `console.go` and `workspace.go` produce the same set for the same
 inputs — the divergence is the actual bug.
 
-## T3. Machine policy is not enforced on most routes in  **[verified]**
+## T3. Machine policy is not enforced on most routes in  **[verified] [DONE]**
+
+Done in both directions: the routes were closed, and the sentence was made
+specific rather than left to be re-read generously. `runAgent` now loads the
+policy before anything is built or started and applies the checks the
+workspace path applies — the mode an agent run actually uses (`allowlist`,
+which is not optional there), `forbid` against the project's own asks,
+`require.*` applied after the project and the stored file so nothing lower
+relaxes them, and the registry rule on the base the overlay is built on.
+
+Every mutation goes through `CheckHost` — `--allow-host` on `run`, `shell`,
+`console`, `agent run` and `agent policy`, `dev agent accept`, the blocking
+prompt and the console's dialog. Two routes turned up that the finding did
+not name: `dev accept`, which recorded consent to a forbidden setting and
+left the refusal to the next run, and `dev tools add`, which writes the
+request and the acceptance in one step.
+
+The assembled allowlist is then filtered once more on the way to the
+sidecar (`permittedHosts`), because two things cannot be refused at the
+door: a grant recorded before the rule existed, and `dev agent config edit`,
+which hands the user an editor. A destination dropped there is named on
+stderr. `edit` also warns at save time, since by then the file is written.
+
+ROADMAP M4 now lists the routes concretely and says which of them refuse
+and which drop, and USE-CASES no longer claims a project's forbidden
+request is refused rather than offered while `dev accept` was offering it.
 
 `internal/policy` documents itself as enforced at "every route in", and
 ROADMAP M4 repeats it. In fact `loadPolicy` is called from `allow.go`,
@@ -480,7 +505,7 @@ Done means all six of these are true at once:
 |---|---|
 | T1 | `dev agent run X --safe --dry-run` shows no `--dangerously-skip-permissions`; without `--safe` it does |
 | T2 | the allowlist for `dev run` equals the one for `dev console` given identical config and store |
-| T3 | with a policy denying a host, all of `--allow-host`, the interactive grant, and `dev agent accept` refuse it; agent runs honor `network_modes`, `forbid`, `require.*` |
+| T3 | done — with a policy denying a host, all of `--allow-host`, the interactive grant, and `dev agent accept` refuse it; agent runs honor `network_modes`, `forbid`, `require.*` |
 | T4 | an accepted mount appears in the RunSpec and an unaccepted one does not — or the key is gone from config, consent, doctor, migrate and the docs |
 | T5 | a non-internal pre-existing network makes the run fail loudly, naming `dev clean --all` |
 | T6 | a handshake whose SNI differs from the CONNECT host is refused — or no doc claims SNI |

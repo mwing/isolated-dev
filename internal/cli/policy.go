@@ -16,6 +16,52 @@ func loadPolicy(env *Env) (*policy.Policy, error) {
 	return policy.Load(env.Paths.Home)
 }
 
+// checkHosts refuses destinations the policy denies, loading the policy for
+// the callers that have none in hand — `dev agent allow`, `dev agent
+// accept`, `dev agent policy` and `dev agent run`. The commands that
+// already hold one (the runs, the prompts) call CheckHost themselves.
+//
+// Every route that widens what a run may reach is checked one way or the
+// other. It used to be reachable from `dev agent allow` alone, while the
+// package doc claimed enforcement at every route in — a rule with one
+// polite entrance is not a rule, it is a suggestion with good manners.
+func checkHosts(env *Env, hosts []string) error {
+	if len(hosts) == 0 {
+		return nil
+	}
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	return pol.CheckHosts(hosts)
+}
+
+// permittedHosts drops denied destinations from an assembled allowlist,
+// naming each one it drops.
+//
+// The routes above refuse outright, which is where a user finds out and can
+// do something about it. This is the last gate before the sidecar, and it
+// exists because a grant recorded before a rule existed must not outlive the
+// rule — the same reason enforceConsent puts policy above an acceptance
+// already given. Dropping rather than failing is deliberate here: the run
+// proceeds with the destination closed, which is the outcome the rule asks
+// for, and a machine that suddenly refuses every run because of one stale
+// grant teaches people to delete the policy.
+func permittedHosts(env *Env, pol *policy.Policy, hosts []string) []string {
+	if pol == nil || len(pol.DenyHosts) == 0 {
+		return hosts
+	}
+	out := make([]string, 0, len(hosts))
+	for _, h := range hosts {
+		if verr := pol.CheckHost(h); verr != nil {
+			fmt.Fprintf(env.Stderr, "⚠  dropped from this run's allowlist: %v\n", verr)
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
 func newPolicyCmd(env *Env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "policy",

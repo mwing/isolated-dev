@@ -165,6 +165,19 @@ func (p *Policy) CheckHost(host string) error {
 	return nil
 }
 
+// CheckHosts reports whether a set of destinations may be granted,
+// returning the first violation. Nothing is granted when one is denied:
+// half of a `--allow-host a --allow-host b` is not what the user asked for,
+// and a partial grant is the kind of outcome discovered a week later.
+func (p *Policy) CheckHosts(hosts []string) error {
+	for _, h := range hosts {
+		if err := p.CheckHost(h); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CheckRegistry reports whether a base image may be used.
 func (p *Policy) CheckRegistry(image string) error {
 	if p == nil || len(p.AllowedRegistries) == 0 {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/policy"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
 
@@ -69,17 +70,26 @@ type prompter struct {
 	// in is a single reader over stdin: a fresh bufio.Reader per prompt
 	// would discard whatever it had buffered, losing the next answer.
 	in *bufio.Reader
+	// policy is the machine's rules. The prompt is the one place a user
+	// widens egress mid-run, and it persists what it grants, so it is a
+	// route in like any other.
+	policy *policy.Policy
 }
 
-func newPrompter(env *Env, side *netpolicy.Sidecar, store *trust.Store, project string) *prompter {
+// newPrompter takes the policy rather than reading it later, so a caller
+// cannot forget it: a nil policy permits everything, which is the quiet
+// failure this whole area is being fixed for.
+func newPrompter(env *Env, side *netpolicy.Sidecar, store *trust.Store,
+	project string, pol *policy.Policy) *prompter {
 	var in *bufio.Reader
 	if r := env.stdin(); r != nil {
 		in = bufio.NewReader(r)
 	}
 	return &prompter{
 		env: env, side: side, store: store, project: project,
-		asked: map[string]bool{},
-		in:    in,
+		asked:  map[string]bool{},
+		in:     in,
+		policy: pol,
 	}
 }
 
@@ -99,6 +109,18 @@ func (p *prompter) Handle(ctx context.Context, e netpolicy.Event) {
 		p.asked = map[string]bool{}
 	}
 	p.asked[dest] = true
+
+	// A destination the machine denies is not a question. Asking it would
+	// offer a choice with one permitted answer, which is how a prompt stops
+	// being read; refusing at the sidecar fails the held request now rather
+	// than leaving it to wait out its timeout.
+	if verr := p.policy.CheckHost(dest); verr != nil {
+		fmt.Fprintf(p.env.Stderr, "\r\n  ⛔ blocked: %s\n     %v\n", dest, verr)
+		if err := p.side.Grant(ctx, "refuse", e.Host); err != nil {
+			fmt.Fprintf(p.env.Stderr, "     could not refuse it outright: %v\n", err)
+		}
+		return
+	}
 
 	fmt.Fprintf(p.env.Stderr, "\r\n  ⛔ blocked: %s\n", dest)
 	fmt.Fprintf(p.env.Stderr, "     The request is waiting. Allow it?\n")

@@ -797,14 +797,26 @@ policy forbids network mode open: this machine permits only allowlist, none
 $ dev agent allow pastebin.com
 policy forbids egress to pastebin.com: matches the denied destination pastebin.com
 
+$ dev run --allow-host pastebin.com
+policy forbids egress to pastebin.com: matches the denied destination pastebin.com
+
+$ dev agent accept --all           # the project asked for it in .devenv.yaml
+policy forbids egress to pastebin.com: matches the denied destination pastebin.com
+
 $ dev scan --severity critical
 Policy raises the threshold from critical to high.
 ```
 
+The same holds for `dev agent run`, which is an allowlist run and so needs
+a machine that permits one, and for the prompt that offers to allow a
+blocked destination mid-run: a denied host is refused outright rather than
+put to the user as a question with one permitted answer.
+
 A project requesting something forbidden is refused rather than offered
-for acceptance — including something accepted before the rule existed,
-since a rule that only applied to new decisions would leave the machines
-that most need it untouched.
+for acceptance. So is something accepted or granted before the rule
+existed: a setting stops applying, and a destination is dropped from the
+run's allowlist with a line saying so. A rule that bound only new
+decisions would leave the machines that most need it untouched.
 
 **What it is not.** The file is on the user's disk and they can edit it.
 It closes the unsafe paths for people who are not attacking their own

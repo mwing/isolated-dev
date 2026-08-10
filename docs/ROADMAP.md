@@ -570,6 +570,17 @@ pinned.
   already recorded, a user's own grant — because a rule with one polite
   entrance is not a rule.
 
+  What "every route in" is, concretely, since the claim was written before
+  it was true: `--allow-host` on `run`, `shell`, `console`, `agent run` and
+  `agent policy`; `dev allow`; `dev accept` and `dev agent accept`; the
+  blocking prompt and the console's dialog, both of which grant while a run
+  is in flight; and `dev agent run`, which was reached by none of it — the
+  runs with the most reason to be constrained were the ones the policy did
+  not bind. Each of those refuses. The assembled allowlist is then filtered
+  once more on the way to the sidecar, because the trust file can be edited
+  by hand and a grant recorded before a rule must not outlive it; a
+  destination dropped there is named on stderr rather than vanishing.
+
   Stated in the package doc rather than left implied: it is not a defense
   against the machine's owner, who can edit the file. It closes the unsafe
   paths for people who are not attacking their own laptop and makes an

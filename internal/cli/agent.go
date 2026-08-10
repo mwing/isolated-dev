@@ -17,6 +17,7 @@ import (
 	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/history"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -86,6 +87,12 @@ func newAgentPolicyCmd(env *Env) *cobra.Command {
 			}
 			a, err := r.Get(args[0])
 			if err != nil {
+				return err
+			}
+			// This command exists to answer "what would a run permit?", so
+			// it has to refuse what a run would refuse. Printing a policy
+			// the real run rejects would be a worse answer than none.
+			if err := checkHosts(env, extra); err != nil {
 				return err
 			}
 			opts := agent.Options{Agent: a, ExtraHosts: extra}
@@ -331,6 +338,35 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	a := opts.Agent
 	eng := container.New(env.driver(cfg.VMName))
 
+	// The machine's policy, which until now reached every command except
+	// this one — the runs with the most reason to be constrained were the
+	// ones it did not bind. Loaded before anything is built or started so a
+	// refusal costs nothing, and before --dry-run prints, so what the dry
+	// run shows is what the real run would do.
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	// An agent run is always an allowlist run: it has no --network, and the
+	// sidecar below is not optional. A machine that permits only `none`
+	// therefore permits no agent.
+	if verr := pol.CheckNetwork(string(project.NetworkAllowlist)); verr != nil {
+		return verr
+	}
+	// Forbidden settings, checked the way the workspace path checks them:
+	// against what the project's own file asks for, whether or not this user
+	// has already accepted it.
+	for _, ask := range projectAsks(cfg) {
+		if verr := pol.CheckSetting(ask.Key); verr != nil {
+			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, ask.Key, verr)
+		}
+	}
+	// --allow-host, and the git host --allow-push adds. A per-run flag is
+	// still a route in.
+	if verr := pol.CheckHosts(opts.ExtraHosts); verr != nil {
+		return verr
+	}
+
 	store, err := trust.Load(env.Paths.Home, opts.Project)
 	if err != nil {
 		return err
@@ -343,7 +379,11 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return err
 	}
 	saved := store.Resolve(a.Name)
-	granted := saved.AllowHosts
+	// Filtered here rather than only at the end, because these two are what
+	// the run reports back to the user. Printing "granted: evil.example"
+	// under a line saying it was dropped would be the report and the
+	// behavior disagreeing, which is the whole complaint this queue is about.
+	granted := permittedHosts(env, pol, saved.AllowHosts)
 
 	// The project's own request (ROADMAP 4.2.1). It grants nothing by
 	// itself: anything the user has not accepted stops the run, so a
@@ -358,7 +398,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		fmt.Fprintf(env.Stderr, "Accept all:   dev agent accept --all --agent %s\n", a.Name)
 		return fmt.Errorf("unaccepted egress request")
 	}
-	accepted := store.AcceptedRequest(a.Name, request)
+	accepted := permittedHosts(env, pol, store.AcceptedRequest(a.Name, request))
 
 	opts.ExtraHosts = agentEgress(p, granted, accepted, opts.ExtraHosts)
 
@@ -392,7 +432,21 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		opts.Args = append([]string(nil), saved.Args...)
 	}
 
-	allowEntries := opts.Allowlist()
+	// Limits the policy requires are applied last, so nothing lower — the
+	// project's request, this user's stored file, a flag — can relax them.
+	if pol.Require.Memory != "" {
+		opts.Memory = pol.Require.Memory
+	}
+	if pol.Require.CPUs != "" {
+		opts.CPUs = pol.Require.CPUs
+	}
+	// The overlay is built on a base the project can choose, so the
+	// registry rule applies here as it does to a project build.
+	if verr := pol.CheckRegistry(opts.BaseImage()); verr != nil {
+		return verr
+	}
+
+	allowEntries := permittedHosts(env, pol, opts.Allowlist())
 	allow, err := netpolicy.Parse(allowEntries)
 	if err != nil {
 		return err

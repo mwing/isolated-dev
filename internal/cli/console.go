@@ -123,6 +123,15 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		return fmt.Errorf("console needs `network: allowlist`; this project is %q, "+
 			"and with nothing filtered there is nothing to decide", p.Network)
 	}
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	// Refused before anything is built or started: the console is a view
+	// over the same run, so --allow-host means here what it means there.
+	if err := pol.CheckHosts(extraHosts); err != nil {
+		return err
+	}
 	if len(command) == 0 && agentName == "" {
 		command = []string{"/bin/bash"}
 		interactive = true
@@ -167,7 +176,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 			return err
 		}
 	}
-	allowed = append(allowed, extraHosts...)
+	allowed = permittedHosts(env, pol, append(allowed, extraHosts...))
 
 	side, topo, err := startSidecar(ctx, eng, p, allowed, EgressAsk)
 	if err != nil {
@@ -219,6 +228,15 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 				// hang.
 				if d == console.DecideNo {
 					return side.Grant(runCtx, "refuse", host)
+				}
+				// The dialog is a route in like the CLI prompt: it widens
+				// egress mid-run and can persist what it widens. A denied
+				// destination is refused outright rather than held.
+				if verr := pol.CheckHost(host); verr != nil {
+					if err := side.Grant(runCtx, "refuse", host); err != nil {
+						return err
+					}
+					return verr
 				}
 				// Apply to the running sidecar first: that is what releases
 				// the held request. Recording it afterwards is bookkeeping

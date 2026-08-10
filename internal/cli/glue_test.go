@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/container"
+	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/policy"
 	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/runner"
 	"github.com/mwing/isolated-dev/internal/trust"
@@ -438,6 +442,273 @@ func containsPair(args []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// --- Machine policy: the routes it did not cover (T3) ---
+
+// denyEvil is the smallest policy that matters here. `internal/policy`
+// documents itself as enforced at every route in; before this it was
+// reachable from `dev agent allow` and nowhere else.
+const denyEvil = "deny_hosts: [evil.example]\n"
+
+// requestEvil is a project asking for the destination the policy denies —
+// the shape `dev agent accept` walks the user through.
+const requestEvil = `agents:
+  default:
+    allow_hosts:
+      - evil.example
+`
+
+func TestPolicyDeniesAHostOnEveryRouteIn(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		project string
+		args    []string
+	}{
+		{"dev agent allow", "", []string{"agent", "allow", "evil.example"}},
+		{"a plain run's --allow-host", "",
+			[]string{"run", "--tty", "off", "--allow-host", "evil.example", "-c", "true"}},
+		{"an agent run's --allow-host", "",
+			[]string{"agent", "run", "claude", "--tty", "off", "--allow-host", "evil.example"}},
+		{"the policy an agent run would enforce", "",
+			[]string{"agent", "policy", "claude", "--allow-host", "evil.example"}},
+		{"dev console's --allow-host", "",
+			[]string{"console", "--allow-host", "evil.example", "-c", "true"}},
+		{"dev agent accept", requestEvil, []string{"agent", "accept", "--all"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.readyBackend()
+			h.readySidecar()
+			h.writePolicy(t, denyEvil)
+			if tc.project != "" {
+				h.writeProject(t, tc.project)
+			}
+
+			err := h.run(t, tc.args...)
+			if err == nil {
+				t.Fatalf("the denied destination got in:\n%s", strings.Join(h.fake.Lines(), "\n"))
+			}
+			if !strings.Contains(err.Error(), "evil.example") {
+				t.Errorf("the refusal does not name the destination: %v", err)
+			}
+			for _, allow := range h.startedAllowlists() {
+				if contains(allow, "evil.example") {
+					t.Errorf("a sidecar was started with it anyway: %v", allow)
+				}
+			}
+		})
+	}
+}
+
+// startedAllowlists returns the allowlist of every sidecar that was
+// started, or nothing when none was. Unlike sidecarAllow it does not fail
+// the test on finding none: a refusal is expected to start nothing at all.
+func (h *harness) startedAllowlists() [][]string {
+	var out [][]string
+	for _, args := range h.runsWithRole("egress-sidecar") {
+		for i, a := range args {
+			if a == "--allow" && i+1 < len(args) {
+				out = append(out, strings.Split(args[i+1], ","))
+			}
+		}
+	}
+	return out
+}
+
+func TestAForbiddenSettingCannotBeAccepted(t *testing.T) {
+	// "A project requesting something forbidden is refused rather than
+	// offered for acceptance" — USE-CASES said so while `dev accept`
+	// recorded it happily and left the refusal to the next run.
+	h := newHarness(t)
+	h.writeProject(t, "mount_docker_socket: true\n")
+	h.writePolicy(t, "forbid: [mount_docker_socket]\n")
+
+	if err := h.run(t, "accept", "--all"); err == nil {
+		t.Fatal("a forbidden setting was accepted")
+	}
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.PendingSettings(projectAsks(cfg))) == 0 {
+		t.Fatal("the acceptance was recorded anyway")
+	}
+
+	// And it is named rather than silently dropped from the listing.
+	h.stdout.Reset()
+	if err := h.run(t, "accept"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(h.stdout.String(), "cannot be accepted") {
+		t.Errorf("the listing still offers it:\n%s", h.stdout.String())
+	}
+}
+
+func TestAGrantOlderThanTheRuleDoesNotReachTheSidecar(t *testing.T) {
+	// Policy outranks a decision already recorded — the same reasoning
+	// enforceConsent applies to accepted settings. A rule that bound only
+	// new decisions would leave the machines that most need it untouched,
+	// and the routes above would be theatre: grant first, write the rule
+	// later, keep the destination.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.grantHosts(t, "default", "evil.example")
+	h.writePolicy(t, denyEvil)
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	if allow := h.sidecarAllow(t); contains(allow, "evil.example") {
+		t.Fatalf("a grant recorded before the rule outlived it: %v", allow)
+	}
+	if !strings.Contains(h.stderr.String(), "evil.example") {
+		t.Errorf("the destination was dropped silently:\n%s", h.stderr.String())
+	}
+}
+
+func TestAnAgentRunDoesNotReportADroppedGrantAsGranted(t *testing.T) {
+	// The run tells the user what it permits. Printing "granted:
+	// evil.example" one line under "dropped from this run's allowlist" is
+	// the report and the behavior disagreeing — a smaller version of
+	// exactly the problem this queue exists to close.
+	h := newHarness(t)
+	h.readyBackend()
+	h.grantHosts(t, "claude", "evil.example")
+	h.writePolicy(t, denyEvil)
+
+	if err := h.run(t, "agent", "run", "claude", "--dry-run"); err != nil {
+		t.Fatalf("agent run: %v", err)
+	}
+	if strings.Contains(h.stdout.String(), "granted: evil.example") {
+		t.Errorf("a dropped destination was reported as granted:\n%s", h.stdout.String())
+	}
+	if !strings.Contains(h.stderr.String(), "dropped from this run's allowlist") {
+		t.Errorf("the drop was not reported at all:\n%s", h.stderr.String())
+	}
+	if strings.Contains(h.stdout.String(), "evil.example") {
+		t.Errorf("it survived into the printed allowlist:\n%s", h.stdout.String())
+	}
+}
+
+func TestAnAgentRunHonorsTheNetworkModesPolicy(t *testing.T) {
+	// An agent run is always an allowlist run, so a machine permitting only
+	// `none` permits no agent at all. Before this the policy was not loaded
+	// on this path at all: agent runs, the runs with the most reason to be
+	// constrained, were the ones it did not reach.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writePolicy(t, "network_modes: [none]\n")
+
+	err := h.run(t, "agent", "run", "claude", "--tty", "off")
+	if err == nil {
+		t.Fatal("the agent ran on a machine that permits no network mode it uses")
+	}
+	if !strings.Contains(err.Error(), "allowlist") {
+		t.Errorf("the refusal does not say which mode was refused: %v", err)
+	}
+}
+
+func TestAnAgentRunHonorsForbid(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, "mount_git_config: true\n")
+	h.acceptSettings(t, trust.Ask{Key: "mount_git_config", Value: "true"})
+	h.writePolicy(t, "forbid: [mount_git_config]\n")
+
+	err := h.run(t, "agent", "run", "claude", "--tty", "off")
+	if err == nil {
+		t.Fatal("an agent run honored a setting the machine forbids")
+	}
+	if !strings.Contains(err.Error(), "mount_git_config") {
+		t.Errorf("the refusal does not name the setting: %v", err)
+	}
+}
+
+func TestAnAgentRunHonorsRequiredLimits(t *testing.T) {
+	// Applied last, so nothing lower can relax them: the project asks for
+	// 16g and the machine's ceiling is what lands.
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, "agents:\n  default:\n    memory: 16g\n")
+	h.writePolicy(t, "require:\n  memory: 2g\n")
+
+	if err := h.run(t, "agent", "run", "claude", "--tty", "off"); err != nil {
+		t.Fatalf("agent run: %v\n%s", err, h.stderr.String())
+	}
+	args := h.workloadRun(t)
+	if !containsPair(args, "--memory", "2g") {
+		t.Errorf("the required limit did not reach the container:\n%s", argv(args))
+	}
+	if containsPair(args, "--memory", "16g") {
+		t.Errorf("the project's own limit outranked the machine's:\n%s", argv(args))
+	}
+}
+
+func TestTheInteractiveGrantRefusesADeniedHost(t *testing.T) {
+	// The prompt is the one place a user widens policy while a run is in
+	// flight, and it persists what it grants. Asking a question whose only
+	// permitted answer is "no" would be worse than not asking: the honest
+	// move is to refuse it at the sidecar so the held request fails now
+	// rather than waiting out its timeout.
+	h := newHarness(t)
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Answer "this project, from now on" — the route that records a grant.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("p\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	h.env.Stdin = r
+
+	pol, err := policy.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol.DenyHosts = []string{"evil.example"}
+
+	side := &netpolicy.Sidecar{
+		Engine:   container.New(h.env.driver(vmName)),
+		Topology: netpolicy.Topology{SidecarName: sidecarName},
+	}
+	p := newPrompter(h.env, side, store, h.paths.ProjectDir, pol)
+	p.Handle(context.Background(), netpolicy.Event{
+		Action: "pending", Host: "evil.example", Port: 443,
+	})
+
+	if got := store.Resolve("default").AllowHosts; contains(got, "evil.example") {
+		t.Fatalf("the prompt recorded a grant the policy denies: %v", got)
+	}
+	if !strings.Contains(h.stderr.String(), "policy forbids") {
+		t.Errorf("the user was not told why:\n%s", h.stderr.String())
+	}
+	var refused bool
+	for _, line := range h.fake.Lines() {
+		if strings.Contains(line, "control refuse evil.example") {
+			refused = true
+		}
+		if strings.Contains(line, "control allow evil.example") {
+			t.Errorf("the running sidecar was told to allow it: %s", line)
+		}
+	}
+	if !refused {
+		t.Errorf("the held request was left to time out, calls:\n%s",
+			strings.Join(h.fake.Lines(), "\n"))
+	}
 }
 
 // An agent asked to work on a project needs that project's package index.

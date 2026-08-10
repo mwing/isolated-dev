@@ -164,6 +164,17 @@ func shareTools(ctx context.Context, env *Env, names []string) error {
 	if err != nil {
 		return err
 	}
+	// Sharing a tool writes the request and records the author's acceptance
+	// in one step, so it is a route in twice over. Refused before the
+	// project file is edited: leaving behind a request the machine will
+	// never honor is worse than not writing it.
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	if verr := pol.CheckSetting("tools"); verr != nil {
+		return verr
+	}
 
 	merged := appendMissing(cfg.Tools, names)
 	if err := writeProjectTools(env.Paths.Project, merged); err != nil {
