@@ -21,8 +21,7 @@ Requires Go 1.26+ and OrbStack.
 
 ```sh
 make install        # builds dev into ~/.local/bin
-make proxy-image    # builds the egress sidecar image into the VM
-dev doctor          # checks everything above; changes nothing
+dev doctor          # checks the setup; changes nothing
 dev completion install
 ```
 

@@ -178,7 +178,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	}
 	allowed = permittedHosts(env, pol, append(allowed, extraHosts...))
 
-	side, topo, err := startSidecar(ctx, eng, p, allowed, EgressAsk)
+	side, topo, err := startSidecar(ctx, env, eng, p, allowed, EgressAsk)
 	if err != nil {
 		return err
 	}

@@ -428,7 +428,7 @@ func TestDoctorReportsMissingProxyImageWithRemedy(t *testing.T) {
 	if !strings.Contains(out, "✗  image dev-proxy:latest") {
 		t.Errorf("missing image not reported:\n%s", out)
 	}
-	if !strings.Contains(out, "make proxy-image") {
+	if !strings.Contains(out, "built automatically") {
 		t.Errorf("remedy not offered:\n%s", out)
 	}
 }
@@ -444,7 +444,7 @@ func TestDoctorChecksProxyImageWithoutBuilding(t *testing.T) {
 		if line == proxyInspect {
 			inspected = true
 		}
-		// doctor diagnoses; repairing the image is `make proxy-image`.
+		// doctor diagnoses; the image is built by the next run that needs it.
 		if strings.Contains(line, "docker build") {
 			t.Errorf("doctor built something: %s", line)
 		}

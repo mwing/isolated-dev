@@ -461,6 +461,24 @@ func (e *Engine) DiskUsage(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// ImageLabel reads one label off an image, empty when it carries none.
+func (e *Engine) ImageLabel(ctx context.Context, tag, label string) (string, error) {
+	res, err := e.docker(ctx, "image", "inspect", "--format",
+		fmt.Sprintf("{{index .Config.Labels %q}}", label), tag)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", nil
+	}
+	v := strings.TrimSpace(res.Stdout)
+	// docker renders a missing key as "<no value>", which is not a value.
+	if v == "<no value>" {
+		return "", nil
+	}
+	return v, nil
+}
+
 // PublishedBy returns the containers publishing a host port.
 //
 // Used to explain a bind failure. The daemon's own message names the port

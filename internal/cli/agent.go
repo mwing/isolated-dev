@@ -760,17 +760,16 @@ const proxyImageTag = "dev-proxy:latest"
 // compiled inside the build so the host needs no cross-compilation setup,
 // and the runtime layer is scratch: the sidecar has no shell, no package
 // manager and nothing to pivot to if it were ever compromised.
+// ensureProxyImage returns the sidecar image, building it from the source
+// this binary carries when it is missing or was built by another version.
+//
+// It used to tell the user to run `make proxy-image` from a checkout, which
+// a release binary does not have — so the one component every filtered run
+// requires could not be produced at all. It also accepted any image with
+// the right tag, which meant a sidecar built before a policy change went on
+// enforcing the old policy in silence.
 func ensureProxyImage(ctx context.Context, eng *container.Engine, env *Env) (string, error) {
-	exists, err := eng.ImageExists(ctx, proxyImageTag)
-	if err != nil {
-		return "", err
-	}
-	if exists {
-		return proxyImageTag, nil
-	}
-	return "", fmt.Errorf(
-		"egress sidecar image %s is missing; build it with `make proxy-image` from the repository root",
-		proxyImageTag)
+	return ensureProxyImageBuilt(ctx, eng, proxyImageTag, env.Paths.Home, env.Stderr)
 }
 
 // isTerminal reports whether f is an interactive terminal.

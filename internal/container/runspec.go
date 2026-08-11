@@ -278,6 +278,9 @@ type BuildSpec struct {
 	NoCache bool
 	// Stdin supplies the Dockerfile when Dockerfile is "-".
 	Quiet bool
+	// Labels are recorded on the image. Used to stamp what an image was
+	// built from, so a stale one can be recognized rather than trusted.
+	Labels map[string]string
 }
 
 // Args renders the spec as arguments to `docker build`.
@@ -285,6 +288,11 @@ func (b BuildSpec) Args() []string {
 	var a []string
 	if b.Tag != "" {
 		a = append(a, "--tag", b.Tag)
+	}
+	// Sorted: the rendered argv is asserted on in tests, and map order
+	// would make the same spec render differently on each run.
+	for _, k := range sortedKeys(b.Labels) {
+		a = append(a, "--label", k+"="+b.Labels[k])
 	}
 	if b.Dockerfile != "" {
 		a = append(a, "--file", b.Dockerfile)

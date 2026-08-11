@@ -195,7 +195,8 @@ func (s *Sidecar) explainExit(ctx context.Context, name string) error {
 		logs = ""
 	}
 
-	const hint = "Rebuild the sidecar image:\n  make proxy-image   (from the repository root)"
+	const hint = "The image is rebuilt automatically on the next run; if this repeats,\n" +
+		"the build itself is failing and its output is above."
 	if strings.Contains(logs, "flag provided but not defined") ||
 		strings.Contains(logs, "flag needs an argument") {
 		return fmt.Errorf("the egress sidecar image is older than dev and does not "+

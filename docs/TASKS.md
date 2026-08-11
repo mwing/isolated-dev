@@ -279,7 +279,7 @@ right answer; the comment already describes it.
 increments and the connection survives, plus one where silence past the
 timeout closes it.
 
-## T8. The sidecar cannot be built from a release binary  **[verified]**
+## T8. The sidecar cannot be built from a release binary  **[done]**
 
 `ensureProxyImage` (`internal/cli/agent.go:569`) errors with "build it with
 `make proxy-image` from the repository root". The Makefile target tars the
@@ -505,7 +505,7 @@ a language plugin fixture and asserts the registries reach the sidecar's
 
 Nothing to do; listed so it is not repeated.
 
-## T21. A stale sidecar enforces an older policy, silently  **[found while verifying T6]**
+## T21. A stale sidecar enforces an older policy, silently  **[done]**
 
 `ensureProxyImage` accepts any locally-tagged `dev-proxy:latest`. The
 enforcement lives in that image, not in the `dev` binary, so a rebuilt
@@ -542,7 +542,7 @@ Worth noting for anything else that reads this: it was invisible for months
 because it only bites a workload that spawns many short-lived children, and
 the symptom names the wrong culprit.
 
-## T23. Nothing installs the language plugins  **[found while verifying T14]**
+## T23. Nothing installs the language plugins  **[done]**
 
 `~/.dev-envs/languages/` is where every plugin is read from. Only v1's
 `install.sh` writes it. `make install` builds the binary and stops.
@@ -694,7 +694,7 @@ Done means all six of these are true at once:
 | T5 | a non-internal pre-existing network makes the run fail loudly, naming `dev clean --all` |
 | T6 | done — a handshake whose SNI differs from the CONNECT host is refused, and no interception is added to do it |
 | T7 | done — a connection transferring past the timeout survives; a silent one is closed |
-| T8 | the sidecar image builds with no repository present |
+| T8 | done — the sidecar image builds with no repository present |
 | T9 | done — `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |
 | T10 | done — `Close()` returns within a bounded time with an idle forwarded connection open |
 | T11 | done — approving `host:8080` grants 8080 and does not grant 80/443 |
@@ -707,9 +707,9 @@ Done means all six of these are true at once:
 | T18 | done — one transport is reused across plain-HTTP requests |
 | T19 | done — an agent run's `--allow` contains the project's language registries |
 | T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
-| T21 | a run against an older sidecar image fails, naming the skew |
+| T21 | done — a run against an older sidecar image rebuilds it, naming both hashes |
 | T22 | done — `/proc/1/comm` in a run is an init, not the workload |
-| T23 | with `~/.dev-envs/languages` deleted, detection and `dev new` still work |
+| T23 | done — with `~/.dev-envs/languages` deleted, detection and `dev new` still work |
 
 ---
 

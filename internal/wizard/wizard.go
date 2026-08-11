@@ -132,7 +132,7 @@ func Assess(f Facts) []Check {
 			out = append(out, Check{OK, "egress sidecar image", ""})
 		} else {
 			out = append(out, Check{Broken, "egress sidecar image",
-				"build it with `make proxy-image`"})
+				"built automatically on the next run"})
 		}
 		if f.ImageBuilt {
 			out = append(out, Check{OK, "project image", "built"})

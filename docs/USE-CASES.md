@@ -892,12 +892,8 @@ dev console --replay /tmp/rec.jsonl | head -20
 That prints the sizes the workload was given alongside the screen it
 produced.
 
-**If the sidecar looks wrong after an upgrade**, its image may be older
-than the binary:
-
-```sh
-make proxy-image
-```
-
-The tool detects this case and says so, but rebuilding is harmless
-anyway.
+**If the sidecar looks wrong after an upgrade**, it will not be: the image
+is stamped with the source it was built from, and a run whose binary
+carries a different one rebuilds it and says so. The image is where egress
+is actually enforced, so a stale one enforces a stale policy — which is
+worth a rebuild you did not ask for.

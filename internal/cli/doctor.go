@@ -212,7 +212,8 @@ func reportProxyImage(ctx context.Context, out interface{ Write([]byte) (int, er
 	}
 	fmt.Fprintf(out, "  %s  image %s\n", mark(exists), proxyImageTag)
 	if !exists {
-		fmt.Fprintf(out, "  →  build it with `make proxy-image` from the repository root\n")
+		fmt.Fprintf(out, "  →  built automatically on the next run, from the source "+
+			"this binary carries\n")
 	}
 	return exists
 }

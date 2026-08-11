@@ -446,7 +446,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	// the sidecar publishes them and relays to the workload by container
 	// name. The container therefore needs a stable name.
 	spec.Name = p.Container
-	side, topo, err := startSidecarWithPorts(ctx, eng, p, allowed, resolved, p.Ports)
+	side, topo, err := startSidecarWithPorts(ctx, env, eng, p, allowed, resolved, p.Ports)
 	if err != nil {
 		return explainPortConflict(ctx, eng, err, p.Ports)
 	}
@@ -527,13 +527,22 @@ func missingCommand(stderr string) bool {
 }
 
 // startSidecar brings up the egress proxy for a workspace run.
-func startSidecar(ctx context.Context, eng *container.Engine, p *project.Project,
+func startSidecar(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
 	allowed []string, mode EgressMode) (*netpolicy.Sidecar, netpolicy.Topology, error) {
-	return startSidecarWithPorts(ctx, eng, p, allowed, mode, nil)
+	return startSidecarWithPorts(ctx, env, eng, p, allowed, mode, nil)
 }
 
-func startSidecarWithPorts(ctx context.Context, eng *container.Engine, p *project.Project,
+func startSidecarWithPorts(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
 	allowed []string, mode EgressMode, ports []int) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	// The image every filtered run depends on, built or refreshed here.
+	// Only the agent path used to do this, so a plain run against a missing
+	// sidecar failed as "exited immediately with no output" — the daemon
+	// had tried to pull an image that is not published anywhere.
+	image, err := ensureProxyImage(ctx, eng, env)
+	if err != nil {
+		return nil, netpolicy.Topology{}, err
+	}
+
 	var ask time.Duration
 	if mode == EgressAsk {
 		ask = AskTimeout
@@ -544,7 +553,7 @@ func startSidecarWithPorts(ctx context.Context, eng *container.Engine, p *projec
 	}
 	side := &netpolicy.Sidecar{
 		Engine:     eng,
-		Image:      proxyImageTag,
+		Image:      image,
 		Allow:      allowed,
 		AskTimeout: ask,
 		Forwards:   forwards,

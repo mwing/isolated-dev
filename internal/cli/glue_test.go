@@ -1019,3 +1019,62 @@ registries:
 		}
 	}
 }
+
+// proxyInspectLabel is how the tool asks what a sidecar image was built
+// from. The answer decides whether the image is used or replaced.
+func proxyLabelKey() string {
+	return dockerKey("image", "inspect", "--format")
+}
+
+// A release binary has no checkout, so the image every filtered run needs
+// has to come from the binary itself.
+func TestAMissingSidecarImageIsBuilt(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	// Image absent: inspect fails.
+	h.fake.Response[proxyInspect] = runner.Result{ExitCode: 1}
+
+	_ = h.run(t, "run", "--tty", "off", "-c", "true")
+
+	var built bool
+	for _, args := range h.dockerArgs() {
+		if len(args) > 0 && args[0] == "build" && containsPair(args, "--tag", "dev-proxy:latest") {
+			built = true
+			if !hasLabelPrefix(args, "dev.proxy.source=") {
+				t.Fatalf("built the sidecar without stamping its source:\n%s", argv(args))
+			}
+		}
+	}
+	if !built {
+		t.Fatalf("no sidecar build was attempted:\n%s", strings.Join(h.fake.Lines(), "\n"))
+	}
+}
+
+// An image built before a policy change goes on enforcing the old policy.
+// Verifying the SNI check against a live proxy, a mismatched name completed
+// its handshake for exactly this reason, and nothing said so.
+func TestASidecarFromAnotherBuildIsReplaced(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.fake.Response[proxyInspect] = runner.Result{Stdout: "[{}]\n"}
+	h.fake.Response[proxyLabelKey()] = runner.Result{Stdout: "an-older-build\n"}
+
+	_ = h.run(t, "run", "--tty", "off", "-c", "true")
+
+	for _, args := range h.dockerArgs() {
+		if len(args) > 0 && args[0] == "build" && containsPair(args, "--tag", "dev-proxy:latest") {
+			return
+		}
+	}
+	t.Fatalf("a sidecar from another build was used as is:\n%s",
+		strings.Join(h.fake.Lines(), "\n"))
+}
+
+func hasLabelPrefix(args []string, prefix string) bool {
+	for i, a := range args {
+		if a == "--label" && i+1 < len(args) && strings.HasPrefix(args[i+1], prefix) {
+			return true
+		}
+	}
+	return false
+}
