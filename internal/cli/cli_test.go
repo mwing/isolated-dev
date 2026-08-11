@@ -477,7 +477,7 @@ func TestProjectAsksOnlyCountFromTheProjectFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	asks := projectAsks(cfg)
+	asks := projectAsks(cfg, nil)
 	if len(asks) != 1 || asks[0].Key != "network" || asks[0].Value != "open" {
 		t.Fatalf("asks = %+v", asks)
 	}
@@ -498,7 +498,7 @@ func TestGlobalSettingIsNotAnAsk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asks := projectAsks(cfg); len(asks) != 0 {
+	if asks := projectAsks(cfg, nil); len(asks) != 0 {
 		t.Fatalf("global config produced asks: %+v", asks)
 	}
 }
@@ -512,7 +512,7 @@ func TestAskingForLessAccessNeedsNoConsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asks := projectAsks(cfg); len(asks) != 0 {
+	if asks := projectAsks(cfg, nil); len(asks) != 0 {
 		t.Fatalf("restricting access prompted: %+v", asks)
 	}
 }
@@ -595,7 +595,7 @@ func TestSharedToolsAreARequestNotAGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	asks := projectAsks(cfg)
+	asks := projectAsks(cfg, nil)
 	if len(asks) != 1 || asks[0].Key != "tools" {
 		t.Fatalf("asks = %+v", asks)
 	}
@@ -647,7 +647,7 @@ func TestChangingTheSharedListAsksAgain(t *testing.T) {
 	if got := effectiveTools(cfg, store); len(got) != 0 {
 		t.Fatalf("a widened list applied without a new acceptance: %v", got)
 	}
-	if len(store.PendingSettings(projectAsks(cfg))) != 1 {
+	if len(store.PendingSettings(projectAsks(cfg, nil))) != 1 {
 		t.Error("the widened list did not ask again")
 	}
 }
@@ -751,7 +751,7 @@ func TestPinningNeedsNoAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asks := projectAsks(cfg); len(asks) != 0 {
+	if asks := projectAsks(cfg, nil); len(asks) != 0 {
 		t.Fatalf("pinning asked for consent: %+v", asks)
 	}
 }

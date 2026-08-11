@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
 
@@ -17,8 +18,14 @@ import (
 // Only values that came from the PROJECT file count. The global file is
 // the user's own machine and needs no consent from them, and a default is
 // nobody's request. This is the whole reason config tracks provenance.
-func projectAsks(cfg config.Config) []trust.Ask {
+func projectAsks(cfg config.Config, p *project.Project) []trust.Ask {
 	var asks []trust.Ask
+
+	// The build source is a request too: a repository supplying its own
+	// Dockerfile is asking for an unfiltered build of instructions it wrote.
+	if ask := buildSourceAsk(p); ask != nil {
+		asks = append(asks, *ask)
+	}
 
 	if cfg.Origin("network") == config.OriginProject && cfg.Network == "open" {
 		asks = append(asks, trust.Ask{
@@ -62,7 +69,7 @@ func projectAsks(cfg config.Config) []trust.Ask {
 
 // enforceConsent stops a run when the project asks for something the user
 // has not accepted. A project file is a request; running it is not consent.
-func enforceConsent(env *Env, cfg config.Config, store *trust.Store) error {
+func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trust.Store) error {
 	pol, err := loadPolicy(env)
 	if err != nil {
 		return err
@@ -70,7 +77,7 @@ func enforceConsent(env *Env, cfg config.Config, store *trust.Store) error {
 	// Policy outranks acceptance. Something already accepted can become
 	// forbidden later, and a rule that only applied to new decisions would
 	// leave the machines that most need it untouched.
-	for _, ask := range projectAsks(cfg) {
+	for _, ask := range projectAsks(cfg, p) {
 		if verr := pol.CheckSetting(ask.Key); verr != nil {
 			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, ask.Key, verr)
 		}
@@ -79,7 +86,7 @@ func enforceConsent(env *Env, cfg config.Config, store *trust.Store) error {
 		return err
 	}
 
-	pending := store.PendingSettings(projectAsks(cfg))
+	pending := store.PendingSettings(projectAsks(cfg, p))
 	if len(pending) == 0 {
 		return nil
 	}
@@ -111,7 +118,9 @@ func newAcceptCmd(env *Env) *cobra.Command {
 }
 
 func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
-	cfg, err := config.Load(env.Paths, env.Env)
+	// Resolved rather than just loaded: the build source is one of the
+	// things being accepted, and knowing what it is needs detection.
+	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
 	}
@@ -120,7 +129,7 @@ func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
 		return err
 	}
 
-	pending := store.PendingSettings(projectAsks(cfg))
+	pending := store.PendingSettings(projectAsks(cfg, p))
 	if len(pending) == 0 {
 		fmt.Fprintln(env.Stdout, "Nothing pending: this project requests no settings you have not accepted.")
 		fmt.Fprintln(env.Stdout, "Egress destinations are accepted with `dev agent accept`.")

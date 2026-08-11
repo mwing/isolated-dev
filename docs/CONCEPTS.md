@@ -199,7 +199,10 @@ what your machine reached is not the repository's business.
   OrbStack VM, so a container escape reaches that VM rather than your Mac —
   but containers there share a kernel with each other.
 - **Builds are not filtered.** Egress control governs a running container;
-  what a build fetches is governed by pinning. See ROADMAP 4.3.1.
+  what a build fetches is governed by pinning. See ROADMAP 4.3.1. Because
+  of that, a repository's own `Dockerfile` is not built until you accept it
+  once — `dev accept build_source`, or `--build-source template` to build a
+  stock image for the language and ignore the file entirely.
 
 ---
 

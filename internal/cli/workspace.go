@@ -60,6 +60,18 @@ func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Pro
 
 func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project.Project,
 	platform string, noCache bool) error {
+	// The last gate before instructions from the repository run over an
+	// unfiltered network. It is here rather than at each caller because a
+	// build is the thing being consented to, and every path to one — run,
+	// shell, console, update, tools — goes through this function.
+	store, err := trust.Load(env.Paths.Home, p.Dir)
+	if err != nil {
+		return err
+	}
+	if !buildSourceAccepted(p, store) {
+		return resolveBuildSource(env, p, store, "")
+	}
+
 	dockerfile, err := p.RenderedDockerfile()
 	if err != nil {
 		return err
@@ -159,6 +171,7 @@ func newRunCmd(env *Env) *cobra.Command {
 				Image:        image,
 				Clone:        useCloneDir,
 				CloneDepth:   cloneDepth,
+				BuildSource:  buildSourceFlag(cmd),
 			})
 		},
 	}
@@ -203,6 +216,7 @@ func newShellCmd(env *Env) *cobra.Command {
 				Fallback:     []string{"/bin/sh"},
 				Clone:        useCloneDir,
 				CloneDepth:   cloneDepth,
+				BuildSource:  buildSourceFlag(cmd),
 			})
 		},
 	}
@@ -212,8 +226,20 @@ func newShellCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
+// buildSourceFlag reads the choice, treating an unreadable flag as no
+// choice: a build then falls back to asking, which is the safe direction.
+func buildSourceFlag(cmd *cobra.Command) string {
+	v, err := cmd.Flags().GetString("build-source")
+	if err != nil {
+		return ""
+	}
+	return v
+}
+
 func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offline *bool,
 	network *string, extraHosts *[]string, image *string) {
+	cmd.Flags().String("build-source", "",
+		"what to build: project (its Dockerfile) or template (the language's)")
 	cmd.Flags().StringVar(image, "image", "",
 		"run this image instead of building one for the project")
 	cmd.Flags().StringVarP(command, "command", "c", "", "run this command instead of the default")
@@ -274,6 +300,9 @@ type workspaceOpts struct {
 	Clone bool
 	// CloneDepth limits the history that copy carries. Zero copies it all.
 	CloneDepth int
+	// BuildSource picks what a build uses: "project", "template", or empty
+	// to use what was accepted.
+	BuildSource string
 }
 
 // workspaceAllowlist is the egress policy a plain run enforces: the
@@ -329,8 +358,15 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if err != nil {
 		return err
 	}
+	// An explicit --build-source is applied before consent is checked:
+	// choosing the template removes the request rather than answering it,
+	// so a repository whose Dockerfile you never intend to build should not
+	// have to be accepted first.
+	if err := resolveBuildSource(env, p, store, o.BuildSource); err != nil {
+		return err
+	}
 	// A project file is a request; running the project is not consent.
-	if err := enforceConsent(env, cfg, store); err != nil {
+	if err := enforceConsent(env, cfg, p, store); err != nil {
 		return err
 	}
 

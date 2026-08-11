@@ -472,6 +472,13 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	a := opts.Agent
 	eng := container.New(env.driver(cfg.VMName))
 
+	// Resolved before the policy checks, which ask what the project's own
+	// file requests — and the build source is one of those requests.
+	_, p, err := resolveProject(env)
+	if err != nil {
+		return err
+	}
+
 	// The machine's policy, which until now reached every command except
 	// this one — the runs with the most reason to be constrained were the
 	// ones it did not bind. Loaded before anything is built or started so a
@@ -490,7 +497,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	// Forbidden settings, checked the way the workspace path checks them:
 	// against what the project's own file asks for, whether or not this user
 	// has already accepted it.
-	for _, ask := range projectAsks(cfg) {
+	for _, ask := range projectAsks(cfg, p) {
 		if verr := pol.CheckSetting(ask.Key); verr != nil {
 			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, ask.Key, verr)
 		}
@@ -502,13 +509,6 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	}
 
 	store, err := trust.Load(env.Paths.Home, opts.Project)
-	if err != nil {
-		return err
-	}
-	// Resolved for its language registries. An agent asked to work on a
-	// project needs the package index that project builds against, and
-	// until now this path was the only one that did not have it.
-	_, p, err := resolveProject(env)
 	if err != nil {
 		return err
 	}

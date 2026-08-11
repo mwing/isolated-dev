@@ -116,7 +116,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if err != nil {
 		return err
 	}
-	if err := enforceConsent(env, cfg, store); err != nil {
+	if err := enforceConsent(env, cfg, p, store); err != nil {
 		return err
 	}
 	if p.Network != project.NetworkAllowlist {

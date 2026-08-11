@@ -161,6 +161,20 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+// UseTemplate discards a project-supplied Dockerfile in favour of the
+// detected language's template.
+//
+// Building a repository's own Dockerfile hands it an unfiltered network
+// before the sandbox exists, so "build a stock image for whatever this
+// language is, and ignore what the repository asked for" has to be
+// reachable. It is the right default for looking at code that has not
+// earned trust yet.
+func (p *Project) UseTemplate() {
+	p.Dockerfile = ""
+	p.DevcontainerImage = ""
+	p.FromTemplate = p.Detected.Found()
+}
+
 // RenderedDockerfile returns the Dockerfile contents to build with. A
 // project's own Dockerfile wins; otherwise the detected language's
 // template is rendered.

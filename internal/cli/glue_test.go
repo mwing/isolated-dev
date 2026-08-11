@@ -730,7 +730,7 @@ func TestAForbiddenSettingCannotBeAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(store.PendingSettings(projectAsks(cfg))) == 0 {
+	if len(store.PendingSettings(projectAsks(cfg, nil))) == 0 {
 		t.Fatal("the acceptance was recorded anyway")
 	}
 
