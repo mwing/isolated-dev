@@ -210,6 +210,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		safe       bool
 		allowPush  bool
 		inPlace    bool
+		useClone   bool
 		cloneDepth int
 	)
 
@@ -264,7 +265,19 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 			// --in-place opts out, which is the right shape: the safer
 			// behaviour needs no argument, and choosing the other one is
 			// a sentence someone typed.
-			if !inPlace {
+			// Three layers, narrowest last: the built-in default, what
+			// config says, and what this invocation says. Someone who runs
+			// agents interactively sets agent_clone once instead of typing
+			// a flag forever; a flag still wins for the run in front of
+			// them, in both directions.
+			wantClone := cfg.AgentClone
+			if inPlace {
+				wantClone = false
+			}
+			if useClone {
+				wantClone = true
+			}
+			if wantClone {
 				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
 				// A dry run says what would happen and does none of it. This
 				// was the one place it did: the clone was copied before the
@@ -350,6 +363,8 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		"forward your ssh-agent so the agent can push, and allow the git host")
 	cmd.Flags().BoolVar(&inPlace, "in-place", false,
 		"mount the working tree directly instead of a private clone")
+	cmd.Flags().BoolVar(&useClone, "clone", false,
+		"work in a private clone (the default; use when config turns it off)")
 	cmd.Flags().IntVar(&cloneDepth, "clone-depth", 0,
 		"copy only this many commits of history into the clone (0: all)")
 	cmd.Flags().BoolVar(&safe, "safe", false,
@@ -555,6 +570,26 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	// under a line saying it was dropped would be the report and the
 	// behavior disagreeing, which is the whole complaint this queue is about.
 	granted := permittedHosts(env, pol, saved.AllowHosts)
+
+	// Settings the project asked for that change how an agent runs. The
+	// egress request below was always checked here; the settings were not,
+	// because until agent_clone existed none of them applied to an agent
+	// and the gap was invisible. A project turning the clone off is
+	// asking to edit the files you are editing, which is exactly the kind
+	// of request this mechanism exists to put in front of someone.
+	//
+	// Only the settings an agent run honors are checked. Refusing to start
+	// over a mount an agent never receives would be a prompt about nothing,
+	// and prompts about nothing are how people learn to accept prompts.
+	if pending := store.PendingSettings(agentAsks(cfg, p)); len(pending) > 0 {
+		fmt.Fprintf(env.Stderr, "%s requests settings you have not accepted:\n\n",
+			env.Paths.Project)
+		for _, ask := range pending {
+			fmt.Fprintf(env.Stderr, "  %s: %s\n      %s\n", ask.Key, ask.Value, ask.Effect)
+		}
+		fmt.Fprintf(env.Stderr, "\nReview and accept:  dev accept\n")
+		return fmt.Errorf("unaccepted project settings")
+	}
 
 	// The project's own request (ROADMAP 4.2.1). It grants nothing by
 	// itself: anything the user has not accepted stops the run, so a

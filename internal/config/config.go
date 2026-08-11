@@ -110,16 +110,19 @@ func (p PassEnv) Resolve(environ []string) []string {
 // "set to the zero value" so that a project file saying `mount_git_config:
 // false` overrides a global `true` instead of being treated as unset.
 type File struct {
-	VMName            *string  `yaml:"vm_name"`
-	DefaultTemplate   *string  `yaml:"default_template"`
-	ContainerPrefix   *string  `yaml:"container_prefix"`
-	AutoStartVM       *bool    `yaml:"auto_start_vm"`
-	MemoryLimit       *string  `yaml:"memory_limit"`
-	CPULimit          *string  `yaml:"cpu_limit"`
-	CacheTTL          *int     `yaml:"cache_ttl"`
-	CacheMaxSize      *int     `yaml:"cache_max_size"`
-	MinDiskSpace      *int     `yaml:"min_disk_space"`
-	MountGitConfig    *bool    `yaml:"mount_git_config"`
+	VMName          *string `yaml:"vm_name"`
+	DefaultTemplate *string `yaml:"default_template"`
+	ContainerPrefix *string `yaml:"container_prefix"`
+	AutoStartVM     *bool   `yaml:"auto_start_vm"`
+	MemoryLimit     *string `yaml:"memory_limit"`
+	CPULimit        *string `yaml:"cpu_limit"`
+	CacheTTL        *int    `yaml:"cache_ttl"`
+	CacheMaxSize    *int    `yaml:"cache_max_size"`
+	MinDiskSpace    *int    `yaml:"min_disk_space"`
+	MountGitConfig  *bool   `yaml:"mount_git_config"`
+	// AgentClone decides whether `dev agent run` works in a private copy
+	// of the repository. Default true.
+	AgentClone        *bool    `yaml:"agent_clone"`
 	MountDockerSocket *bool    `yaml:"mount_docker_socket"`
 	ForwardPorts      *string  `yaml:"forward_ports"`
 	PassEnvVars       *PassEnv `yaml:"pass_env_vars"`
@@ -156,6 +159,7 @@ type Config struct {
 	CacheMaxSize      int
 	MinDiskSpace      int
 	MountGitConfig    bool
+	AgentClone        bool
 	MountDockerSocket bool
 	ForwardPorts      string
 	PassEnvVars       PassEnv
@@ -199,16 +203,20 @@ func (n Note) String() string {
 // Defaults returns the built-in configuration, matching v1's constants.sh.
 func Defaults() Config {
 	return Config{
-		VMName:            "dev-vm-docker-host",
-		DefaultTemplate:   "",
-		ContainerPrefix:   "dev",
-		AutoStartVM:       true,
-		MemoryLimit:       "",
-		CPULimit:          "",
-		CacheTTL:          86400,
-		CacheMaxSize:      100,
-		MinDiskSpace:      5,
-		MountGitConfig:    false,
+		VMName:          "dev-vm-docker-host",
+		DefaultTemplate: "",
+		ContainerPrefix: "dev",
+		AutoStartVM:     true,
+		MemoryLimit:     "",
+		CPULimit:        "",
+		CacheTTL:        86400,
+		CacheMaxSize:    100,
+		MinDiskSpace:    5,
+		MountGitConfig:  false,
+		// Clone by default: an agent acts on instructions from a model and
+		// can edit what the host runs later. Turning it off is a decision,
+		// and from a project file it is a decision the user has to accept.
+		AgentClone:        true,
 		MountDockerSocket: false,
 		ForwardPorts:      "",
 		PassEnvVars:       PassEnv{},
@@ -272,6 +280,10 @@ func (c *Config) merge(f File, o Origin) {
 	if f.MountGitConfig != nil {
 		c.MountGitConfig = *f.MountGitConfig
 		c.origins["mount_git_config"] = o
+	}
+	if f.AgentClone != nil {
+		c.AgentClone = *f.AgentClone
+		c.origins["agent_clone"] = o
 	}
 	if f.MountDockerSocket != nil {
 		c.MountDockerSocket = *f.MountDockerSocket

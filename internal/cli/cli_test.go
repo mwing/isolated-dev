@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -59,6 +60,42 @@ func (h *harness) run(t *testing.T, args ...string) error {
 	cmd.SetOut(h.stdout)
 	cmd.SetErr(h.stderr)
 	return cmd.Execute()
+}
+
+// gitPassthrough runs git for real and fakes everything else.
+//
+// Some behaviour depends on what git actually says — whether a directory is
+// a repository, what a clone contains — and a fake answers those with
+// silence, which reads as "not a repository" and sends the code down a
+// fallback path. Faking docker while letting git run is the combination
+// those tests need.
+type gitPassthrough struct {
+	fake *runner.Fake
+	real runner.Runner
+}
+
+func (g gitPassthrough) Run(ctx context.Context, cmd runner.Command) (runner.Result, error) {
+	if cmd.Path == "git" {
+		return g.real.Run(ctx, cmd)
+	}
+	return g.fake.Run(ctx, cmd)
+}
+
+// realGit makes git calls real for this harness, leaving docker faked.
+func (h *harness) realGit() {
+	h.env.Runner = gitPassthrough{fake: h.fake, real: runner.New(false)}
+}
+
+// writeGlobal writes the user's own config, which needs no consent from
+// them: it is their machine and nobody else asked.
+func (h *harness) writeGlobal(t *testing.T, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(h.paths.Global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(h.paths.Global, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (h *harness) writeProject(t *testing.T, body string) {

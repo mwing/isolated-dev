@@ -34,6 +34,17 @@ func projectAsks(cfg config.Config, p *project.Project) []trust.Ask {
 				"and nothing is reported as blocked because nothing is blocked",
 		})
 	}
+	// Only the direction that weakens protection is a request. A project
+	// asking for agent_clone: true is asking for the default it already
+	// gets, and prompting for that would train people to accept prompts.
+	if cfg.Origin("agent_clone") == config.OriginProject && !cfg.AgentClone {
+		asks = append(asks, trust.Ask{
+			Key: "agent_clone", Value: "false",
+			Effect: "run agents directly in your working tree instead of a private " +
+				"clone, so an agent edits the files you are editing — including " +
+				"git hooks, npm scripts and Makefiles, which your host runs later",
+		})
+	}
 	if cfg.Origin("mount_git_config") == config.OriginProject && cfg.MountGitConfig {
 		asks = append(asks, trust.Ask{
 			Key: "mount_git_config", Value: "true",
@@ -65,6 +76,22 @@ func projectAsks(cfg config.Config, p *project.Project) []trust.Ask {
 		})
 	}
 	return asks
+}
+
+// agentAsks are the settings an agent run actually honors.
+//
+// A subset rather than all of them, because an agent receives none of the
+// host grants: asking someone to accept a gitconfig mount before starting
+// an agent that will never see it is a prompt about nothing.
+func agentAsks(cfg config.Config, p *project.Project) []trust.Ask {
+	var out []trust.Ask
+	for _, ask := range projectAsks(cfg, p) {
+		switch ask.Key {
+		case "agent_clone", "build_source":
+			out = append(out, ask)
+		}
+	}
+	return out
 }
 
 // enforceConsent stops a run when the project asks for something the user

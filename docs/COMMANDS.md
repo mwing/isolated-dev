@@ -60,6 +60,7 @@ Useful flags on `run`, `shell` and `console`:
 | `dev agent list` | available agents |
 | `dev agent run NAME` | run one against this project |
 | `dev agent run NAME --in-place` | …in your working tree instead of a private copy |
+| `dev agent run NAME --clone` | …in a clone, when config turned that off |
 | `dev agent run NAME -- "prompt"` | pass a prompt or flags through to the agent |
 | `dev agent policy` | the egress policy a run would enforce, without running it |
 | `dev agent logout NAME` | discard the stored login |

@@ -156,9 +156,24 @@ moved too, it fetches to a branch and shows you the merge, rebase and diff
 options rather than choosing — an automatic merge is a judgement about code
 the tool has not read.
 
-`--in-place` opts out. `dev run` and `dev shell` are unchanged: a human
-editing their own tree is the case the plain mount is right for, and
-`--clone` is there when you want it anyway.
+`--in-place` opts out for one run. If you mostly drive agents
+interactively, decide it once instead:
+
+```yaml
+# ~/.dev-envs/config.yaml
+agent_clone: false
+```
+
+Your own config needs no consent — it is your machine. The same line in a
+project's `.devenv.yaml` is a *request*, and stops the run until you accept
+it, because a repository asking to turn the clone off is asking to edit the
+files you are editing. Asking for `agent_clone: true` needs no acceptance:
+it is the default already, and a prompt that grants nothing teaches people
+to click through the ones that matter.
+
+`dev run` and `dev shell` are unchanged: a human editing their own tree is
+the case the plain mount is right for, and `--clone` is there when you want
+it anyway.
 
 Clones are full copies, so they cost disk:
 
