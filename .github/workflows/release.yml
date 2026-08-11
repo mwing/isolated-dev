@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  # Keyless signing: cosign exchanges this for a short-lived certificate
+  # bound to this workflow, so there is no key anywhere to leak.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # goreleaser derives the changelog from history, and a shallow
+          # clone gives it one commit to describe.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26'
+
+      # The suite runs on every push already; it runs again here because a
+      # tag is the one build that people install without reading anything.
+      - name: Test
+        run: go test -race ./...
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+        with:
+          cosign-release: v2.4.1
+
+      # Two different things are pinned here, and only one of them can be a
+      # commit. The action is pinned by SHA above, like every other action.
+      # `version` selects the goreleaser CLI and takes a semver only — for
+      # the record, v2.17.1 is tag object 408e5a74 pointing at commit
+      # 83f4c19a5c5c0b9efef6bf2aedc6805bbcb9dfe2.
+      #
+      # It is also the version this config validates against: `formats` and
+      # `homebrew_casks` are both newer than v2.5, and pinning to something
+      # that cannot read the config is a broken pin, not a safe one — the
+      # mistake made once already with golangci-lint.
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          version: v2.17.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pushes the formula to mwing/homebrew-tap, which the workflow's
+          # own token cannot reach. Without it the release still publishes
+          # and the formula is skipped.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}

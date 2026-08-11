@@ -91,7 +91,7 @@ agent. That contradicts everything `dev pin` says about tags.
 moves them deliberately and reports old → new, and `dev agent list` shows
 what is pinned.
 
-### B5. Real distribution — `todo`
+### B5. Real distribution — `doing`
 
 Requiring Go 1.26 and `make install` is now the adoption blocker: the
 sidecar image and the language plugins already travel inside the binary, so
@@ -181,7 +181,7 @@ know whose repository it is.
 **Done when:** it is per-run rather than quietly persistent, remembering it
 takes a deliberate flag, and the run header keeps saying what it means.
 
-### B13. Pin CI dependencies — `todo`
+### B13. Pin CI dependencies — `done`
 
 Actions are referenced by tag and `govulncheck` is installed with `@latest`
 — the same moving target this tool warns about for images. The linter

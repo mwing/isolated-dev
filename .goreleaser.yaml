@@ -20,30 +20,85 @@ builds:
       - -X github.com/mwing/isolated-dev/internal/cli.Commit={{.Commit}}
       - -X github.com/mwing/isolated-dev/internal/cli.Date={{.Date}}
 
-  # The egress sidecar runs inside the container network, so it is only
-  # ever built for Linux.
-  - id: dev-proxy
-    main: ./cmd/dev-proxy
-    binary: dev-proxy
-    env:
-      - CGO_ENABLED=0
-    goos: [linux]
-    goarch: [amd64, arm64]
-    ldflags:
-      - -s -w
+# Only the one binary ships. The egress sidecar is not a release artifact:
+# the source it is built from travels inside this binary, which builds the
+# image on the machine that needs it. That is what makes a single file the
+# whole product — no companion image to publish, and nothing that can be a
+# version behind.
+#
+# Linux binaries are built now even though the docker backend is not yet
+# advertised. They cost nothing, and having them means the Linux story is a
+# configuration change rather than a release-engineering project.
 
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - docs/*
 
 checksum:
   name_template: checksums.txt
 
-# Signing lands in M3 alongside the brew tap; the placeholder is left here
-# deliberately so the release path is not invented at the last minute.
-# signs:
-#   - cmd: cosign
-#     artifacts: checksum
+# Keyless signing over the checksum file, which covers every artifact
+# through it. No key to store, lose, or rotate: the signature is bound to
+# the workflow identity GitHub asserts, and `cosign verify-blob` checks it
+# against that.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# A cask rather than a formula: goreleaser deprecated `brews`, and a
+# formula that installs a prebuilt binary was always the awkward shape.
+#
+# Casks are macOS-only, which matches where this tool runs today. When the
+# docker backend is ready for Linux, that audience gets the archives and
+# native packages from the same release rather than a second brew story.
+homebrew_casks:
+  - name: dev
+    directory: Casks
+    repository:
+      owner: mwing
+      name: homebrew-tap
+      # A token that can push to another repository; the workflow's own
+      # GITHUB_TOKEN cannot. Absent, the release still publishes and only
+      # the cask is skipped — the binaries are the product, the tap is a
+      # convenience.
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    binaries:
+      - dev
+    homepage: https://github.com/mwing/isolated-dev
+    description: Run code in a container without learning Docker, in a sandbox closed by default
+    hooks:
+      post:
+        install: |
+          # The binary is not notarized, so macOS would quarantine it and
+          # refuse to run it. Signing is on the roadmap; until then this is
+          # the honest handling — and it is worth knowing that `brew` is
+          # the reason a browser download would behave differently.
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/dev"]
+          end
+    caveats: |
+      dev needs a container backend. On macOS that is OrbStack:
+        brew install --cask orbstack
+
+      Then check the setup, which changes nothing:
+        dev doctor
+
+      The first filtered run builds the egress sidecar image from source
+      carried inside the binary, which takes a few minutes once.
 
 changelog:
   sort: asc
@@ -51,6 +106,23 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+      - '^chore:'
 
 release:
   prerelease: auto
+  footer: |
+    ## Verifying a download
+
+    Every artifact is covered by `checksums.txt`, which is signed with
+    cosign keyless — there is no key, the signature is bound to the
+    workflow that produced it.
+
+    ```sh
+    cosign verify-blob checksums.txt \
+      --signature checksums.txt.sig \
+      --certificate checksums.txt.pem \
+      --certificate-identity-regexp 'https://github.com/mwing/isolated-dev/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+    sha256sum -c checksums.txt --ignore-missing
+    ```
