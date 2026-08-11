@@ -76,7 +76,12 @@ jobs:
         with:
           # Pinned: `latest` is a build that changes under you, which is the
           # same argument this tool makes about image tags.
-          version: v2.5.0
+          #
+          # It has to be a release built with a Go at least as new as the one
+          # go.mod targets — golangci-lint refuses to load a config for a
+          # newer language version than it was compiled against. Raising the
+          # `go` directive means raising this too.
+          version: v2.12.2
 
   vulncheck:
     runs-on: ubuntu-latest
