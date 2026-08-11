@@ -57,6 +57,12 @@ function copy_scaffolding_files_from_plugin() {
     # Copy scaffolding files, replacing placeholders
     for file in "${scaffolding_files[@]}"; do
         local source_file="$language_dir/$file"
+        # A plugin may store a file under a ".tmpl" suffix when it cannot
+        # ship the name it scaffolds: a directory holding a real go.mod is a
+        # nested Go module, which the v2 binary's embedded copy of these
+        # plugins excludes. Same files, one of them stored under a name the
+        # toolchain ignores.
+        [[ ! -f "$source_file" && -f "$source_file.tmpl" ]] && source_file="$source_file.tmpl"
         [[ ! -f "$source_file" ]] && continue
         
         # Create directory structure if needed
@@ -69,7 +75,12 @@ function copy_scaffolding_files_from_plugin() {
                 sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"
                 ;;
             "go.mod")
-                sed -e "s/{{PROJECT_NAME}}/$project_name/g" -e "s/{{GO_VERSION}}/$go_version/g" "$source_file" > "$file"
+                # {{VERSION}} is what the plugins use now, since that is the
+                # one name v2's renderer knows; {{GO_VERSION}} is still
+                # substituted so an older plugin set keeps working.
+                sed -e "s/{{PROJECT_NAME}}/$project_name/g" \
+                    -e "s/{{VERSION}}/$go_version/g" \
+                    -e "s/{{GO_VERSION}}/$go_version/g" "$source_file" > "$file"
                 ;;
             "Cargo.toml")
                 sed "s/{{PROJECT_NAME}}/$project_name/g" "$source_file" > "$file"

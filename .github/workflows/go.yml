@@ -68,11 +68,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
-      - uses: golangci/golangci-lint-action@v6
+      # v7 of the action, because the config is golangci-lint v2 and v6 of
+      # the action refuses a v2 version outright. That mismatch is why this
+      # job had been failing on every push: `version: latest` resolved to a
+      # v2 release the action could not install.
+      - uses: golangci/golangci-lint-action@v7
         with:
           # Pinned: `latest` is a build that changes under you, which is the
-          # same argument this tool makes about image tags. It also broke —
-          # a transitive dependency of a newer release stopped resolving.
+          # same argument this tool makes about image tags.
           version: v2.5.0
 
   vulncheck:

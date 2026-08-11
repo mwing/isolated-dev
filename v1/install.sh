@@ -5,6 +5,12 @@ VERSION="1.0.0"
 
 # Define source and destination directories
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The language plugins stayed at the repository root when this tool moved
+# into v1/: both tools read the same set, and duplicating them would mean
+# fixing every plugin bug twice. Fall back to SRC_DIR so a copy of just this
+# directory still installs.
+PLUGIN_SRC="$SRC_DIR/languages"
+[[ -d "$PLUGIN_SRC" ]] || PLUGIN_SRC="$(cd "$SRC_DIR/.." && pwd)/languages"
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="$HOME/.dev-envs/setups"
 LANGUAGES_DIR="$HOME/.dev-envs/languages"
@@ -218,7 +224,7 @@ log "   -> Validating source files..."
 # Source files validation
 [[ -f "$SRC_DIR/scripts/dev" ]] || error_exit "Source file scripts/dev not found"
 [[ -f "$SRC_DIR/config/docker-host.yaml" ]] || error_exit "Source file config/docker-host.yaml not found"
-[[ -d "$SRC_DIR/languages" ]] || error_exit "Source directory languages not found"
+[[ -d "$PLUGIN_SRC" ]] || error_exit "Source directory languages not found (looked in $SRC_DIR and its parent)"
 
 # Create destination directories if they don't exist
 log "   -> Creating destination directories..."
@@ -280,8 +286,8 @@ cp "$SRC_DIR/config/docker-host.yaml" "$CONFIG_DIR/docker-host.yaml" || error_ex
 
 # Install language plugins
 log "   -> Installing language plugins to $LANGUAGES_DIR"
-if [[ -d "$SRC_DIR/languages" ]]; then
-    cp -r "$SRC_DIR/languages"/* "$LANGUAGES_DIR/" || error_exit "Failed to copy language plugins"
+if [[ -d "$PLUGIN_SRC" ]]; then
+    cp -r "$PLUGIN_SRC"/* "$LANGUAGES_DIR/" || error_exit "Failed to copy language plugins"
 else
     log "   -> Warning: No languages directory found, skipping language plugins"
 fi

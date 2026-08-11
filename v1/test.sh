@@ -11,6 +11,15 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Test variables
+#
+# This suite runs from v1/, where the bash tool lives. The language plugins
+# stayed at the repository root when v1 moved here, because both tools read
+# the same set — so anything about plugins is looked up through REPO_ROOT
+# rather than relative to the current directory.
+V1_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$V1_DIR/.." && pwd)"
+# The Go rewrite owns the name `dev`; this tool installs itself beside it.
+DEV_BIN="dev1"
 ORIGINAL_DIR="$(pwd)"
 TEST_DIR="$(mktemp -d)"
 TEST_HOME="$(mktemp -d)"  # Isolated home directory for testing
@@ -184,33 +193,33 @@ test_language_plugins() {
     run_test "Language plugin structure"
     
     # Test that language plugins directory exists
-    assert_dir_exists "languages" "Languages directory exists"
+    assert_dir_exists "$REPO_ROOT/languages" "Languages directory exists"
     
     # Test that key language plugins exist
-    assert_dir_exists "languages/python" "Python language plugin exists"
-    assert_dir_exists "languages/node" "Node.js language plugin exists"
-    assert_dir_exists "languages/golang" "Go language plugin exists"
-    assert_dir_exists "languages/rust" "Rust language plugin exists"
-    assert_dir_exists "languages/java" "Java language plugin exists"
-    assert_dir_exists "languages/php" "PHP language plugin exists"
-    assert_dir_exists "languages/ubuntu" "Ubuntu language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/python" "Python language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/node" "Node.js language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/golang" "Go language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/rust" "Rust language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/java" "Java language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/php" "PHP language plugin exists"
+    assert_dir_exists "$REPO_ROOT/languages/ubuntu" "Ubuntu language plugin exists"
     
     # Test that each plugin has required files
-    assert_file_exists "languages/python/language.yaml" "Python language.yaml exists"
-    assert_file_exists "languages/python/Dockerfile.template" "Python Dockerfile.template exists"
-    assert_file_exists "languages/python/requirements.txt" "Python requirements.txt exists"
-    assert_file_exists "languages/python/main.py" "Python main.py exists"
-    assert_file_exists "languages/python/.gitignore" "Python .gitignore exists"
+    assert_file_exists "$REPO_ROOT/languages/python/language.yaml" "Python language.yaml exists"
+    assert_file_exists "$REPO_ROOT/languages/python/Dockerfile.template" "Python Dockerfile.template exists"
+    assert_file_exists "$REPO_ROOT/languages/python/requirements.txt" "Python requirements.txt exists"
+    assert_file_exists "$REPO_ROOT/languages/python/main.py" "Python main.py exists"
+    assert_file_exists "$REPO_ROOT/languages/python/.gitignore" "Python .gitignore exists"
     
-    assert_file_exists "languages/node/language.yaml" "Node.js language.yaml exists"
-    assert_file_exists "languages/node/Dockerfile.template" "Node.js Dockerfile.template exists"
-    assert_file_exists "languages/node/package.json" "Node.js package.json exists"
+    assert_file_exists "$REPO_ROOT/languages/node/language.yaml" "Node.js language.yaml exists"
+    assert_file_exists "$REPO_ROOT/languages/node/Dockerfile.template" "Node.js Dockerfile.template exists"
+    assert_file_exists "$REPO_ROOT/languages/node/package.json" "Node.js package.json exists"
     
     # Test placeholder content
-    local python_dockerfile=$(cat languages/python/Dockerfile.template)
+    local python_dockerfile=$(cat "$REPO_ROOT/languages/python/Dockerfile.template")
     assert_contains "$python_dockerfile" "{{VERSION}}" "Python Dockerfile contains version placeholder"
     
-    local package_json=$(cat languages/node/package.json)
+    local package_json=$(cat "$REPO_ROOT/languages/node/package.json")
     assert_contains "$package_json" "{{PROJECT_NAME}}" "Node.js package.json contains project name placeholder"
 }
 
@@ -227,7 +236,7 @@ test_installation() {
     assert_equals "0" "$install_exit_code" "Installation completes successfully"
     
     # Test that files were installed in our test environment
-    assert_file_exists "$TEST_HOME/.local/bin/dev" "dev script installed"
+    assert_file_exists "$TEST_HOME/.local/bin/$DEV_BIN" "$DEV_BIN script installed"
     assert_dir_exists "$TEST_HOME/.dev-envs" "Configuration directory created"
     # Templates directory no longer needed - we generate directly from language plugins
     assert_dir_exists "$TEST_HOME/.dev-envs/languages" "Languages directory created"
@@ -251,13 +260,13 @@ test_template_creation() {
     cd "$test_project"
     
     # Test that dev command exists in our test environment
-    if [[ ! -f "$HOME/.local/bin/dev" ]]; then
+    if [[ ! -f "$HOME/.local/bin/$DEV_BIN" ]]; then
         log "${YELLOW}⏭️  SKIP${NC}: dev not installed, skipping template tests"
         return
     fi
     
     # Test template creation with --yes flag (using our test installation)
-    local template_output=$("$HOME/.local/bin/dev" new python-3.13 --init --yes 2>&1 || echo "FAILED")
+    local template_output=$("$HOME/.local/bin/$DEV_BIN" new python-3.13 --init --yes 2>&1 || echo "FAILED")
     
     if [[ "$template_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/Dockerfile" "Dockerfile created from template"
@@ -291,7 +300,7 @@ test_config_creation() {
     cd "$test_project"
     
     # Test project config creation using the installed dev script
-    local config_output=$("$HOME/.local/bin/dev" config --init --yes 2>&1 || echo "FAILED")
+    local config_output=$("$HOME/.local/bin/$DEV_BIN" config --init --yes 2>&1 || echo "FAILED")
     
     if [[ "$config_output" != "FAILED" ]]; then
         assert_file_exists "$test_project/.devenv.yaml" "Project config file created"
