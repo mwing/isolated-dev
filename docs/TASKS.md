@@ -542,6 +542,36 @@ Worth noting for anything else that reads this: it was invisible for months
 because it only bites a workload that spawns many short-lived children, and
 the symptom names the wrong culprit.
 
+## T23. Nothing installs the language plugins  **[found while verifying T14]**
+
+`~/.dev-envs/languages/` is where every plugin is read from. Only v1's
+`install.sh` writes it. `make install` builds the binary and stops.
+
+Two consequences, and the second is why this was invisible:
+
+- **A fresh install does not work.** Someone who installs `dev` alone has
+  no plugins, so nothing detects, `dev run` has no image to build and
+  `dev new` has no languages to offer.
+- **Fixes to plugins never reach anyone.** T14 corrected
+  `languages/golang/go.mod`, and scaffolding a Go project still emitted the
+  broken placeholder — because `dev new` reads the installed copy, which is
+  whatever v1 put there whenever it last ran. The repository and the tool
+  disagree and neither says so.
+
+This is T8's family: the parts of the product that are not the binary have
+no supported path onto a machine. Doing them together is cheaper than
+twice.
+
+**Do:** `go:embed languages/` and install from the binary — `dev doctor`
+reports plugins missing or older than the binary, and something (an install
+step, or `dev doctor --fix`) writes them. Keep reading `~/.dev-envs` so a
+user's own plugin still wins; the embedded set is the floor, not a
+replacement.
+
+**Acceptance:** with `~/.dev-envs/languages` removed entirely, a fresh
+binary can still detect a project and scaffold one, and `dev new golang`
+produces a `go.mod` a Go toolchain accepts.
+
 ## T20. The gitconfig filter is a denylist wearing an allowlist's label
 
 `internal/cli/hostaccess.go` filters the host gitconfig by dropping known
@@ -679,6 +709,7 @@ Done means all six of these are true at once:
 | T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
 | T21 | a run against an older sidecar image fails, naming the skew |
 | T22 | done — `/proc/1/comm` in a run is an init, not the workload |
+| T23 | with `~/.dev-envs/languages` deleted, detection and `dev new` still work |
 
 ---
 
@@ -792,7 +823,7 @@ Twelve steps. Each is a commit; the groups are natural stopping points.
 | 7 | **T6** SNI | Decide and act. Doing it after T3 means the sentence you write about enforcement is about a code path that is finally true. |
 | 8 | **T9, T13** | Small, mechanical, user-visible. A palate cleanser after the P0 block, and T9 unblocks CI use. |
 | 9 | **T7, T10, T18** | The proxy's connection handling, all in `internal/netpolicy`, all needing the same real-daemon verification — one context, one sitting. |
-| 10 | **T8 + T21** distribution and version skew | Needs the sidecar to be otherwise finished, since embedding it fixes its build path. Before any release, and before asking anyone else to install this. |
+| 10 | **T8 + T21 + T23** distribution: sidecar image, version skew, language plugins | Needs the sidecar to be otherwise finished, since embedding it fixes its build path. Before any release, and before asking anyone else to install this. |
 | 11 | **T11, T12, T14** | User-facing surface: the port bug, the command move, the stale plugin docs. T12 last of the three because it renames things the other two mention. |
 | 12 | **T20, T15 (rest), T16, T17** | Finish the integration tier, then hardening. Hardening last is deliberate: each item widens or narrows matching behavior, and you want the full test suite underneath before touching allowlist semantics. |
 
