@@ -200,3 +200,32 @@ func TestShippedPluginsUseOnlySubstitutedPlaceholders(t *testing.T) {
 		})
 	}
 }
+
+// A plugin cannot always ship the filename it scaffolds: a directory
+// holding a go.mod is a nested module, which the toolchain excludes from
+// the parent — and therefore from the binary's embedded copy of the
+// plugins. The golang plugin shipped without its go.mod and main.go for
+// exactly that reason, and nothing reported it.
+func TestScaffoldAcceptsATmplSuffixOnThePluginsCopy(t *testing.T) {
+	l := plugin(t, `name: demo
+versions: ["1.25"]
+detection:
+  files: [go.mod]
+files:
+  scaffolding: [go.mod]
+`, map[string]string{"go.mod.tmpl": "module {{PROJECT_NAME}}\n\ngo {{VERSION}}\n"})
+
+	plan, err := Build(l, t.TempDir(), Vars{ProjectName: "demo", Version: "1.25"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Missing) != 0 {
+		t.Fatalf("reported missing: %v", plan.Missing)
+	}
+	if len(plan.Files) != 1 || plan.Files[0].Path != "go.mod" {
+		t.Fatalf("plan = %+v, want one file written as go.mod", plan.Files)
+	}
+	if plan.Files[0].Body != "module demo\n\ngo 1.25\n" {
+		t.Fatalf("body = %q", plan.Files[0].Body)
+	}
+}

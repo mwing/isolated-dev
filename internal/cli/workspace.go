@@ -14,7 +14,6 @@ import (
 	"github.com/mwing/isolated-dev/internal/config"
 	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/history"
-	"github.com/mwing/isolated-dev/internal/langs"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
 	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/trust"
@@ -26,7 +25,7 @@ func resolveProject(env *Env) (config.Config, *project.Project, error) {
 	if err != nil {
 		return cfg, nil, err
 	}
-	set, err := langs.Load(env.Paths.Languages)
+	set, err := loadLanguages(env)
 	if err != nil {
 		return cfg, nil, err
 	}

@@ -1,16 +1,13 @@
 package main
 
-import (
-	"fmt"
-	"log"
-	"net/http"
-)
+import "fmt"
 
 func main() {
 	fmt.Println("Hello from {{PROJECT_NAME}}!")
 	fmt.Println("Go development environment is ready!")
 
-	// Example HTTP server (uncomment to use)
+	// Example HTTP server. Uncomment, and add "log" and "net/http" to the
+	// imports above.
 	/*
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Hello from {{PROJECT_NAME}}!\n")

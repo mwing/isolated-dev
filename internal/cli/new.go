@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/mwing/isolated-dev/internal/langs"
 	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/scaffold"
 )
@@ -42,7 +41,7 @@ func newNewCmd(env *Env) *cobra.Command {
 		if len(args) > 0 {
 			return nil, cobra.ShellCompDirectiveFilterDirs
 		}
-		set, err := langs.Load(env.Paths.Languages)
+		set, err := loadLanguages(env)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -56,7 +55,7 @@ func newNewCmd(env *Env) *cobra.Command {
 }
 
 func newProject(env *Env, language, dir, version string, force bool) error {
-	set, err := langs.Load(env.Paths.Languages)
+	set, err := loadLanguages(env)
 	if err != nil {
 		return err
 	}

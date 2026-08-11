@@ -43,6 +43,34 @@ type Vars struct {
 	Version     string
 }
 
+// readScaffold reads a scaffolding file, accepting a ".tmpl" suffix on the
+// plugin's copy.
+//
+// A plugin cannot always ship the filename it scaffolds. A directory
+// containing a go.mod is a nested Go module: the toolchain excludes it from
+// the parent module, which means it is excluded from the binary's embedded
+// copy of the plugins too — the golang plugin silently shipped without its
+// go.mod and main.go, and scaffolding a Go project produced neither. A file
+// the plugin cannot name literally needs a name it can.
+func readScaffold(dir, name string) (string, []byte, error) {
+	src := filepath.Join(dir, name)
+	raw, err := os.ReadFile(src)
+	if err == nil {
+		return src, raw, nil
+	}
+	if !os.IsNotExist(err) {
+		return src, nil, err
+	}
+	tmpl := src + ".tmpl"
+	raw, tErr := os.ReadFile(tmpl)
+	if tErr != nil {
+		// The original name is reported: ".tmpl" is how a plugin stores
+		// the file, not what the user asked for.
+		return src, nil, err
+	}
+	return tmpl, raw, nil
+}
+
 // Build computes the plan for a language in a directory.
 func Build(l *langs.Language, dir string, vars Vars) (*Plan, error) {
 	p := &Plan{Dir: dir, Language: l.Name, Version: vars.Version}
@@ -53,8 +81,7 @@ func Build(l *langs.Language, dir string, vars Vars) (*Plan, error) {
 	}
 
 	for _, name := range names {
-		src := filepath.Join(l.Dir, name)
-		raw, err := os.ReadFile(src)
+		src, raw, err := readScaffold(l.Dir, name)
 		if err != nil {
 			if os.IsNotExist(err) {
 				p.Missing = append(p.Missing, name)
