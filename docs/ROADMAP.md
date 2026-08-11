@@ -227,6 +227,25 @@ The failure this design exists to prevent: honoring `allow_hosts` from a
 cloned repository, which would let a hostile project widen its own egress
 before anyone read a line of it.
 
+**What a grant is attached to, stated plainly: the path.** Not the code,
+and not the repository. A decision recorded for `~/src/foo` applies to
+whatever is in `~/src/foo` afterwards — a `git pull` that brings new code,
+or a different project cloned into the same directory.
+
+This is a real limit and it is not fixable by fingerprinting the
+repository. Binding trust to the git origin would mean reading an identity
+out of the repository whose identity is in question, and `git remote
+set-url` defeats it in one command — the same self-asserted-configuration
+problem this whole section exists to avoid. The only unforgeable signal is
+the content itself, which changes on every commit and would ask constantly,
+which is how people are taught to stop reading prompts.
+
+So the mitigations are elsewhere, and are the reason these exist: grants
+are per-destination rather than blanket, `dev grants` reports which ones
+anything has actually used, pruning removes the rest, and the settings with
+consequences severe enough that inheritance would matter — the docker
+socket above all — should be per-run rather than persistent.
+
 Status: implemented. `.devenv.yaml` may carry an `agents:` section; a run
 stops on anything requested but not accepted, and `dev agent accept`
 records the decision. Acceptance is an intersection, not a union: a host the

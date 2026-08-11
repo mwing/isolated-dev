@@ -35,19 +35,40 @@ before building, names the file, and offers the template; the decision is
 recorded per project; `--build-source` chooses without prompting; a changed
 Dockerfile is reported at build time.
 
-### B2. Trust keyed to repository identity, not just path — `todo`
+### B2. Trust keyed to repository identity, not just path — `dropped`
 
-Grants live at `~/.dev-envs/projects/<slug>-<hash>.yaml`, hashed from the
-absolute path. `rm -rf foo && git clone something-else foo` inherits foo's
-grants. Accepted *settings* are value-sensitive, which helps; direct grants
-are not.
+The finding is real: grants live at `~/.dev-envs/projects/<slug>-<hash>.yaml`,
+hashed from the absolute path, so `rm -rf foo && git clone something-else foo`
+inherits foo's grants.
 
-For a security tool, a path is a location, not an identity.
+The proposed fix does not work, and the reason is worth keeping.
 
-**Done when:** the project file records a repository fingerprint (normalized
-git origin where one exists), a changed identity forces review rather than
-inheriting, and non-git directories keep path-only semantics with that
-stated.
+Binding trust to the git origin means reading an identity **out of the
+repository whose identity is in question**. One command defeats it:
+
+```sh
+git clone evil foo && cd foo && git remote set-url origin <the-old-url>
+```
+
+That is self-asserted data, which is exactly what this tool's founding rule
+says not to believe — `.devenv.yaml` is a request rather than authority
+*because* configuration inside a repository can grant itself. A remote URL
+is the same class of data, and treating it as identity would be a hole in
+the middle of the model.
+
+The bind is structural rather than a matter of picking a better field. Any
+signal stable enough to be an identity is self-asserted; the one signal
+that is not — the content itself, a HEAD commit — changes on every commit,
+so it fires constantly and teaches people to click through the prompts that
+matter. There is no version of this that both holds and stays quiet.
+
+What survives:
+
+- The dangerous payload — a new project at an old path silently inheriting
+  `mount_docker_socket: true`, because value-sensitivity matches on
+  sameness — is **B12**, which depends on no identity signal at all.
+- The documentation duty: say plainly that grants follow the path, not the
+  code and not the repository. Done in ROADMAP 4.2.1.
 
 ### B3. Stop recommending `--network open` for unfamiliar repos — `todo`
 
@@ -146,10 +167,16 @@ is where the seconds are actually lost. The measured case in the docs is
 **Done when:** a build whose context exceeds a threshold says so and offers
 the `.dockerignore` the wizard already generates.
 
-### B12. Docker socket as break-glass — `todo`
+### B12. Docker socket as break-glass — `todo`  *(promoted from P1: absorbs B2)*
 
 Mounting it is root on the docker host, and the sandbox does not contain
 it. It currently travels the same path as allowing a hostname.
+
+It also carries the one consequence that made B2 look worth doing: a
+persistent acceptance at a path is inherited by whatever occupies that path
+later, and value-sensitivity does not help because the new request matches
+the old value exactly. Making this per-run closes that without needing to
+know whose repository it is.
 
 **Done when:** it is per-run rather than quietly persistent, remembering it
 takes a deliberate flag, and the run header keeps saying what it means.
