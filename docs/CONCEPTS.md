@@ -161,11 +161,11 @@ is the wrong lifetime for the question:
 ```sh
 dev history          # what each run reached, and what was blocked
 dev history hosts    # every destination, most recent first
-dev agent grants     # each grant, and whether anything still uses it
+dev grants           # each grant, and whether anything still uses it
 ```
 
-An allowlist that only ever grows stops meaning anything. `dev agent
-grants prune` offers back the entries no recorded run has reached — and
+An allowlist that only ever grows stops meaning anything. `dev grants
+prune` offers back the entries no recorded run has reached — and
 refuses to judge a thin history, because "never used" across three runs is
 not a finding.
 

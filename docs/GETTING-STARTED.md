@@ -58,14 +58,14 @@ first run on something. That is the tool working:
 Egress: blocked destinations this run:
   blocked: telemetry.example.com:443
 Allow once:       --allow-host HOST
-Allow from now:   dev agent allow HOST
+Allow from now:   dev allow HOST
 Unrestricted:     --network open
 ```
 
 Decide each one deliberately — that decision is the whole point:
 
 ```sh
-dev agent allow api.mycompany.com     # persistent, this project
+dev allow api.mycompany.com           # persistent, this project
 dev run --allow-host api.example.com  # just this run
 ```
 
@@ -284,11 +284,11 @@ an editor will not start it. The generated file says so.
 ```sh
 dev history           # what each run reached, and what was blocked
 dev history hosts     # every destination, most recent first
-dev agent grants      # each grant, and whether anything still uses it
+dev grants            # each grant, and whether anything still uses it
 ```
 
 Worth doing a few weeks in. Grants accumulate for reasons that were true
-at the time, and `dev agent grants prune` offers back the ones nothing
+at the time, and `dev grants prune` offers back the ones nothing
 has reached since.
 
 ---
@@ -330,7 +330,7 @@ dev doctor                      # setup is sane
 dev status                      # detection and allowlist look right
 # add .dockerignore for a large repo
 dev run -c '<your test command>'
-dev agent allow <hosts it needed>
+dev allow <hosts it needed>
 dev tools add --shared <tools the team needs>
 dev pin && dev scan
 dev devcontainer                # if teammates use an IDE

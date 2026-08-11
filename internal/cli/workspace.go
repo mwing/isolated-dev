@@ -422,7 +422,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if len(allowed) == 0 {
 		fmt.Fprintf(env.Stderr,
 			"⚠  network: allowlist, but nothing is allowed for this project.\n"+
-				"   Use `--network open`, or grant destinations with `dev agent allow`.\n")
+				"   Use `--network open`, or grant destinations with `dev allow`.\n")
 	}
 
 	// Asking needs a terminal to ask on AND stdin free to answer with. An
@@ -611,7 +611,7 @@ func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec ru
 		fmt.Fprintf(env.Stderr, "  %s\n", line)
 	}
 	fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")
-	fmt.Fprintf(env.Stderr, "Allow from now:   dev agent allow HOST\n")
+	fmt.Fprintf(env.Stderr, "Allow from now:   dev allow HOST\n")
 	fmt.Fprintf(env.Stderr, "Unrestricted:     --network open\n")
 	fmt.Fprintf(env.Stderr, "Later:            dev history\n")
 }

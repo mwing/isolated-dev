@@ -186,6 +186,45 @@ func (h *harness) grantHosts(t *testing.T, agentName string, hosts ...string) {
 	}
 }
 
+// answer gives the prompt something to read. Stdin is a pipe rather than the
+// test binary's own: whether it is a terminal decides whether prompting is
+// possible at all, and a closed pipe makes an unanswered prompt resolve
+// immediately instead of waiting.
+func (h *harness) answer(t *testing.T, reply string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(reply); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	h.env.Stdin = r
+}
+
+// controlOps returns the [op, host] of every policy change pushed into a
+// running sidecar through its control socket.
+//
+// Vectors, not rendered lines: these destinations differ by a port suffix,
+// and "control allow example.com" is a substring of the line that grants
+// example.com:8080 — so a substring assertion cannot tell the bug from the
+// fix.
+func (h *harness) controlOps() [][]string {
+	var out [][]string
+	for _, args := range h.dockerArgs() {
+		for i, a := range args {
+			if a == "control" && i+1 < len(args) {
+				out = append(out, args[i+1:])
+				break
+			}
+		}
+	}
+	return out
+}
+
 // dockerArgs returns the argument vector of every docker invocation, with
 // the backend's wrapper stripped. Assertions work on the vector rather than
 // on a rendered line: the argv is the behavior, and a rendered line has to
@@ -730,11 +769,79 @@ func TestCompletionCoversEveryCommand(t *testing.T) {
 	for _, want := range []string{
 		"run", "shell", "build", "console", "status", "clean", "tools",
 		"pin", "scan", "agent", "accept", "doctor", "migrate", "vm", "version",
-		"completion",
+		"completion", "allow", "revoke", "grants", "config",
 	} {
 		if !names[want] {
 			t.Errorf("%q is not in the command tree, so it cannot be completed", want)
 		}
+	}
+}
+
+func TestGrantCommandsLiveAtTheRoot(t *testing.T) {
+	// They apply to plain runs too: a blocked `dev run` prints the hint, and
+	// a plain run consumes the grants. Under `dev agent` they named an owner
+	// they do not have.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	for _, name := range []string{"allow", "revoke", "grants", "config"} {
+		c, _, err := root.Find([]string{name})
+		if err != nil || c == nil || c.Name() != name {
+			t.Fatalf("`dev %s` is not in the tree: %v", name, err)
+		}
+		if c.Hidden {
+			t.Errorf("`dev %s` is hidden, so nothing will lead anyone to it", name)
+		}
+	}
+	// The verbs that really are about agents stay where they are.
+	for _, path := range [][]string{{"agent", "run"}, {"agent", "list"},
+		{"agent", "logout"}, {"agent", "policy"}, {"agent", "accept"}} {
+		c, _, err := root.Find(path)
+		if err != nil || c == nil || c.Name() != path[1] {
+			t.Errorf("`dev %s` moved or vanished: %v", strings.Join(path, " "), err)
+		}
+	}
+	// `dev accept` is settings, `dev agent accept` is egress. Two decisions,
+	// two commands: merging them would blur the line the trust model rests on.
+	if c, _, err := root.Find([]string{"accept"}); err != nil || c == nil || c.Hidden {
+		t.Errorf("`dev accept` is gone or hidden: %v", err)
+	}
+}
+
+func TestTheOldGrantPathsStillWorkAndAreHidden(t *testing.T) {
+	// Nothing should break mid-transition: these spellings are in people's
+	// shell history and in scripts. They stay out of the help so no one
+	// learns them now.
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	for _, name := range []string{"allow", "revoke", "grants", "config"} {
+		c, _, err := root.Find([]string{"agent", name})
+		if err != nil || c == nil || c.Name() != name {
+			t.Fatalf("`dev agent %s` stopped working: %v", name, err)
+		}
+		if !c.Hidden {
+			t.Errorf("`dev agent %s` is still advertised as a way to do this", name)
+		}
+	}
+
+	// And the alias does the same work, saying once which name to use now.
+	if err := h.run(t, "agent", "allow", "example.com"); err != nil {
+		t.Fatalf("agent allow: %v\n%s", err, h.stderr.String())
+	}
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Resolve("default").AllowHosts; !contains(got, "example.com") {
+		t.Errorf("the alias recorded nothing: %v", got)
+	}
+	if !strings.Contains(h.stderr.String(), "`dev allow`") {
+		t.Errorf("the alias does not say what to type instead:\n%s", h.stderr.String())
+	}
+	// On stderr, because `dev agent config path` is read by scripts.
+	if strings.Contains(h.stdout.String(), "is now") {
+		t.Errorf("the note went to stdout, where it corrupts output:\n%s", h.stdout.String())
 	}
 }
 

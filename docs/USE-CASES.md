@@ -235,8 +235,8 @@ to" once you have time to look.
 Grants are then reviewable against it:
 
 ```sh
-dev agent grants         # each grant, and when it was last actually used
-dev agent grants prune   # the ones nothing has reached; --apply to remove
+dev grants               # each grant, and when it was last actually used
+dev grants prune         # the ones nothing has reached; --apply to remove
 ```
 
 An allowlist that only ever grows stops meaning anything. `prune` refuses
@@ -309,7 +309,7 @@ If a build genuinely needs another host:
 
 ```sh
 dev run --allow-host proxy.corp.example.com -c 'go mod download'   # once
-dev agent allow proxy.corp.example.com                             # from now on
+dev allow proxy.corp.example.com                                   # from now on
 ```
 
 **Caveat worth knowing:** image *builds* are not filtered, and neither is
@@ -799,7 +799,7 @@ It holds against every route in, not just the polite ones:
 $ dev run --network open
 policy forbids network mode open: this machine permits only allowlist, none
 
-$ dev agent allow pastebin.com
+$ dev allow pastebin.com
 policy forbids egress to pastebin.com: matches the denied destination pastebin.com
 
 $ dev run --allow-host pastebin.com
@@ -871,7 +871,7 @@ forward:
 
 ```
 Allow once:       --allow-host HOST
-Allow from now:   dev agent allow HOST
+Allow from now:   dev allow HOST
 Unrestricted:     --network open
 ```
 

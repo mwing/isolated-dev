@@ -284,7 +284,13 @@ func TestBrokenPluginIsReportedNotSilentlyIgnored(t *testing.T) {
 func TestRealPluginsFromTheRepoLoad(t *testing.T) {
 	// The plugins that ship with v1 must load unchanged: the format is
 	// preserved, only the reading of it is new.
-	set, err := langs.Load("../../../languages")
+	//
+	// The path is relative to this package. It was one level too high when
+	// the module lived in a subdirectory, and a missing directory loads as an
+	// empty set rather than an error — so this test skipped itself silently
+	// for as long as that was wrong, which is the one outcome a guard must
+	// not have.
+	set, err := langs.Load("../../languages")
 	if err != nil {
 		t.Skipf("languages dir unavailable: %v", err)
 	}

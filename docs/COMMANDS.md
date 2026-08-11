@@ -76,14 +76,22 @@ trust this repository.
 |---|---|
 | `dev accept` | review the settings this project requests |
 | `dev agent accept` | review the egress it requests |
-| `dev agent allow HOST` | grant a destination for this project |
-| `dev agent revoke HOST` | remove one |
-| `dev agent grants` | every grant, and whether anything still uses it |
-| `dev agent grants prune` | offer back the ones no recorded run reached |
+| `dev allow HOST` | grant a destination for this project |
+| `dev revoke HOST` | remove one |
+| `dev grants` | every grant, and whether anything still uses it |
+| `dev grants prune` | offer back the ones no recorded run reached |
+| `dev config edit` | open this project's recorded configuration in `$EDITOR` |
+| `dev config show` | the configuration a run would resolve |
 | `dev history` | what past runs reached, and what was blocked |
 | `dev history hosts` | every destination, most recent first |
 | `dev policy` | the rules this machine enforces on everyone |
 | `dev status` | what is running, under which policy (`--all` for other projects) |
+
+Grants belong to the project, not to agents: a plain `dev run` consumes the
+same ones. `allow`, `revoke`, `grants` and `config` were once `dev agent`
+subcommands and still answer there, hidden, so existing scripts keep
+working. `dev accept` and `dev agent accept` are different decisions —
+settings the project requests, and egress it requests — and stay separate.
 
 ---
 

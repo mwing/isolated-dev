@@ -153,3 +153,50 @@ func TestPluginWithNoScaffoldingIsAnError(t *testing.T) {
 		t.Fatal("a plugin with nothing to scaffold produced a plan")
 	}
 }
+
+func TestShippedPluginsUseOnlySubstitutedPlaceholders(t *testing.T) {
+	// A placeholder the renderer does not know survives into the project the
+	// user just created: `dev new golang` wrote a go.mod saying
+	// `go {{GO_VERSION}}`, which is not a version and does not build. v1's
+	// bash substituted that name; nothing in v2 does, and the plugin
+	// README documented it as available for years afterwards.
+	set, err := langs.Load("../../languages")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set.Len() == 0 {
+		t.Fatal("no shipped plugins loaded; this guard would pass vacuously")
+	}
+
+	for _, l := range set.All() {
+		t.Run(l.Name, func(t *testing.T) {
+			plan, err := Build(l, t.TempDir(), Vars{
+				ProjectName: "demo", Version: l.DefaultVersion(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bodies := map[string]string{}
+			for _, f := range plan.Files {
+				bodies[f.Path] = f.Body
+			}
+			raw, err := os.ReadFile(l.DockerfileTemplate())
+			if err != nil {
+				t.Fatal(err)
+			}
+			bodies[filepath.Base(l.DockerfileTemplate())] = langs.RenderDockerfile(
+				string(raw), langs.TemplateVars{ProjectName: "demo", Version: l.DefaultVersion()})
+
+			for name, body := range bodies {
+				if i := strings.Index(body, "{{"); i >= 0 {
+					end := strings.Index(body[i:], "}}")
+					if end < 0 {
+						end = len(body) - i
+					}
+					t.Errorf("%s keeps %s, which nothing substitutes",
+						name, body[i:i+end+2])
+				}
+			}
+		})
+	}
+}

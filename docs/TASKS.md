@@ -366,7 +366,19 @@ Fix the comment or the behavior it describes.
 
 # P2 — daily friction
 
-## T11. The interactive grant ignores the port it asked about  **[verified]**
+## T11. The interactive grant ignores the port it asked about  **[verified] [DONE]**
+
+Both grants — `[o]` for the run and `[p]` for the project file — now name
+the destination the question named. The destination is built with
+`net.JoinHostPort` rather than a format string, because it is granted and
+recorded now rather than only printed, and `::1:8080` is not something
+`netpolicy.Parse` can read back.
+
+The refusal is the one place that still names the bare host, deliberately:
+a deny rule matches the name whatever port follows it, so the refusal is as
+broad as the rule that caused it — and it is the key `Proxy.Refuse` records
+under, so a narrower one would not be found and the next attempt would wait
+out its timeout again.
 
 `internal/cli/prompt.go:106` grants `e.Host` — the bare hostname — after
 asking about `host:port`. A bare grant opens 80/443 only. So approving
@@ -374,23 +386,26 @@ asking about `host:port`. A bare grant opens 80/443 only. So approving
 request you approved keeps failing until it times out. Wrong in both
 directions, and invisible from the prompt.
 
-**Do:** grant `host:port` as asked. Check `netpolicy.Parse` accepts the
-form the prompt produces.
+## T12. Four of nine `dev agent` subcommands are not about agents  **[DONE]**
 
-**Acceptance:** a test that approving a non-standard port grants that port
-and not 80/443.
+`dev allow`, `dev revoke`, `dev grants` and `dev config` are the canonical
+spellings; the four under `dev agent` are hidden aliases that still work and
+say once, on stderr, which name to use now. Not through cobra's `Deprecated`
+field: that prints through the command's out writer, which is stdout here,
+and `dev agent config path` exists to be read by a script.
 
-## T12. Four of nine `dev agent` subcommands are not about agents
+`dev agent accept` stays where it is. The root already has an `accept` for
+the settings a project requests, and this one is for the egress it requests
+— two different decisions, and merging them would blur the line the trust
+model rests on. It looks inconsistent beside the four that moved, and it is
+the right split.
+
+Completions needed no change: they are generated from the tree, so the new
+root commands appear and the hidden aliases do not.
 
 `allow`, `revoke`, `grants` and `config` apply to plain runs too — a
 blocked `dev run` prints `dev agent allow HOST` (`workspace.go`), and plain
 runs consume those grants.
-
-**Do:** move them to the root (`dev allow`, `dev revoke`, `dev grants`),
-keep `dev agent` for agent-only verbs, and keep the old paths as hidden
-aliases so nothing breaks mid-transition. Update the hint text, the
-completions and every doc that names them (`docs/COMMANDS.md`,
-`docs/CONCEPTS.md`, `docs/USE-CASES.md`, `README.md`).
 
 ## T13. Small correctness  **[all verified] [DONE]**
 
@@ -422,11 +437,29 @@ with. Refusing says that; granting 443 would have looked like it worked.
   that name regardless of the actual remote. Derive the host from
   `git remote get-url origin`.
 
-## T14. `languages/README.md` is v1 documentation  **[verified]**
+## T14. `languages/README.md` is v1 documentation  **[verified] [DONE]**
 
-It documents `dev list`, `dev new python-3.13 --init` and `--devcontainer`,
-none of which exist in this tool. Rewrite it against the current plugin
-format, or delete it and point at `docs/`.
+Rewritten against what `internal/langs` actually reads, which turned up two
+things the old page had been covering for:
+
+- `languages/golang/go.mod` used `{{GO_VERSION}}`, a placeholder only v1's
+  bash substituted. `dev new golang` had been writing `go {{GO_VERSION}}`
+  into every new project — a go.mod that does not build.
+  `TestShippedPluginsUseOnlySubstitutedPlaceholders` now fails on any
+  plugin using a placeholder nothing substitutes.
+- `TestRealPluginsFromTheRepoLoad` pointed one directory too high, left over
+  from when the module lived in a subdirectory. A missing plugin directory
+  loads as an empty set rather than an error, so the guard had been skipping
+  itself silently — the one outcome a guard must not have.
+
+The page also states what the plugin format does NOT do, since that is where
+it was wrong before: a directory never matches as a detection marker, a
+version read from a project's own marker file is used whether declared or
+not, and `registries` widen egress for every run of a detected project with
+no grant and no prompt.
+
+It documented `dev list`, `dev new python-3.13 --init` and `--devcontainer`,
+none of which exist in this tool.
 
 ---
 
@@ -634,10 +667,10 @@ Done means all six of these are true at once:
 | T8 | the sidecar image builds with no repository present |
 | T9 | done — `dev run -c 'exit 7'` exits 7; a PTY workload killed by a signal does not report success |
 | T10 | done — `Close()` returns within a bounded time with an idle forwarded connection open |
-| T11 | approving `host:8080` grants 8080 and does not grant 80/443 |
-| T12 | `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |
+| T11 | done — approving `host:8080` grants 8080 and does not grant 80/443 |
+| T12 | done — `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |
 | T13 | done — each of the four is corrected, and `--egress-notify of` is rejected rather than silently accepted |
-| T14 | `languages/README.md` names no command or flag that does not exist |
+| T14 | done — `languages/README.md` names no command or flag that does not exist |
 | T15 | the CLI suite fails when any of T1–T5 is reverted |
 | T16 | `*.co.uk` is refused or warned about; an over-long QNAME under a wildcard grant is refused; a dial to 169.254.169.254 is refused unless a rule names it |
 | T17 | a flood of distinct denials does not grow memory without bound |
@@ -726,7 +759,7 @@ dev run -c 'exit 7'; echo $?        # want 7
 # T11
 dev run --egress-prompt ask --tty off -c 'curl -sS https://example.com:8080/'
 # approve with [p], then:
-dev agent grants                    # want example.com:8080, not example.com
+dev grants                          # want example.com:8080, not example.com
 ```
 
 Clean up after network experiments: `dev clean --all`.

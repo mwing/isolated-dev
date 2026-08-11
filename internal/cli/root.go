@@ -134,6 +134,14 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.AddCommand(newShellCmd(env))
 	root.AddCommand(newStatusCmd(env))
 	root.AddCommand(newAcceptCmd(env))
+	// Egress grants and the file that records them. They belong to the
+	// project, not to agents: a plain `dev run` consumes the same grants, so
+	// `dev agent allow` named the wrong owner. The old spellings survive as
+	// hidden aliases under `dev agent`.
+	root.AddCommand(newAllowCmd(env))
+	root.AddCommand(newRevokeCmd(env))
+	root.AddCommand(newGrantsCmd(env))
+	root.AddCommand(newConfigCmd(env))
 	root.AddCommand(newMigrateCmd(env))
 	root.AddCommand(newConsoleCmd(env))
 	root.AddCommand(newToolsCmd(env))

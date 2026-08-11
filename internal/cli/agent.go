@@ -34,11 +34,59 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentRunCmd(env))
 	cmd.AddCommand(newAgentLogoutCmd(env))
 	cmd.AddCommand(newAgentPolicyCmd(env))
-	cmd.AddCommand(newAgentAllowCmd(env))
-	cmd.AddCommand(newAgentRevokeCmd(env))
-	cmd.AddCommand(newAgentGrantsCmd(env))
-	cmd.AddCommand(newAgentConfigCmd(env))
+	// `accept` stays: it reviews the egress a project's .devenv.yaml
+	// requests on behalf of an agent, and the root already has an `accept`
+	// for the settings a project requests. Two different decisions, kept
+	// two commands.
 	cmd.AddCommand(newAgentAcceptCmd(env))
+
+	// Grants and configuration are not agent-only: a plain `dev run`
+	// consumes the same grants and reads the same file, so the canonical
+	// spellings live at the root. These are the paths people already have
+	// in scripts and shell history, kept working and out of the help.
+	cmd.AddCommand(moved(env, newAllowCmd(env), "dev agent allow", "dev allow"))
+	cmd.AddCommand(moved(env, newRevokeCmd(env), "dev agent revoke", "dev revoke"))
+	cmd.AddCommand(moved(env, newGrantsCmd(env), "dev agent grants", "dev grants"))
+	cmd.AddCommand(moved(env, newConfigCmd(env), "dev agent config", "dev config"))
+	return cmd
+}
+
+// moved marks a command as the old spelling of one that now lives elsewhere:
+// hidden from help, still working, and saying which name to use now.
+//
+// The note goes to stderr, never stdout: `dev agent config path` exists to
+// be read by a script, and a deprecation notice on its standard output would
+// break the thing this exists to avoid breaking. cobra's own Deprecated
+// field prints through the command's out writer, which is stdout here, so it
+// cannot be used for that reason.
+//
+// The alias is a separate command instance rather than the same pointer
+// under two parents: a cobra command has one parent, and sharing one would
+// re-parent it out of the tree it was added to first.
+func moved(env *Env, cmd *cobra.Command, from, to string) *cobra.Command {
+	cmd.Hidden = true
+	cmd.Long = fmt.Sprintf("`%s` is now `%s`. This spelling still works.\n\n", from, to) +
+		firstNonEmpty(cmd.Long, cmd.Short)
+
+	var mark func(*cobra.Command)
+	mark = func(c *cobra.Command) {
+		note := func() {
+			fmt.Fprintf(env.Stderr, "note: `%s` is now `%s`; the old spelling still works.\n",
+				from, to)
+		}
+		// Only the leaf that actually runs says it. A group command with no
+		// RunE prints usage, which already names the new spelling.
+		if run := c.RunE; run != nil {
+			c.RunE = func(cmd *cobra.Command, args []string) error {
+				note()
+				return run(cmd, args)
+			}
+		}
+		for _, sub := range c.Commands() {
+			mark(sub)
+		}
+	}
+	mark(cmd)
 	return cmd
 }
 
@@ -633,8 +681,8 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			fmt.Fprintf(env.Stderr, "  %s\n", line)
 		}
 		fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")
-		fmt.Fprintf(env.Stderr, "Allow from now:   dev agent allow HOST\n")
-		fmt.Fprintf(env.Stderr, "Edit the file:    dev agent config edit\n")
+		fmt.Fprintf(env.Stderr, "Allow from now:   dev allow HOST\n")
+		fmt.Fprintf(env.Stderr, "Edit the file:    dev config edit\n")
 		fmt.Fprintf(env.Stderr, "Later:            dev history\n")
 	}()
 

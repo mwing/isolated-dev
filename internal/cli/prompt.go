@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,7 +128,11 @@ func (p *prompter) Handle(ctx context.Context, e netpolicy.Event) {
 	}
 	dest := e.Host
 	if e.Port != 0 {
-		dest = fmt.Sprintf("%s:%d", e.Host, e.Port)
+		// JoinHostPort rather than Sprintf, because this string is granted
+		// and recorded now rather than only printed: an IPv6 literal needs
+		// its brackets, and "::1:8080" is not a destination
+		// netpolicy.Parse can read back.
+		dest = net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
 	}
 	if p.asked[dest] {
 		return
@@ -142,6 +148,11 @@ func (p *prompter) Handle(ctx context.Context, e netpolicy.Event) {
 	// than leaving it to wait out its timeout.
 	if verr := p.policy.CheckHost(dest); verr != nil {
 		fmt.Fprintf(p.env.Stderr, "\r\n  ⛔ blocked: %s\n     %v\n", dest, verr)
+		// The bare host, deliberately, where a grant names the port: a deny
+		// rule matches the name whatever port follows it, so the refusal is
+		// as broad as the rule that caused it. It is also the key the proxy
+		// records refusals under, so a narrower one would not be found and
+		// the next attempt would wait out its timeout again.
 		if err := p.side.Grant(ctx, "refuse", e.Host); err != nil {
 			fmt.Fprintf(p.env.Stderr, "     could not refuse it outright: %v\n", err)
 		}
@@ -152,19 +163,24 @@ func (p *prompter) Handle(ctx context.Context, e netpolicy.Event) {
 	fmt.Fprintf(p.env.Stderr, "     The request is waiting. Allow it?\n")
 	fmt.Fprintf(p.env.Stderr, "       [o] once   [p] this project, from now on   [n] no  ")
 
+	// Every grant below names dest, the destination the question named. It
+	// used to grant e.Host, the bare hostname, which was wrong in both
+	// directions: a bare rule opens 80 and 443, so approving evil.com:8080
+	// opened two ports nobody was asked about and left 8080 shut, and the
+	// request that prompted the question went on failing until it timed out.
 	switch p.readAnswer() {
 	case "o":
-		if err := p.side.Grant(ctx, "allow", e.Host); err != nil {
+		if err := p.side.Grant(ctx, "allow", dest); err != nil {
 			fmt.Fprintf(p.env.Stderr, "\n     could not allow: %v\n", err)
 			return
 		}
 		fmt.Fprintf(p.env.Stderr, "\n     allowed for this run\n")
 	case "p":
-		if err := p.side.Grant(ctx, "allow", e.Host); err != nil {
+		if err := p.side.Grant(ctx, "allow", dest); err != nil {
 			fmt.Fprintf(p.env.Stderr, "\n     could not allow: %v\n", err)
 			return
 		}
-		if _, err := p.store.Grant(p.store.Project, "default", []string{e.Host}); err != nil {
+		if _, err := p.store.Grant(p.store.Project, "default", []string{dest}); err != nil {
 			fmt.Fprintf(p.env.Stderr, "\n     allowed now, but not recorded: %v\n", err)
 			return
 		}

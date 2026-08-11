@@ -640,7 +640,7 @@ func TestAnOrdinaryFailureIsStillExitOne(t *testing.T) {
 
 // denyEvil is the smallest policy that matters here. `internal/policy`
 // documents itself as enforced at every route in; before this it was
-// reachable from `dev agent allow` and nowhere else.
+// reachable from the grant command and nowhere else.
 const denyEvil = "deny_hosts: [evil.example]\n"
 
 // requestEvil is a project asking for the destination the policy denies —
@@ -657,7 +657,10 @@ func TestPolicyDeniesAHostOnEveryRouteIn(t *testing.T) {
 		project string
 		args    []string
 	}{
-		{"dev agent allow", "", []string{"agent", "allow", "evil.example"}},
+		{"dev allow", "", []string{"allow", "evil.example"}},
+		// The old spelling is hidden, not weakened: an alias that skipped the
+		// policy would be the deny list's widest hole and the least visible.
+		{"dev agent allow, the hidden alias", "", []string{"agent", "allow", "evil.example"}},
 		{"a plain run's --allow-host", "",
 			[]string{"run", "--tty", "off", "--allow-host", "evil.example", "-c", "true"}},
 		{"an agent run's --allow-host", "",
@@ -845,6 +848,93 @@ func TestAnAgentRunHonorsRequiredLimits(t *testing.T) {
 	}
 }
 
+// sidecarFor builds a Sidecar pointed at the harness's fake daemon, for the
+// tests that drive a policy change into a run already in flight.
+func (h *harness) sidecarFor() *netpolicy.Sidecar {
+	return &netpolicy.Sidecar{
+		Engine:   container.New(h.env.driver(vmName)),
+		Topology: netpolicy.Topology{SidecarName: sidecarName},
+	}
+}
+
+func TestTheInteractiveGrantOpensThePortItAskedAbout(t *testing.T) {
+	// The prompt asks about host:port and used to grant the bare hostname,
+	// which is wrong in both directions: it opens 80 and 443, which nobody
+	// was asked about, and leaves the port that was approved shut, so the
+	// held request keeps failing until it times out. Neither is visible from
+	// the prompt, which says the destination was allowed.
+	h := newHarness(t)
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "this project, from now on" — the route that both tells the running
+	// sidecar and records the grant, so one answer covers both.
+	h.answer(t, "p\n")
+	pol, err := policy.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPrompter(h.env, h.sidecarFor(), store, h.paths.ProjectDir, pol)
+	p.Handle(context.Background(), netpolicy.Event{
+		Action: "pending", Host: "example.com", Port: 8080,
+	})
+
+	ops := h.controlOps()
+	if len(ops) != 1 || argv(ops[0]) != "allow example.com:8080" {
+		t.Fatalf("the running sidecar was told %q, want `allow example.com:8080`",
+			strings.Join(h.fake.Lines(), "\n"))
+	}
+
+	granted := store.Resolve("default").AllowHosts
+	if !contains(granted, "example.com:8080") {
+		t.Fatalf("recorded grants = %v, want the port that was approved", granted)
+	}
+	// The recorded form has to mean what the prompt asked, which is the
+	// allowlist's own question rather than a string comparison.
+	allow, err := netpolicy.Parse(granted)
+	if err != nil {
+		t.Fatalf("the prompt recorded something the allowlist cannot parse: %v", err)
+	}
+	if !allow.Allows("example.com", 8080) {
+		t.Errorf("the approved port is still closed: %v", granted)
+	}
+	for _, port := range []int{80, 443} {
+		if allow.Allows("example.com", port) {
+			t.Errorf("approving :8080 also opened :%d, which nobody was asked about", port)
+		}
+	}
+}
+
+func TestAGrantForOneRunAlsoNamesThePort(t *testing.T) {
+	// [o] tells the sidecar and records nothing. The destination it tells it
+	// about has the same reason to carry the port.
+	h := newHarness(t)
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.answer(t, "o\n")
+	pol, err := policy.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := newPrompter(h.env, h.sidecarFor(), store, h.paths.ProjectDir, pol)
+	p.Handle(context.Background(), netpolicy.Event{
+		Action: "pending", Host: "db.example.com", Port: 5432,
+	})
+
+	ops := h.controlOps()
+	if len(ops) != 1 || argv(ops[0]) != "allow db.example.com:5432" {
+		t.Fatalf("the running sidecar was told:\n%s", strings.Join(h.fake.Lines(), "\n"))
+	}
+	if got := store.Resolve("default").AllowHosts; len(got) != 0 {
+		t.Errorf("`once` recorded a grant: %v", got)
+	}
+}
+
 func TestTheInteractiveGrantRefusesADeniedHost(t *testing.T) {
 	// The prompt is the one place a user widens policy while a run is in
 	// flight, and it persists what it grants. Asking a question whose only
@@ -857,15 +947,7 @@ func TestTheInteractiveGrantRefusesADeniedHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Answer "this project, from now on" — the route that records a grant.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.WriteString("p\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = w.Close()
-	h.env.Stdin = r
+	h.answer(t, "p\n")
 
 	pol, err := policy.Load(t.TempDir())
 	if err != nil {
@@ -873,11 +955,7 @@ func TestTheInteractiveGrantRefusesADeniedHost(t *testing.T) {
 	}
 	pol.DenyHosts = []string{"evil.example"}
 
-	side := &netpolicy.Sidecar{
-		Engine:   container.New(h.env.driver(vmName)),
-		Topology: netpolicy.Topology{SidecarName: sidecarName},
-	}
-	p := newPrompter(h.env, side, store, h.paths.ProjectDir, pol)
+	p := newPrompter(h.env, h.sidecarFor(), store, h.paths.ProjectDir, pol)
 	p.Handle(context.Background(), netpolicy.Event{
 		Action: "pending", Host: "evil.example", Port: 443,
 	})

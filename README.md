@@ -72,7 +72,7 @@ a private copy of the repository; the changes come back through git when
 you approve them.
 
 **What happened is recorded.** `dev history` says what past runs reached
-and what was blocked; `dev agent grants` says which of your grants anything
+and what was blocked; `dev grants` says which of your grants anything
 still uses.
 
 ---

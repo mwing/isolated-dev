@@ -17,12 +17,12 @@ func loadPolicy(env *Env) (*policy.Policy, error) {
 }
 
 // checkHosts refuses destinations the policy denies, loading the policy for
-// the callers that have none in hand — `dev agent allow`, `dev agent
-// accept`, `dev agent policy` and `dev agent run`. The commands that
-// already hold one (the runs, the prompts) call CheckHost themselves.
+// the callers that have none in hand — `dev allow`, `dev agent accept`,
+// `dev agent policy` and `dev agent run`. The commands that already hold one
+// (the runs, the prompts) call CheckHost themselves.
 //
 // Every route that widens what a run may reach is checked one way or the
-// other. It used to be reachable from `dev agent allow` alone, while the
+// other. It used to be reachable from the grant command alone, while the
 // package doc claimed enforcement at every route in — a rule with one
 // polite entrance is not a rule, it is a suggestion with good manners.
 func checkHosts(env *Env, hosts []string) error {

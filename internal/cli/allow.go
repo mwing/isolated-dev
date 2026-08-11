@@ -22,7 +22,7 @@ func scopeOf(s *trust.Store, global bool) *trust.File {
 	return s.Project
 }
 
-func newAgentAllowCmd(env *Env) *cobra.Command {
+func newAllowCmd(env *Env) *cobra.Command {
 	var global bool
 	var agentName string
 
@@ -30,7 +30,9 @@ func newAgentAllowCmd(env *Env) *cobra.Command {
 		Use:   "allow <host>...",
 		Short: "Grant egress destinations for this project, persistently",
 		Long: "Records destinations so they need not be repeated as --allow-host\n" +
-			"on every run.\n\n" +
+			"on every run. It applies to every run of this project — a plain\n" +
+			"`dev run` consumes these grants exactly as an agent does, which is\n" +
+			"why this is not an agent subcommand.\n\n" +
 			"Grants are stored under ~/.dev-envs, keyed by project path, never\n" +
 			"inside the project. Configuration in a repository is configuration\n" +
 			"the repository can grant itself, so a clone could widen its own\n" +
@@ -77,7 +79,7 @@ func newAgentAllowCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
-func newAgentRevokeCmd(env *Env) *cobra.Command {
+func newRevokeCmd(env *Env) *cobra.Command {
 	var global bool
 	var agentName string
 
@@ -109,10 +111,14 @@ func newAgentRevokeCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
-func newAgentConfigCmd(env *Env) *cobra.Command {
+func newConfigCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Show or edit per-project agent configuration",
+		Short: "Show or edit this project's recorded configuration",
+		Long: "The file under ~/.dev-envs holding this project's grants and\n" +
+			"preferences. Its per-agent sections apply to agent runs; the\n" +
+			"\"default\" section applies to every run of the project, plain ones\n" +
+			"included.",
 	}
 	cmd.AddCommand(newConfigEditCmd(env))
 	cmd.AddCommand(newConfigShowCmd(env))
@@ -127,7 +133,7 @@ func newConfigEditCmd(env *Env) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "edit [agent]",
-		Short: "Open this project's agent configuration in $EDITOR",
+		Short: "Open this project's configuration in $EDITOR",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 1 {

@@ -1,3 +1,3 @@
 module {{PROJECT_NAME}}
 
-go {{GO_VERSION}}
+go {{VERSION}}

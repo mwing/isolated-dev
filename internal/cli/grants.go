@@ -21,7 +21,7 @@ type grantUse struct {
 	Count int
 }
 
-func newAgentGrantsCmd(env *Env) *cobra.Command {
+func newGrantsCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "grants",
 		Short: "Egress destinations granted for this project, and whether they are used",
@@ -37,7 +37,7 @@ func newAgentGrantsCmd(env *Env) *cobra.Command {
 			return showGrants(env)
 		},
 	}
-	cmd.AddCommand(newAgentPruneCmd(env))
+	cmd.AddCommand(newPruneCmd(env))
 	return cmd
 }
 
@@ -130,12 +130,12 @@ func showGrants(env *Env) error {
 			"a grant is unused.")
 	case unused > 0:
 		fmt.Fprintf(env.Stdout, "%d grant(s) marked ? were never reached in those runs: "+
-			"`dev agent grants prune` to review them.\n", unused)
+			"`dev grants prune` to review them.\n", unused)
 	}
 	return nil
 }
 
-func newAgentPruneCmd(env *Env) *cobra.Command {
+func newPruneCmd(env *Env) *cobra.Command {
 	var apply bool
 	var minRuns int
 
@@ -145,9 +145,9 @@ func newAgentPruneCmd(env *Env) *cobra.Command {
 		Long: "Lists grants no recorded run ever reached, and with --apply removes\n" +
 			"them.\n\n" +
 			"It refuses to act on a thin history, because 'never used' derived\n" +
-			"from three runs is not a finding. Removing a grant is cheap to\n" +
-			"undo — `dev agent allow` puts it back — but a tool that quietly\n" +
-			"narrows access on weak evidence teaches people to distrust it.",
+			"from three runs is not a finding. Removing a grant is cheap to undo\n" +
+			"— `dev allow` puts it back — but a tool that quietly narrows access\n" +
+			"on weak evidence teaches people to distrust it.",
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			grants, runs, store, err := collectGrants(env)
@@ -191,7 +191,7 @@ func newAgentPruneCmd(env *Env) *cobra.Command {
 				}
 			}
 			fmt.Fprintf(env.Stdout, "\nRemoved %d grant(s). "+
-				"`dev agent allow HOST` puts any of them back.\n", len(stale))
+				"`dev allow HOST` puts any of them back.\n", len(stale))
 			return nil
 		},
 	}
