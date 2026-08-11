@@ -22,6 +22,17 @@ import (
 // Inbound is not subject to the egress allowlist. The allowlist answers
 // "what may this workload reach"; a published port answers "what may reach
 // this workload", and the user answered that by asking for the port.
+const (
+	// forwardDialTimeout bounds reaching the workload. It is on the same
+	// host: it answers immediately or it is not listening.
+	forwardDialTimeout = 10 * time.Second
+	// defaultForwardIdle is long because a published port carries
+	// websockets, debugger sessions and long polls that are legitimately
+	// silent. This bounds a wedged connection without touching a working
+	// one, which is why the proxy's ten minutes would be wrong here.
+	defaultForwardIdle = time.Hour
+)
+
 type Forward struct {
 	// ListenPort is the port the sidecar listens on, published to the host.
 	ListenPort int
@@ -29,6 +40,9 @@ type Forward struct {
 	// by container name through docker's embedded DNS.
 	TargetHost string
 	TargetPort int
+	// IdleTimeout closes a forwarded connection that has gone quiet in both
+	// directions. Zero uses defaultForwardIdle.
+	IdleTimeout time.Duration
 
 	ln        net.Listener
 	wg        sync.WaitGroup
@@ -115,7 +129,11 @@ func (f *Forward) handle(client net.Conn) {
 	// forward is raw TCP, so an immediate close is the whole vocabulary.
 	// The comment here used to claim the client was told; it was not, and
 	// could not be.
-	upstream, err := net.Dial("tcp", target)
+	// A dial with no timeout waits on the operating system's, which is
+	// minutes. The target is a container on the same host: it answers at
+	// once or it is not listening, and holding the accepted connection
+	// meanwhile tells the developer nothing while looking like a hang.
+	upstream, err := net.DialTimeout("tcp", target, forwardDialTimeout)
 	if err != nil {
 		return
 	}
@@ -126,18 +144,33 @@ func (f *Forward) handle(client net.Conn) {
 		return
 	}
 
+	// An idle timer, refreshed by traffic in either direction, exactly as
+	// the proxy relay does it.
+	//
+	// Deliberately generous, and generous for a different reason than the
+	// proxy's: a published port carries websockets, debugger sessions and
+	// long polls that are legitimately silent for a long time. A blanket
+	// deadline would kill precisely the traffic port forwarding exists for,
+	// which is why the earlier pass left this alone. An hour bounds a
+	// wedged connection without touching a working one.
+	idle := f.IdleTimeout
+	if idle == 0 {
+		idle = defaultForwardIdle
+	}
+	keepalive := newIdleTimer(idle, client, upstream)
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(upstream, client)
+		_, _ = io.Copy(upstream, keepalive.reader(client))
 		if c, ok := upstream.(*net.TCPConn); ok {
 			_ = c.CloseWrite()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = io.Copy(client, upstream)
+		_, _ = io.Copy(client, keepalive.reader(upstream))
 		if c, ok := client.(*net.TCPConn); ok {
 			_ = c.CloseWrite()
 		}

@@ -122,7 +122,7 @@ Key design decisions:
 
 ### 4.1 Trust levels
 
-**What the binary actually does, as of the T4 work in `docs/TASKS.md`:**
+**What the binary actually does:**
 there are no three named levels in the code, and there is no `dev trust`
 command. What exists is the untrusted column plus a per-setting acceptance:
 `mount_git_config`, `mount_docker_socket` and `pass_env_vars` are honored
@@ -245,9 +245,20 @@ Egress control is enforced by network topology, not by environment variables:
 - DNS resolves only through the proxy's resolver on the internal network,
   so name resolution cannot be used as a side channel to bypass hostname
   checks, and raw-IP connections fail for lack of a route. The resolver
-  *allowlists*, it does not merely forward: non-allowlisted names get
-  NXDOMAIN and are logged alongside denied connections. Forwarding without
-  filtering would leave DNS tunnelling wide open. (With CONNECT proxying the
+  *allowlists*, it does not merely forward: non-allowlisted names are
+  REFUSED — not NXDOMAIN, which asserts a name does not exist — and are
+  logged alongside denied connections. Forwarding without filtering would
+  leave DNS tunnelling wide open.
+
+  **A wildcard grant reopens part of it, and this is not fully closed.**
+  With `*.example.com` allowed, `<payload>.example.com` is a permitted
+  name whose *query* carries data out; no answer is needed. Both the
+  resolver and the CONNECT path refuse names whose shape suggests
+  encoding — over-long, deeply nested, or long-labelled — which raises the
+  cost and lowers the bandwidth. It does not close the channel: chunked,
+  low-volume encoding inside ordinary-looking names still passes, by
+  design, because the alternative refuses names real services use. Treat
+  DNS exfiltration under a wildcard grant as slowed, not prevented. (With CONNECT proxying the
   client does not strictly need working DNS at all — the proxy resolves — so
   a filtering resolver is a compatibility affordance, not a requirement.)
 - The proxy has no runtime control plane reachable from the internal
@@ -271,7 +282,16 @@ Egress control is enforced by network topology, not by environment variables:
   no name to check, and a ClientHello carrying no SNI reaches whatever the
   dialled host serves by default, which is the host already approved. A
   handshake record that cannot be read is refused rather than passed,
-  because fragmenting the ClientHello is how a check like this is evaded.
+  because fragmenting the ClientHello is how a check like this is evaded —
+  including across two TLS records, which is legal, reassembles perfectly
+  at the far end, and is chosen by the client.
+
+  **Known limitation: Encrypted Client Hello.** Where a client uses ECH,
+  the visible SNI is the ECH public name rather than the destination, so it
+  will not match the CONNECT target and the connection is refused. That is
+  the safe direction — a name this proxy cannot read is not one it can
+  vouch for — but it means ECH clients cannot use a filtered run until
+  this is handled deliberately.
 - `HTTP(S)_PROXY`/`NO_PROXY` are injected as a convenience for well-behaved
   clients (npm, pip, git, curl, the agent CLIs); they are not the security
   boundary.

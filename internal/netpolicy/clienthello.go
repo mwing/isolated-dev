@@ -41,6 +41,45 @@ type clientHello struct {
 	// gap: a session with no SNI reaches whatever the dialled host serves by
 	// default, and that host is the one the allowlist already approved.
 	ServerName string
+	// Readable distinguishes "this hello carried no SNI" from "this hello
+	// could not be read", which look identical in ServerName and are
+	// opposite decisions.
+	//
+	// A client controls its own TLS stack: splitting the ClientHello across
+	// two TLS records makes it unparseable here while the far end
+	// reassembles it perfectly. Treating that as "no SNI" — as the first
+	// version of this check did — hands back the whole domain-fronting
+	// bypass, because the attacker chooses the fragmentation.
+	Readable bool
+}
+
+// verifySNI is the decision the proxy applies to every relayed connection,
+// as a named function rather than a closure written at the call site.
+//
+// It is named because the first version of this check was a closure in
+// proxy.go while the test proving it supplied a different closure of its
+// own — and the two disagreed on the branch that mattered, so the suite was
+// green over a bypass. A security-critical branch has to be reachable by
+// the test that claims to cover it.
+func verifySNI(target string) func(clientHello) error {
+	return func(h clientHello) error {
+		switch {
+		case !h.TLS:
+			// Nothing here names a destination. The CONNECT authority,
+			// already checked, is the whole decision.
+			return nil
+		case !h.Readable:
+			// Could not be read, which is not the same as carrying no name.
+			return &sniMismatch{Target: target}
+		case h.ServerName == "":
+			// Genuinely no SNI: the far end serves whatever it serves by
+			// default, and that host is the one already approved.
+			return nil
+		case sameServerName(h.ServerName, target):
+			return nil
+		}
+		return &sniMismatch{Target: target, SNI: h.ServerName}
+	}
 }
 
 // sniMismatch is the verdict that stops a relay. It is an error so it can
@@ -133,14 +172,15 @@ func (s *sniffer) inspect() {
 	}
 	name, ok := parseClientHello(b[5 : 5+length])
 	if !ok {
-		// A handshake record that holds no readable ClientHello is a name
-		// that cannot be checked. Splitting a ClientHello across records is
-		// a known way past filters that check it, so this is a refusal
-		// rather than a pass.
+		// A handshake record holding no readable ClientHello is a name that
+		// cannot be checked — most obviously because the hello was split
+		// across two TLS records, which a client chooses freely and the far
+		// end reassembles without trouble. Readable stays false so the
+		// caller refuses it; reporting it as "no SNI" returns the bypass.
 		s.settle(clientHello{TLS: true})
 		return
 	}
-	s.settle(clientHello{TLS: true, ServerName: name})
+	s.settle(clientHello{TLS: true, ServerName: name, Readable: true})
 }
 
 func (s *sniffer) settle(h clientHello) {

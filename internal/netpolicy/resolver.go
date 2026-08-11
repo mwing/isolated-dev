@@ -116,7 +116,22 @@ func (r *Resolver) deny(name string) {
 	if r.denials == nil {
 		r.denials = map[string]int{}
 	}
-	r.denials[name]++
+	// Bounded like the proxy's tally, and for the same reason: the key is a
+	// name the workload chose, so a client spraying random names grows this
+	// for the life of the run. This one was missed when the others were
+	// capped, which is the whole argument for the overflow key — a map that
+	// silently stops counting reports the wrong thing, and one that never
+	// stops is the failure being prevented.
+	switch {
+	case len(r.denials) < maxTrackedDestinations:
+		r.denials[name]++
+	default:
+		if _, known := r.denials[name]; known {
+			r.denials[name]++
+		} else {
+			r.denials[overflowKey]++
+		}
+	}
 	r.mu.Unlock()
 	r.emit(Event{Action: "deny", Host: name, Method: "DNS", Reason: "not in allowlist"})
 }

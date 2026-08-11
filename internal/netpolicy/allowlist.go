@@ -76,6 +76,14 @@ func parseEntry(entry string) (Rule, error) {
 		host, ports = h, []int{port}
 	}
 
+	// Before the wildcard branch, not after it: the branch returns, so a
+	// check placed below it never saw `*.<non-ascii>` at all — and a
+	// homoglyph in a wildcard's parent is worse than in an exact host,
+	// since it admits every name beneath it.
+	if err := checkASCIIHost(strings.TrimPrefix(host, "*.")); err != nil {
+		return Rule{}, fmt.Errorf("netpolicy: %w", err)
+	}
+
 	if strings.HasPrefix(host, "*.") {
 		parent := strings.TrimPrefix(host, "*.")
 		if parent == "" {
@@ -99,9 +107,6 @@ func parseEntry(entry string) (Rule, error) {
 
 	if host == "" || strings.ContainsAny(host, "*/ ") {
 		return Rule{}, fmt.Errorf("netpolicy: %q: not a valid host", entry)
-	}
-	if err := checkASCIIHost(host); err != nil {
-		return Rule{}, fmt.Errorf("netpolicy: %w", err)
 	}
 	return Rule{Host: normalizeHost(host), Ports: ports}, nil
 }
@@ -219,6 +224,32 @@ func (r Rule) String() string {
 
 // Empty reports whether the allowlist permits nothing at all.
 func (a *Allowlist) Empty() bool { return a == nil || len(a.rules) == 0 }
+
+// matchedByWildcard reports whether a name is permitted only because a
+// wildcard rule covers it, rather than by a rule naming it exactly.
+//
+// The distinction decides whether the name's shape is the user's choice or
+// the workload's: an exact grant is a destination someone chose, a wildcard
+// admits names nobody has seen.
+func (a *Allowlist) matchedByWildcard(host string) bool {
+	if a == nil {
+		return false
+	}
+	h := normalizeHost(host)
+	var wild bool
+	for _, r := range a.rules {
+		if r.IP != nil {
+			continue
+		}
+		if !r.Wildcard && h == r.Host {
+			return false
+		}
+		if r.Wildcard && strings.HasSuffix(h, "."+r.Host) {
+			wild = true
+		}
+	}
+	return wild
+}
 
 // AllowsIP reports whether a rule names this address literally.
 //

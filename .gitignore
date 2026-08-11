@@ -7,4 +7,5 @@ dist/
 # Session artifacts, not project files.
 log.txt
 *.patch
+review*.txt
 /install

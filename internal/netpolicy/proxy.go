@@ -146,6 +146,28 @@ func (p *Proxy) dial(ctx context.Context, addr string) (net.Conn, error) {
 	return d.DialContext(ctx, "tcp", addr)
 }
 
+// exfilShape applies the resolver's name-shape limits to a destination the
+// workload asked to connect to, and reports why it was refused.
+//
+// The resolver checked these and this path did not, which left the primary
+// channel open: under a `*.example.com` grant, CONNECT
+// <payload>.example.com:443 resolves through the system resolver with no
+// shape check at all, and the name has delivered its content before any
+// answer comes back. Filtering one of two doors is filtering neither.
+//
+// Only names under a wildcard rule are checked. An exact grant names a
+// destination the user chose, and its shape is not theirs to justify.
+func (p *Proxy) exfilShape(host string) string {
+	if net.ParseIP(host) != nil {
+		return ""
+	}
+	a := p.Allowlist()
+	if a == nil || !a.matchedByWildcard(host) {
+		return ""
+	}
+	return suspiciousQuery(normalizeHost(host))
+}
+
 // permitAddress refuses to connect to the infrastructure around the
 // sandbox, whatever name resolved to it.
 //
@@ -313,6 +335,11 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if why := p.exfilShape(host); why != "" {
+		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method, Reason: why})
+		denyResponse(w, host, port)
+		return
+	}
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -355,19 +382,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Checking the CONNECT authority alone leaves the connection to an
 	// allowed front open to being steered elsewhere by SNI, which is the one
 	// bypass a per-host policy on a CDN cannot otherwise see.
-	src := &sniffer{src: buf, verify: func(h clientHello) error {
-		switch {
-		case !h.TLS:
-			return nil
-		case h.ServerName == "":
-			// No SNI: the far end serves whatever it serves by default, and
-			// that host is the one already approved.
-			return nil
-		case sameServerName(h.ServerName, host):
-			return nil
-		}
-		return &sniMismatch{Target: host, SNI: h.ServerName}
-	}}
+	src := &sniffer{src: buf, verify: verifySNI(host)}
 
 	start := p.now()
 	n, verdict := relay(client, src, buf, upstream, p.IdleTimeout)
