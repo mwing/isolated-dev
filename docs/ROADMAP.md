@@ -4,9 +4,12 @@ Status: shipped. The Go tool is `dev`; the bash tool it replaced is `dev1`,
 kept in [v1/](../v1/).
 Owner: @mwing
 
-This began as a proposal and is now partly a record. Sections 1–4 are the
-design and still describe the tool as built; section 5 is the milestone
-plan with what actually happened; section 9 is what is left.
+This began as a proposal and is now the design document. Sections 1–4
+describe the tool as built and are what the code's `ROADMAP 4.x` comments
+point at. Section 7 is the retrospective.
+
+It holds no task list. Open work is in [BACKLOG.md](BACKLOG.md), in one
+place, so the two cannot disagree about what is left.
 
 **If you are here to use the tool rather than to understand its design,
 start with [../README.md](../README.md).**
@@ -31,13 +34,20 @@ Three principles follow from that:
    common grants at the moment they are needed ("git push failed: enable
    ssh agent forwarding for this project? dev trust ssh"), never silently
    apply them.
-3. **Trust is per project and revocable.** Access grants attach to a project
-   (identified by path + config hash), are stored outside the project tree,
-   are visible (`dev trust list`), and are revoked in one command.
+3. **Trust is per project and revocable.** Access grants attach to a project,
+   are stored outside the project tree, are visible, and are revoked in one
+   command.
 
-v2 is a rewrite in Go. The bash v1 remains functional during the transition;
-v1 gets bug fixes only, no new features. The CLI contract may change freely
-in v2 (breaking changes are acceptable and expected).
+   As built: `dev grants` lists them with the last time anything used each
+   one, `dev revoke` removes one, and `dev grants prune` offers back the
+   entries no recorded run has reached. The identifier is the project's
+   path — not a fingerprint of the repository, which cannot be had honestly
+   (4.2.1).
+
+The bash v1 remains functional and gets bug fixes only. The CLI contract
+may change freely (breaking changes are acceptable and expected), which two
+releases have already used: agents clone by default, and a repository's own
+Dockerfile is not built until it is accepted.
 
 ## 2. Why Go
 
@@ -75,29 +85,41 @@ central operation is assembling an argv cannot keep relitigating whether a
 value with a space survives. `RunSpec` plus typed argv makes those bugs
 unrepresentable; that is worth a rewrite in a way that "Go is nicer" is not.
 
-The honest cost of choosing this path is that the egress proxy and trust
-store, which users want now, arrive after M0 and M1 instead of next month.
-If that trade stops looking correct — if M1 slips badly — backporting the
-sidecar to v1 is the fallback, and it is a real one.
+The honest cost of choosing this path was that the egress proxy and trust
+store arrived after the skeleton and agent mode rather than next month. The
+fallback, if that had slipped, was backporting the sidecar to bash. It was
+not needed, and the bet paid: the argv defect class has not recurred once,
+and every bug found since has been in glue or in judgement — never in
+whether a value with a space survived.
 
 ## 3. Architecture
 
 ```
 cmd/dev/                 main, cobra command tree
-internal/config/         schema, defaults, layering (flags > env > project > global), validation
-internal/trust/          per-project trust store, TOFU hashing, grant/revoke
+cmd/dev-proxy/           the egress sidecar's own binary
+assets.go                the plugins and the sidecar's source, embedded
+internal/cli/            the commands; the glue layer
+internal/config/         schema, defaults, layering (flags > env > project > global), provenance
+internal/trust/          per-project grants, acceptances, tools
+internal/policy/         the rules that bind the user, not just projects
 internal/backend/        Backend interface + drivers
-    orbstack/            v1 behavior: orb -m <vm> docker ...
-    docker/              plain docker CLI/socket (Linux, Docker Desktop, colima)
-internal/runner/         exec wrapper; every external command goes through here (mockable, logged with --verbose)
-internal/container/      run/build/clean/shell; assembles docker args from a RunSpec struct
-internal/netpolicy/      egress proxy sidecar lifecycle, allowlists, internal networks
-internal/agent/          agent registry, agent volumes, agent run orchestration
-internal/langs/          language plugin loading (same on-disk format as v1: languages/<lang>/)
+    orbstack/            orb -m <vm> docker ...
+    docker/              plain docker CLI (Linux, Docker Desktop, colima)
+internal/runner/         exec wrapper; every external command goes through here
+internal/container/      RunSpec and its rendering; build, run, exec, networks
+internal/netpolicy/      proxy, filtering resolver, ClientHello inspection, sidecar lifecycle
+internal/agent/          agent registry, volumes, run spec
+internal/clone/          private copies of a repository
+internal/history/        what each run reached, recorded per project
+internal/console/        the full-screen view and its terminal emulation
+internal/wizard/         the guided front door
+internal/langs/          language plugin loading (same on-disk format as v1)
 internal/detect/         project type, version, port detection
-internal/scaffold/       dev new, scaffolding, devcontainer.json generation
+internal/devcontainer/   devcontainer.json, read and written
+internal/scaffold/       dev new
 internal/scan/           trivy/grype integration with real exit codes
-internal/ui/             prompts, confirmations, --yes handling, output formatting
+internal/project/        detection results assembled into what a run needs
+internal/ui/             output formatting
 ```
 
 Key design decisions:
@@ -408,338 +430,15 @@ denied, AWS SDK credential error), it prints the one-line grant command that
 would fix it and what that grant exposes. Friction lives at the moment of
 need, with an informed decision, instead of being removed in advance.
 
-## 5. Milestone plan
+## 5. What was built, and where the work now lives
 
-Agent mode ships first. It forces the new foundations (egress proxy, named
-volumes, trust store, backend abstraction) to exist, and those primitives are
-exactly what the rest of the tool then reuses. Porting the crud commands
-first would delay the only genuinely new capability.
+The milestone plan that used to occupy this section is gone: every
+milestone shipped, and a list of finished work reads as a list of pending
+work to anyone who did not watch it finish. What each milestone produced is
+described above, in the architecture and security model it produced.
 
-### M0: Skeleton — done
-
-- Repo layout under `go/` (or a `v2` branch), cobra CLI, goreleaser config,
-  CI matrix (macOS + Linux, go test, golangci-lint, govulncheck).
-- `internal/runner` with fake for tests; `internal/config` reading the v1
-  YAML files (schema-compatible where keys survive).
-- `dev version`, `dev doctor` (checks orb/docker presence, VM state; ports
-  the v1 `debug` checks).
-
-Exit criteria: binary builds on both platforms in CI, doctor works against a
-real OrbStack.
-
-Status: implemented on the `v2-go-rewrite` branch under `go/`. `runner`
-(with fake), `config` (layering, provenance, grant extraction, dead-key
-reporting), `backend` + orbstack probe, `version`, `doctor`, CI matrix,
-goreleaser. `doctor` verified against a live OrbStack VM.
-
-### M1: Agent mode — done
-
-- `dev agent claude`, `dev agent codex`, `dev agent list`.
-- Agent plugin format: `agents/<name>/agent.yaml` (install steps, binary,
-  default allowlist hosts, config dir path inside home).
-- Image overlay: project image + agent layer built on demand (project
-  Dockerfile untouched).
-- **Egress proxy sidecar** (`internal/netpolicy`), implementing section 4.3
-  exactly: internal network with no route out, dual-homed SNI-allowlisting
-  proxy (LLM API + language registries + git hosts), proxy-only DNS, no TLS
-  interception, denied-connection log surfaced at exit.
-- **Agent home volumes**: named volume per agent (configurable per-project),
-  OAuth login persists across runs; `dev agent logout <name>` removes it.
-- **Live egress notices**: blocked destinations are surfaced the moment
-  they happen, not only in the exit summary. A denial mid-run is
-  actionable — the user can decide whether to allow it — but only while it
-  is still happening. Repeats of the same destination are counted and
-  suppressed rather than printed: a retrying client emits hundreds of
-  identical denials per second, and a notifier that prints all of them is
-  one the user switches off, at which point it protects nobody.
-- Auth modes: `volume` (default) and `env` (API key by name, for CI).
-- Agent runs are always `untrusted` level + allowlist regardless of project
-  trust; `--allow-host` adds destinations per run.
-- Safe YOLO: agents launched with their auto-approve flags inside the sandbox.
-- **Git-write story (explicit default)**: agents can commit inside the
-  container (identity-only gitconfig) but cannot push; the human reviews the
-  diff and pushes from the host. This is a feature, not a gap: it is the
-  review boundary. An optional `dev agent --allow-push` grant exists for
-  workflows that want it — it adds the git host to the allowlist and
-  forwards the ssh agent socket (preferred: the key itself never enters the
-  container and the grant dies with the agent), falling back to a
-  repo-scoped token by name where ssh is not an option. Never on by default,
-  and the confirmation states plainly that the run no longer satisfies
-  section 4.4's untrusted-default posture.
-- **Agent versioning**: agent CLIs ship on their own weekly-ish cadence, so
-  `agents/<name>/agent.yaml` pins a version and the overlay layer is keyed
-  by it; `dev agent update <name>` re-resolves deliberately. Unpinned
-  "latest" would silently change what runs inside the sandbox between runs.
-
-Exit criteria: Claude Code and Codex both complete a real task in a sample
-repo with egress logging showing only allowlisted hosts; credentials
-demonstrably absent from the container when not granted.
-
-Status (in progress on `v2-go-rewrite`): the sandbox and its enforcement
-are built and verified against a real OrbStack daemon — allowlist, CONNECT
-proxy with no TLS interception, filtering resolver, internal-network
-topology, agent registry, overlay images, home volumes, live notices.
-`dev agent run claude` runs Claude Code in the sandbox today. Verified in
-the live container: uid 1000 (not root), no host credentials present, an
-allowlisted API reachable, a non-allowlisted host blocked and reported.
-
-Interactive sessions confirmed working from a real terminal: the TTY
-survives `orb -m <vm> sudo docker`, the login persists in the named volume
-across runs, and a normal session completes with no egress denials — the
-tightened default allowlist covers ordinary use rather than merely being
-strict.
-
-`--allow-push` is implemented as ssh-agent forwarding: the socket only,
-never a key file, so nothing exfiltratable enters the container and
-revoking the grant is killing the agent rather than rotating a credential.
-Two things this surfaced that the design had not accounted for:
-
-- The socket arrives group-owned by whatever the host's file sharing
-  decided, so the container could not open it. Fixed with a supplementary
-  group discovered from inside a container, rather than by changing the uid
-  the container runs as — that would hand it the host user's identity.
-- ssh does not speak HTTP proxying, and the workload has no other route
-  out, so a forwarded agent alone produced "network unreachable". ssh is
-  now routed through the same CONNECT proxy, which means git is subject to
-  the allowlist like everything else: the project's own origin host works
-  under the grant — read from `git remote get-url origin`, on the port that
-  remote names — and every other host is blocked and reported. Punching a
-  hole for ssh instead
-  would have been invisible to the policy, since traffic that never reaches
-  the proxy is never reported as blocked.
-
-An agent completed a real task in the sandbox (deterministic egress
-summary, doctor sidecar check) with no egress denials during the session.
-
-Remaining before the milestone closes: Codex exercised end to end. Only
-Claude has been; `--auth env` exists for orgs that disable device-code
-login, but it has not been run against a live key.
-
-### M2: Core loop parity — done
-
-Scope honesty up front: this is the largest milestone, bigger than M0+M1
-combined. v1 is ~4k lines of bash plus 8 language plugins, interactive mode,
-scaffolding, and devcontainer generation. Two rules keep it from stranding
-the project in a permanent dev/dev split:
-
-1. Every v1 command gets an explicit decision recorded in
-   docs/PARITY.md — keep, redesign, drop or defer, each with a reason. No
-   vague "core loop works", and equally no obligation to reproduce
-   something merely because v1 had it.
-2. dev may DELEGATE long-tail commands to a vendored copy of the v1 scripts
-   during the transition, so cutover is gated on the security-relevant path
-   (run, shell, build, trust, egress), not on the least interesting code.
-   The vendored scripts ship inside the release artifact with checksums;
-   they are an implementation detail, not a parallel install.
-
-   **Bright line: a delegated command may never start a container.**
-   Delegation is permitted for commands that only read state or write files
-   — `templates update/stats/prune`, scaffolding, completions. It is
-   forbidden for anything that runs a workload, because a delegated workload
-   would run under v1 semantics (no trust store, no egress policy, image's
-   `USER` instead of `--user`) while the docs describe the v2 model. Note
-   that this puts `interactive` on the port-or-drop side of the line: it
-   launches containers.
-
-Work items:
-
-- `run`, `shell`, `build`, `clean`, `new`, `list`, `config`, `devcontainer`
-  ported onto RunSpec + Backend. `-c` command pass-through. Port/language
-  detection ported from v1 semantics.
-- Trust store + TOFU (section 4.2) wired into `run`/`shell`.
-- ssh-agent forwarding replaces key-file mounts.
-- The egress proxy from M1 becomes available to normal runs:
-  `network: allowlist|open|none` per project, `--offline` flag.
-- v1 config migration: `dev migrate` reads `~/.dev-envs/config.yaml`,
-  writes v2 config, reports dropped/renamed keys (v1 stopped emitting the
-  never-implemented keys in the pre-rewrite fix PR, so the stray-key
-  population is frozen at whatever users already have).
-
-Exit criteria: v2 is the tool the maintainer reaches for, with every v1
-capability present, deliberately redesigned, or dropped with a reason
-recorded in docs/PARITY.md; v1 marked maintenance-only in README.
-
-Note on framing: this milestone was originally specified as parity with a
-command-by-command checklist. That was the wrong target. v1 is a
-prototype, and parity would have forced v2 to reproduce behavior that was
-never good while making a deliberate removal look like a regression. The
-checklist survives as a disposition record — keep, redesign, drop, defer —
-rather than as a list of boxes that must all be ticked.
-
-### M3: Multi-backend + supply chain — partly done
-
-- Plain docker backend (Linux, colima, Docker Desktop); backend auto-detect
-  with config override.
-- Digest pinning: done, as `dev pin`. It resolves every image the
-  Dockerfile builds FROM and records the digests in the project file
-  rather than rewriting the Dockerfile — a language template is shared by
-  every project using that language, so the pin belongs to the project.
-  `dev pin --update` re-resolves deliberately, and `dev build` reports
-  what is still unpinned so the gap is visible rather than assumed.
-  This is the answer to 4.3.1: egress control governs a running container,
-  and pinning governs what a build fetches.
-- `dev scan`: done. Runs trivy and grype against the image the project
-  actually runs, including its tools layer, and exits non-zero at or above
-  a threshold so CI can gate on it. A scanner that cannot run is a
-  failure, not a pass: "no findings" and "no scan" are different answers.
-  SBOM emission is still open.
-- Signed releases: goreleaser + cosign, checksums in release notes,
-  brew tap. Deferred until there is a release to sign — signing is a
-  release-time concern and building it early means maintaining it before
-  it protects anyone.
-
-### M3.1: Requested during dogfooding — done
-
-**Shell completions.** Done. `dev completion install` writes the script
-where the shell will find it, since printing a script is not installing
-it, and --image completes to a short curated list. Original note follows.
-
-v1 shipped bash and zsh completions and v2 had
-none. cobra generates most of it, but the valuable part is completing
-`--image` with a short curated list — the general language images and a
-slim debian — because the sandboxing case starts with someone who does not
-yet know which image to name. A completion that offers every image on the
-daemon would be noise; a completion that offers the five sensible starting
-points is a teaching device.
-
-**`dev update`.** Done. Original note follows.
-
-Rebuild the project image with its packages upgraded to
-current patched versions, and record what changed. Pinning fixes what a
-build fetches, which is the right default and also means a pinned project
-stops receiving security updates silently — the two features are the same
-trade seen from opposite ends, so `update` should re-resolve the pin and
-report the move rather than quietly floating.
-
-The logging matters as much as the upgrade: "these packages moved, this
-base image moved" is the record that makes a pinned project safe to leave
-pinned.
-
-### M4: Team features — done
-
-- Policy file: done. `~/.dev-envs/policy.yaml` restricts network modes,
-  forbids settings outright, denies egress destinations, floors the scan
-  threshold, restricts registries and imposes resource limits. It is
-  enforced at every route in — a flag, a project request, an acceptance
-  already recorded, a user's own grant — because a rule with one polite
-  entrance is not a rule.
-
-  What "every route in" is, concretely, since the claim was written before
-  it was true: `--allow-host` on `run`, `shell`, `console`, `agent run` and
-  `agent policy`; `dev allow`; `dev accept` and `dev agent accept`; the
-  blocking prompt and the console's dialog, both of which grant while a run
-  is in flight; and `dev agent run`, which was reached by none of it — the
-  runs with the most reason to be constrained were the ones the policy did
-  not bind. Each of those refuses. The assembled allowlist is then filtered
-  once more on the way to the sidecar, because the trust file can be edited
-  by hand and a grant recorded before a rule must not outlive it; a
-  destination dropped there is named on stderr rather than vanishing.
-
-  Stated in the package doc rather than left implied: it is not a defense
-  against the machine's owner, who can edit the file. It closes the unsafe
-  paths for people who are not attacking their own laptop and makes an
-  override deliberate. An org needing more than that needs device
-  management.
-- devcontainer.json interop: read side done. The image or Dockerfile it
-  names and its forwardPorts are used, so a project standardized on
-  devcontainers works unmodified. What is deliberately not honored —
-  containerEnv, mounts, remoteUser, postCreateCommand — is reported on
-  every build: those are grants in this model rather than settings, and a
-  config half-honored silently would leave the user believing the file
-  describes what is running. The write side stays with the M2 long tail.
-- `dev status` / `dev ps` across projects.
-
-### M5: Live console — done
-
-The aspirational shape: a full-screen terminal UI that owns the session,
-with the workload in one pane and everything the tool knows in another —
-egress decisions as they happen, container events, and dialogs that ask
-for a decision at the moment of need rather than reporting it afterwards.
-
-This is the natural home for things the CLI can only do awkwardly:
-
-- **Denials become questions.** Done ahead of the UI: `--egress-prompt
-  ask` holds the connection while the user answers "once", "this project
-  from now on", or "no", and the held request proceeds if the policy gains
-  the destination. Firewall semantics — the request waits for a verdict
-  rather than failing and needing a retry nobody is watching for. It falls
-  back to reporting where nobody can answer, because blocking with no one
-  present is a hang, which is worse than a clear failure.
-
-  The limit this exposed was the argument for the console: only one reader
-  can own stdin, so outside the console a prompt and an interactive shell
-  cannot both have it. Inside it the conflict is gone — the console owns
-  the keyboard and routes it, a waiting question outranking the shell.
-  Verified with a shell running: a curl blocked mid-command, the question
-  appeared, one keystroke answered it, and the held request completed.
-- **Agents in the console.** Done: `dev console --agent claude` runs the
-  agent with its stored login — the OAuth token lives in the same named
-  volume either way — while its blocked destinations become questions
-  rather than failures it has to work around. The agent is resolved
-  through the same request/acceptance path `dev agent run` uses, so the
-  same agent cannot end up on a different image depending on which command
-  started it.
-- **Ports.** Done: a workload on an internal network cannot publish ports
-  itself, since docker needs a gateway and an internal network has none.
-  The sidecar publishes and relays instead — it already straddles both
-  networks, and one component owning the whole network boundary is easier
-  to reason about than two. Inbound is deliberately not subject to the
-  egress allowlist: that list answers what the workload may reach, while a
-  published port answers what may reach it, and the user answered that by
-  asking for the port.
-- **Live environment changes.** Done: `dev add <tool>` records the tool
-  outside the repository and rebuilds the image with it, so the need is
-  met when it appears rather than configured in advance. The record is a
-  declaration and the image is rebuilt from it, never `docker commit` —
-  the environment stays reproducible and a teammate given the same list
-  gets the same result. The derived tag carries a hash of the tool set, so
-  an unchanged list reuses the built image and any change produces a new
-  one; the tag cannot lie about its contents.
-- **Multiple panes for what is already collected**: the egress log, the
-  agent's output, build progress, the resolved policy for this run.
-- **An interactive shell in the pane.** Done: the workload runs on a
-  pseudo-terminal and its screen is rendered through a VT emulator. The
-  console cannot pass bytes through, since it draws its own layout — a
-  shell's cursor movement and redraws would otherwise corrupt it. The
-  emulator interprets them instead. ctrl+] leaves, because every other key
-  belongs to the shell.
-
-Two design constraints that are not negotiable, because the whole point of
-the console is to relax something the current design deliberately froze.
-
-**A control plane must never be reachable from the workload.** Section 4.3
-fixes the sidecar's policy at startup precisely so a compromised workload
-cannot rewrite its own allowlist. A console that edits policy live needs a
-channel — and that channel must exist only on the host side: a unix socket
-bind-mounted into the sidecar from the host filesystem, or the sidecar
-holding a connection out to the console process, never a listener on the
-internal network. If the workload can reach the thing that changes the
-policy, the policy is advisory. This is the single highest-risk part of
-the feature and it should be built with that stated in the code.
-
-**Live changes must be recorded as declarations, not baked into a pet
-container.** The tempting implementation of "install it and keep it" is
-`docker commit`, which produces an image nobody can reproduce and a
-project that works only on the machine where the command was typed. The
-console should instead append to the project's configuration — a package
-list, a tool list — and rebuild the image from it. The user gets
-persistence; the project keeps a Dockerfile that explains itself and a
-teammate gets the same environment. If a change cannot be expressed as a
-declaration, it should be explicitly ephemeral and labelled as such.
-
-A third, softer constraint: the console must not become the only way to
-use the tool. Everything it does needs a non-interactive equivalent, or CI
-and scripted use fall off a cliff.
-
-Sequencing: this depends on M2's core loop existing (it wraps run, shell
-and build) and on M1's egress events (it renders them). It replaces v1's
-`dev interactive`, which is a menu wrapping commands rather than a live
-view, and which cannot be delegated to v1 because it starts containers.
-
-### Deliberately out of scope
-
-Compose-style multi-service orchestration, Kubernetes, Windows, remote
-(cloud) backends, GUI. Revisit only after M4 is real.
+Open work is in [BACKLOG.md](BACKLOG.md) — one file, so there is no second
+place to look and no chance of the two disagreeing.
 
 ## 6. Compatibility and migration
 
@@ -752,11 +451,14 @@ Compose-style multi-service orchestration, Kubernetes, Windows, remote
   it. `mount_ssh_keys` is the one key v1 honored that v2 withdraws — a
   private key inside a container is an exfiltratable secret — and `dev
   migrate` says so, naming ssh-agent forwarding as the replacement.
-- CLI: no compatibility promise. The binary ships as `dev` during M1-M2 and
-  takes over the `dev` name when v1 is retired (installer keeps `dev` as an
-  alias to `dev` from M2 on).
-- v1 lifecycle: bug fixes only from M0; removed from the installer at M3;
-  directory kept in-tree as `legacy/` until M4.
+- CLI: no compatibility promise, and the rename has happened. The Go tool
+  is `dev`; the bash tool installs itself as `dev1` from `v1/install.sh`
+  and stays usable beside it. Both read `~/.dev-envs`, so config and
+  language plugins are shared rather than duplicated.
+- v1 lifecycle: bug fixes only. It lives in `v1/`, still installs, and its
+  test suite still runs in CI — which caught real breakage when the plugin
+  templates were renamed. Retiring it is a decision for when nobody reaches
+  for it, not a milestone.
 
 ## 7. Testing strategy
 
@@ -798,25 +500,3 @@ NET_ADMIN), and reading devcontainer.json.
 Several capabilities were not in the original plan at all and came out of
 using the tool: run history, grant review against it, private clones,
 the devcontainer write side, and the guided front door.
-
-## 9. What is left
-
-Nothing here blocks daily use.
-
-- **Plain docker backend** (M3). Only matters off OrbStack — Linux, colima,
-  Docker Desktop. The abstraction exists and is exercised by one
-  implementation, which is the part that usually rots.
-- **SBOM emission** (M3). Worth doing when something consumes it.
-- **Signed releases** (M3). A release-time concern: goreleaser, cosign,
-  checksums. Building it before there is a release to sign means
-  maintaining it before it protects anyone.
-- **Codex end to end.** Runs, but has never been driven through a real
-  session with a key.
-- **Brokered credentials** (4.3.2). A narrow host-side broker for specific
-  privileged operations, generalizing what `--allow-push` already does with
-  the ssh-agent socket. Wanted only when a real case demands it.
-
-### Cut order, if it ever matters again
-
-M4 first, then M3's extra backends. The trust model and egress control are
-not cuttable: they are the tool.

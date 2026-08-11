@@ -462,9 +462,9 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 
 	// Asking needs a terminal to ask on AND stdin free to answer with. An
 	// interactive shell already owns stdin, so a prompt would fight the
-	// workload for the user's keystrokes. Until the console owns the
-	// screen (ROADMAP M5) that combination falls back to reporting, said
-	// out loud rather than silently.
+	// workload for the user's keystrokes. That combination falls back to
+	// reporting, said out loud rather than silently; `dev console` is the
+	// mode where a question can be asked mid-run without that conflict.
 	mode, err := ParseEgressMode(o.EgressPrompt)
 	if err != nil {
 		return err

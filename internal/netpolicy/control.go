@@ -13,7 +13,7 @@ import (
 
 // Control lets the policy be changed while a workload is running, which is
 // what turns a denial from a notice printed afterwards into a question
-// answered at the time (ROADMAP M5).
+// answered at the time — which is what the console renders.
 //
 // Where it listens is the entire security design. Section 4.3 fixes the
 // sidecar's policy at startup precisely so a compromised workload cannot

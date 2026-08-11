@@ -9,9 +9,10 @@ wrong exit criterion: it would have forced v2 to reproduce behavior that
 was never good, and made "we removed something that did not earn its
 place" look like a regression.
 
-The real exit criterion for M2 is that **v2 is the tool you reach for**,
-with every v1 capability either present, deliberately redesigned, or
-dropped with a reason written down.
+The criterion was that **v2 is the tool you reach for**, with every v1
+capability either present, deliberately redesigned, or dropped with a
+reason written down. That is now true, and this file is the record of the
+decisions rather than a list of work.
 
 ## Core loop
 
@@ -50,13 +51,20 @@ and keeping a timestamped backup.
 
 ## Redesigned
 
-**`dev interactive` → `dev console`.** v1's interactive mode is a menu
-that wraps commands. It is useful, and it is also the wrong shape for a
-tool whose interesting events happen *while* something runs. Replaced by a
-full-screen console: workload output in one pane, egress decisions in
-another, and a blocked destination asked as a question while the request
-waits. It is a separate command that delegates to the same code `run`
-uses, so nothing becomes console-only.
+**`dev interactive` → two commands, because it was doing two jobs.**
+
+v1's interactive mode is a menu that wraps commands. That is the wrong
+shape for the events this tool cares about, which happen *while* something
+runs — so `dev console` is a full-screen view: workload output in one pane,
+egress decisions in another, and a blocked destination asked as a question
+while the request waits.
+
+But the menu was also answering "what do I do here?", which a console
+cannot. `dev interactive` still exists for that, rebuilt: it reports what
+state the project is in — detected language, image built or not, what is
+requested and unaccepted, whether a `.dockerignore` is missing — and offers
+the next steps, each naming the command it runs. A menu of commands helps
+someone who already knows the tool; this is for the person who does not.
 
 Not yet: an interactive shell inside the console, which needs a pty per
 pane. `dev shell` covers that case today.
@@ -94,16 +102,17 @@ of output did not earn its place.
 | image `USER` deciding the runtime uid | the tool sets `--user`; a project Dockerfile must not be able to choose root |
 | blanket `apparmor:unconfined` | applied to every v1 run for no stated reason |
 
-## Deferred
+## Deferred, and how each was resolved
 
-| v1 | when |
+Nothing here is still pending.
+
+| v1 | resolution |
 |---|---|
-| `dev new` / scaffolding | M2 late — no containers, so delegable to v1 in the meantime |
-| `dev templates *` | M2 late — same |
-| `dev devcontainer` (write) | M2 |
-
-| `dev security scan` | M3, with real exit codes as a CI gate |
-| `dev security check` | M3 |
+| `dev new` / scaffolding | done — writes the plugin's files, never a Dockerfile |
+| `dev templates *` | dropped — `dev pin` and `dev update` cover what it was for |
+| `dev devcontainer` (write) | done — exports the environment, and says what it cannot export |
+| `dev security scan` | done as `dev scan`, with exit codes CI can gate on |
+| `dev security check` | dropped — `dev doctor` and `dev policy` answer it between them |
 | `dev disk`, `dev troubleshoot` | folded into `doctor` — nobody runs a disk command on a good day |
 
 ## Behavior changes worth knowing

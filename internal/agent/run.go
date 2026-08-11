@@ -105,7 +105,7 @@ func Dockerfile(a *Agent, base string) string {
 	// agent writes into the workspace belong to the invoking user.
 	b.WriteString("USER root\n")
 	// git is not optional: the agent commits inside the container and the
-	// human reviews and pushes from the host (ROADMAP M1). Without it the
+	// human reviews and pushes from the host. Without it the
 	// review boundary has nothing to review. ca-certificates is needed to
 	// verify TLS through the proxy, which does not terminate it.
 	b.WriteString("RUN (command -v apt-get >/dev/null && apt-get update && " +
@@ -145,7 +145,7 @@ func Dockerfile(a *Agent, base string) string {
 // Spec builds the RunSpec for the agent container.
 //
 // The posture is fixed at untrusted regardless of the project's trust
-// level (ROADMAP M1): an agent acts on instructions from a model, so it
+// level (ROADMAP 4.1): an agent acts on instructions from a model, so it
 // does not inherit a human's decision to trust this project.
 func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 	a := o.Agent

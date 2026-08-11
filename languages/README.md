@@ -19,7 +19,10 @@ languages/<name>/                in this repository
 ```
 
 `dev` only ever reads the installed copy, so editing a plugin here has no
-effect until it is copied across. A plugin is machine-level configuration,
+effect until it is copied across: `dev languages install --force` does
+that. The binary carries this set embedded, and installs it when
+`~/.dev-envs/languages` is empty — a fresh machine detects nothing
+otherwise — but never overwrites a plugin you have edited unless asked. A plugin is machine-level configuration,
 like `~/.dev-envs/policy.yaml`: it comes from you, never from the
 repository being sandboxed, which is why it is allowed to widen egress (see
 [`registries`](#on-registries)) without asking.
@@ -51,7 +54,10 @@ repository being sandboxed, which is why it is allowed to widen egress (see
 3. **Image.** The plugin's Dockerfile template is rendered with that
    version and built. A `Dockerfile` in the project wins over the template,
    and a `devcontainer.json` wins over the template but not over a
-   Dockerfile.
+   Dockerfile — but a project's own Dockerfile is not built until the user
+   accepts it once, since a build runs unfiltered and before the sandbox
+   exists. `--build-source template` ignores the project's file and builds
+   this plugin's instead.
 4. **Egress.** The plugin's `registries` are permitted in `allowlist` mode
    for every run of a detected project, without a grant. `dev status` lists
    them.
@@ -108,6 +114,12 @@ The details that decide whether a plugin works:
 - **`files.scaffolding`** may name nested paths. A file declared here and
   not shipped is reported as missing rather than invented: content this tool
   made up would be a surprise attributed to the plugin.
+- A scaffolding file may be stored with a **`.tmpl` suffix** the scaffolder
+  strips: declare `go.mod`, ship `go.mod.tmpl`. Some names a plugin cannot
+  carry literally — a directory holding a real `go.mod` is a nested Go
+  module, which the toolchain excludes from the parent and therefore from
+  the binary's embedded copy, so the golang plugin once shipped without the
+  two files it exists to scaffold.
 - A plugin with **no `detection.files`**, or with an invalid `extract`
   regexp, is skipped with a warning on stderr — `⚠  language plugin: …` —
   rather than failing every command that touches languages. A plugin that

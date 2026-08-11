@@ -225,6 +225,28 @@ Twenty-odd root commands read as a development platform rather than "run
 this project safely". Grouping the help output is cheap and changes the
 impression without removing anything.
 
+### B19. SBOM emission — `todo`
+
+`dev scan` reports vulnerabilities; it does not emit a bill of materials.
+Worth doing when something consumes one — an SBOM nobody reads is a file
+this tool has to keep correct for no reader. Carried over from the
+milestone plan, where it was open for the same reason.
+
+### B20. Codex end to end — `todo`
+
+The definition runs and the image builds, but it has never been driven
+through a real session with a key. Everything it shares with the claude
+path is exercised; what is unverified is the part that is its own.
+
+### B21. Brokered credentials — `todo`
+
+A narrow host-side broker for specific privileged operations, generalizing
+what `--allow-push` already does with the ssh-agent socket: the container
+asks for an action and never holds the secret. See ROADMAP 4.3.2 for why
+this rather than injecting credentials at the proxy, which would cost the
+no-TLS-interception property. Wanted when a real case demands it, not
+before.
+
 **Dropped:** removing `dev new`. The conceptual-surface argument is fair,
 but scaffolding is in use and its removal is a product decision, not a
 security one.
