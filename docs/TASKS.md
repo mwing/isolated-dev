@@ -465,7 +465,7 @@ none of which exist in this tool.
 
 # P3 — hardening, and the reason these bugs were possible
 
-## T15. Integration tests through the CLI glue  **(do this early, not last)**
+## T15. Integration tests through the CLI glue  **[done]**
 
 **[harness DONE]** — `internal/cli/glue_test.go` drives the real command
 tree against the fake runner. The harness in `cli_test.go` gained
@@ -572,7 +572,7 @@ replacement.
 binary can still detect a project and scaffold one, and `dev new golang`
 produces a `go.mod` a Go toolchain accepts.
 
-## T20. The gitconfig filter is a denylist wearing an allowlist's label
+## T20. The gitconfig filter is a denylist wearing an allowlist's label  **[done]**
 
 `internal/cli/hostaccess.go` filters the host gitconfig by dropping known
 dangerous keys (`credential`, `insteadof`, `signingkey`, `sshcommand` …).
@@ -595,7 +595,7 @@ Keep the header comment honest either way.
 an alias, asserting neither survives, alongside the existing tests that
 identity does.
 
-## T16. Allowlist hardening
+## T16. Allowlist hardening  **[done]**
 
 - **Public-suffix guard** (`internal/netpolicy/allowlist.go:79`): `*.co.uk`,
   `*.github.io`, `*.s3.amazonaws.com` all parse and match at any depth. A
@@ -615,13 +615,13 @@ identity does.
 - **IDNA / punycode normalization** in the grant prompt, which is the one
   place a user widens policy by reading a hostname.
 
-## T17. Bound what an attacker can grow
+## T17. Bound what an attacker can grow  **[done]**
 
 The sidecar and the host-side watcher key maps by destination. A retrying
 client can emit thousands of distinct denials. Cap the maps and the log
 volume.
 
-## T18. `http.Transport` per plain-HTTP request  **[DONE]**
+## T18. `http.Transport` per plain-HTTP request  **[done]**  **[DONE]**
 
 One transport, built on first use because `Dial` is injected after
 construction, with a bounded idle pool. The test asserts the observable
@@ -701,12 +701,12 @@ Done means all six of these are true at once:
 | T12 | done — `dev allow` works, `dev agent allow` still works as a hidden alias, and no doc or hint names the old path as primary |
 | T13 | done — each of the four is corrected, and `--egress-notify of` is rejected rather than silently accepted |
 | T14 | done — `languages/README.md` names no command or flag that does not exist |
-| T15 | the CLI suite fails when any of T1–T5 is reverted |
-| T16 | `*.co.uk` is refused or warned about; an over-long QNAME under a wildcard grant is refused; a dial to 169.254.169.254 is refused unless a rule names it |
-| T17 | a flood of distinct denials does not grow memory without bound |
+| T15 | done — CLI suite plus a daemon-backed tier behind `-tags=integration` |
+| T16 | done — all three, plus non-ASCII hostnames refused at the grant |
+| T17 | done — bounded in the sidecar and the watcher, overflow reported |
 | T18 | done — one transport is reused across plain-HTTP requests |
 | T19 | done — an agent run's `--allow` contains the project's language registries |
-| T20 | a gitconfig with `core.fsmonitor` or an alias yields neither in the container |
+| T20 | done — the filter is an allowlist; program-running settings are dropped |
 | T21 | done — a run against an older sidecar image rebuilds it, naming both hashes |
 | T22 | done — `/proc/1/comm` in a run is an init, not the workload |
 | T23 | done — with `~/.dev-envs/languages` deleted, detection and `dev new` still work |

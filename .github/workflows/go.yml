@@ -44,6 +44,23 @@ jobs:
       - name: Build
         run: go build ./...
 
+  # The tier that needs a daemon. Every bug the project's review found
+  # survived a green suite because the tests stopped above docker: a fake
+  # runner will happily report that a network was internal or a container
+  # ran. Linux runners have a daemon, so this is where those claims get
+  # checked against the thing that decides them.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - name: Integration tests against a real docker daemon
+        env:
+          DEV_BACKEND: docker
+        run: go test -tags=integration ./internal/cli/ -run Integration -v
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -53,7 +70,10 @@ jobs:
           go-version: '1.26'
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # Pinned: `latest` is a build that changes under you, which is the
+          # same argument this tool makes about image tags. It also broke —
+          # a transitive dependency of a newer release stopped resolving.
+          version: v2.5.0
 
   vulncheck:
     runs-on: ubuntu-latest

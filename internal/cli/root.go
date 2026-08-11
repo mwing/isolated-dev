@@ -12,6 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mwing/isolated-dev/internal/backend"
+	"github.com/mwing/isolated-dev/internal/backend/docker"
 	"github.com/mwing/isolated-dev/internal/backend/orbstack"
 	"github.com/mwing/isolated-dev/internal/config"
 	"github.com/mwing/isolated-dev/internal/runner"
@@ -89,9 +91,26 @@ func (e *Env) stdin() io.Reader {
 // which is what makes asking the user a question possible.
 func (e *Env) stdinIsTerminal() bool { return isTerminal(e.Stdin) }
 
-// driver builds the container backend for a VM, carrying the injected PATH
-// lookup so every command probes the host the same way.
-func (e *Env) driver(vmName string) *orbstack.Driver {
+// driver returns the container backend, carrying the injected PATH lookup
+// so every command probes the host the same way.
+//
+// OrbStack unless told otherwise. DEV_BACKEND=docker selects a local
+// daemon, which is what a Linux machine has and what the integration tests
+// need — they cannot reach a VM that is not there, and a test tier that
+// cannot reach a daemon is the gap that let every bug in the review through.
+//
+// An environment variable rather than a config key, for now: this selects
+// where the tests run, and a setting in ~/.dev-envs that silently changes
+// which daemon a run uses is a bigger promise than the docker backend has
+// earned.
+func (e *Env) driver(vmName string) backend.Backend {
+	if lookupEnv(e.Env, "DEV_BACKEND") == "docker" {
+		d := docker.New(e.Runner)
+		if e.LookPath != nil {
+			d.LookPath = e.LookPath
+		}
+		return d
+	}
 	d := orbstack.New(vmName, e.Runner)
 	if e.LookPath != nil {
 		d.LookPath = e.LookPath
