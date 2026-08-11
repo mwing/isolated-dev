@@ -17,13 +17,36 @@ otherwise.
 
 ## Install
 
-Requires Go 1.26+ and OrbStack.
+```sh
+brew tap mwing/tap
+brew trust mwing/tap      # Homebrew requires this for third-party casks
+brew install --cask dev
+
+dev doctor                # checks the setup; changes nothing
+dev completion install
+```
+
+Needs a container backend — on macOS, OrbStack:
+`brew install --cask orbstack`.
+
+The binary is the whole product: the egress sidecar's source and the
+language plugins travel inside it, so the first filtered run builds what it
+needs and nothing else has to be fetched or kept in step.
+
+Every release carries a `checksums.txt` signed with cosign keyless, and the
+release notes give the verification commands. There is no key — the
+signature is bound to the workflow that built it.
+
+<details>
+<summary>From source</summary>
+
+Requires Go 1.26+.
 
 ```sh
 make install        # builds dev into ~/.local/bin
-dev doctor          # checks the setup; changes nothing
-dev completion install
 ```
+
+</details>
 
 Coming from the bash version? It is now `dev1`, kept in [v1/](v1/) and
 installed from `v1/install.sh`. Run `dev migrate` for what changes.

@@ -91,7 +91,7 @@ agent. That contradicts everything `dev pin` says about tags.
 moves them deliberately and reports old → new, and `dev agent list` shows
 what is pinned.
 
-### B5. Real distribution — `doing`
+### B5. Real distribution — `done`
 
 Requiring Go 1.26 and `make install` is now the adoption blocker: the
 sidecar image and the language plugins already travel inside the binary, so
