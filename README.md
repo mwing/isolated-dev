@@ -89,9 +89,10 @@ allow for this project, or refuse.
 repository is a *request*. Running the project is not consent — anything
 you have not accepted stops the run and is shown to you first.
 
-**An unattended run need not touch your working tree.** `--clone` gives it
-a private copy of the repository; the changes come back through git when
-you approve them.
+**An agent never touches your working tree.** It works in a private clone
+by default; `dev clone diff` shows what it did and `dev clone apply` brings
+it back when you approve. `--in-place` opts out. Clones are copies, so
+`dev clone list` and `dev clone prune` keep the disk honest.
 
 **What happened is recorded.** `dev history` says what past runs reached
 and what was blocked; `dev grants` says which of your grants anything

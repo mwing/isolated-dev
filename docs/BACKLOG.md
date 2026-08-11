@@ -105,7 +105,7 @@ reports something other than `source`.
 
 ## P1 — best security per unit of effort
 
-### B6. Agent runs default to a clone — `todo`
+### B6. Agent runs default to a clone — `done`
 
 An agent cannot reach `~/.ssh`, but it can edit git hooks, `package.json`,
 Makefiles and CI files — things the *host* runs later. `--clone` exists and

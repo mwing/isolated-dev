@@ -197,20 +197,20 @@ func newAgentLogoutCmd(env *Env) *cobra.Command {
 
 func newAgentRunCmd(env *Env) *cobra.Command {
 	var (
-		extraHosts  []string
-		image       string
-		authMode    string
-		authEnv     []string
-		rebuild     bool
-		memory      string
-		cpus        string
-		dryRun      bool
-		tty         string
-		notify      string
-		safe        bool
-		allowPush   bool
-		useCloneDir bool
-		cloneDepth  int
+		extraHosts []string
+		image      string
+		authMode   string
+		authEnv    []string
+		rebuild    bool
+		memory     string
+		cpus       string
+		dryRun     bool
+		tty        string
+		notify     string
+		safe       bool
+		allowPush  bool
+		inPlace    bool
+		cloneDepth int
 	)
 
 	cmd := &cobra.Command{
@@ -254,10 +254,17 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 
 			opts.GitIdentity = gitIdentity(env)
 
-			// An agent left running unattended is the case a clone is
-			// for: the run keeps the project's identity, allowlist and
-			// history, and only the working tree it can damage changes.
-			if useCloneDir || cloneDepth > 0 {
+			// A clone by default. An agent cannot reach ~/.ssh, but it can
+			// edit the things the host runs later — git hooks, npm
+			// scripts, Makefiles, CI files — and it acts on instructions
+			// from a model rather than from the person in the room. The
+			// run keeps the project's identity, allowlist and history;
+			// only the tree it can damage changes.
+			//
+			// --in-place opts out, which is the right shape: the safer
+			// behaviour needs no argument, and choosing the other one is
+			// a sentence someone typed.
+			if !inPlace {
 				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
 				// A dry run says what would happen and does none of it. This
 				// was the one place it did: the clone was copied before the
@@ -270,16 +277,42 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 					res, err := clone.Prepare(cmd.Context(), env.Runner, clone.Options{
 						Project: opts.Project, Dest: dest, Depth: cloneDepth,
 					})
+					// A clone needs a repository. Without one there is no
+					// mechanism — and no error the user can act on either,
+					// since they never asked for a clone: it is the default.
+					// So the run continues in place and says so loudly. A
+					// directory with no version control has nothing to
+					// recover from anyway, which is the same reason it is
+					// usually scratch work.
+					if err != nil && !isGitRepo(cmd.Context(), env, opts.Project) {
+						fmt.Fprintf(env.Stderr,
+							"⚠  %s is not a git repository, so there is nothing to clone.\n"+
+								"   The agent edits these files directly, and nothing here\n"+
+								"   can undo that. `git init` first, or --in-place to silence this.\n\n",
+							opts.Project)
+						err = nil
+						res.Path = ""
+					}
 					if err != nil {
 						return err
 					}
-					opts.Workspace = res.Path
-					fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
-					for _, note := range res.Notes {
-						fmt.Fprintf(env.Stdout, "           %s\n", note)
+					if res.Path != "" {
+						opts.Workspace = res.Path
+						fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
+						for _, note := range res.Notes {
+							fmt.Fprintf(env.Stdout, "           %s\n", note)
+						}
+						// Named as commands rather than as a git recipe: the
+						// safer path has to cost less than the unsafe one,
+						// and composing a fetch refspec is more than it can
+						// cost.
+						fmt.Fprintf(env.Stdout, "Review:    dev clone diff\n")
+						fmt.Fprintf(env.Stdout, "Bring back: dev clone apply\n")
 					}
-					fmt.Fprintf(env.Stdout, "Bring back: git -C %s fetch %s\n",
-						opts.Project, res.Path)
+					// Now that every agent run makes one of these, the disk
+					// they take is the tool's doing and its business to
+					// report — before it is a surprise rather than after.
+					warnCloneSpace(cmd.Context(), env)
 				}
 			}
 
@@ -315,7 +348,10 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 	cmd.Flags().StringVar(&tty, "tty", "auto", "allocate a terminal: auto, on, or off")
 	cmd.Flags().BoolVar(&allowPush, "allow-push", false,
 		"forward your ssh-agent so the agent can push, and allow the git host")
-	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
+	cmd.Flags().BoolVar(&inPlace, "in-place", false,
+		"mount the working tree directly instead of a private clone")
+	cmd.Flags().IntVar(&cloneDepth, "clone-depth", 0,
+		"copy only this many commits of history into the clone (0: all)")
 	cmd.Flags().BoolVar(&safe, "safe", false,
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",

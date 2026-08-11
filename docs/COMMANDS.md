@@ -59,7 +59,7 @@ Useful flags on `run`, `shell` and `console`:
 |---|---|
 | `dev agent list` | available agents |
 | `dev agent run NAME` | run one against this project |
-| `dev agent run NAME --clone` | …in a private copy, leaving your tree untouched |
+| `dev agent run NAME --in-place` | …in your working tree instead of a private copy |
 | `dev agent run NAME -- "prompt"` | pass a prompt or flags through to the agent |
 | `dev agent policy` | the egress policy a run would enforce, without running it |
 | `dev agent logout NAME` | discard the stored login |
@@ -67,7 +67,9 @@ Useful flags on `run`, `shell` and `console`:
 
 Agents run at the untrusted level regardless of the project's trust: they
 act on instructions from a model, so they do not inherit your decision to
-trust this repository.
+trust this repository. They also work in a **private clone by default** —
+an agent cannot reach your SSH keys, but it can edit git hooks, npm
+scripts and Makefiles, which are things your host runs later.
 
 ---
 
@@ -121,7 +123,10 @@ settings the project requests, and egress it requests — and stay separate.
 |---|---|
 | `dev clone list` | every clone, its size, branch, and what work is still in it |
 | `dev clone path` | this project's, for scripting |
-| `dev clone rm` | delete it — refuses while it holds work the project does not have |
+| `dev clone diff` | what the clone has that the project does not |
+| `dev clone apply` | bring those commits back, fast-forwarding when that needs no decision |
+| `dev clone prune` | remove clones holding nothing (`--older-than`, `--force`, `--dry-run`) |
+| `dev clone rm` | delete one — refuses while it holds work the project does not have |
 
 ---
 

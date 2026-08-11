@@ -29,7 +29,8 @@ func newCloneCmd(env *Env) *cobra.Command {
 			return listClones(cmd.Context(), env)
 		},
 	}
-	cmd.AddCommand(newCloneListCmd(env), newClonePathCmd(env), newCloneRemoveCmd(env))
+	cmd.AddCommand(newCloneListCmd(env), newClonePathCmd(env), newCloneRemoveCmd(env),
+		newClonePruneCmd(env), newCloneDiffCmd(env), newCloneApplyCmd(env))
 	return cmd
 }
 
@@ -43,6 +44,13 @@ func newCloneListCmd(env *Env) *cobra.Command {
 		},
 	}
 }
+
+// clonesRoot is where private copies live, beside the grants and history
+// they belong with.
+func clonesRoot(env *Env) string { return filepath.Join(env.Paths.Home, "clones") }
+
+// removeClone deletes one, refusing anything that is not a clone.
+func removeClone(path string) error { return clone.Remove(path) }
 
 // cloneInfo is what is worth knowing about a clone without opening it.
 type cloneInfo struct {
@@ -122,7 +130,7 @@ func humanSize(n int64) string {
 }
 
 func listClones(ctx context.Context, env *Env) error {
-	root := filepath.Join(env.Paths.Home, "clones")
+	root := clonesRoot(env)
 	clones, err := scanClones(ctx, env.Runner, root)
 	if err != nil {
 		return err

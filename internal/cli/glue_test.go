@@ -479,7 +479,9 @@ func TestADryRunTouchesNothingOnDisk(t *testing.T) {
 	h := newHarness(t)
 	h.readyBackend()
 
-	if err := h.run(t, "agent", "run", "claude", "--clone", "--dry-run"); err != nil {
+	// No --clone: it is the default now, which is what makes the dry run
+	// worth checking — the copy would happen without anyone asking for it.
+	if err := h.run(t, "agent", "run", "claude", "--dry-run"); err != nil {
 		t.Fatalf("dry run: %v\n%s", err, h.stderr.String())
 	}
 	// Reading the host's git identity is a read and belongs in a dry run:
