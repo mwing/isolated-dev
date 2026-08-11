@@ -1,6 +1,9 @@
 package netpolicy
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func mustParse(t *testing.T, entries ...string) *Allowlist {
 	t.Helper()
@@ -181,5 +184,45 @@ func TestRuleStringRoundTrips(t *testing.T) {
 		if got := a.Rules()[0].String(); got != want {
 			t.Errorf("Rule(%q).String() = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A wildcard is only as narrow as its parent. Under a public suffix it is
+// not narrow at all: it admits every name anyone can create there,
+// including one created because the grant exists.
+func TestWildcardsUnderAPublicSuffixAreRefused(t *testing.T) {
+	for _, entry := range []string{
+		"*.co.uk", "*.com", "*.github.io", "*.s3.amazonaws.com",
+		"*.herokuapp.com", "*.storage.googleapis.com", "*.ngrok.io",
+	} {
+		if _, err := Parse([]string{entry}); err == nil {
+			t.Errorf("%s was accepted; it allows anything anyone creates there", entry)
+		}
+	}
+}
+
+func TestOrdinaryWildcardsStillParse(t *testing.T) {
+	for _, entry := range []string{
+		"*.example.com", "*.githubusercontent.com", "*.internal.mycorp.net",
+	} {
+		a, err := Parse([]string{entry})
+		if err != nil {
+			t.Fatalf("%s was refused: %v", entry, err)
+		}
+		if !a.Allows("anything."+strings.TrimPrefix(entry, "*."), 443) {
+			t.Fatalf("%s does not match its own subdomain", entry)
+		}
+	}
+}
+
+// The refusal has to say what the grant would have meant. "Public suffix"
+// is jargon; "anyone can create a name there" is the consequence.
+func TestThePublicSuffixRefusalExplainsItself(t *testing.T) {
+	_, err := Parse([]string{"*.co.uk"})
+	if err == nil {
+		t.Fatal("accepted")
+	}
+	if !strings.Contains(err.Error(), "anyone can register") {
+		t.Fatalf("unhelpful refusal: %v", err)
 	}
 }

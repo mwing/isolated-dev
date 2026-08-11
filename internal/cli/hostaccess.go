@@ -120,32 +120,46 @@ func describeGrants(g project.Grants) []string {
 	return out
 }
 
-// gitConfigDenied are the gitconfig settings a filtered copy drops.
+// gitConfigCarried are the settings a filtered copy keeps.
 //
-// A gitconfig is not identity. It can name a signing key the container
-// cannot use, a credential helper that hands out tokens, and insteadOf rules
-// that silently rewrite a remote to somewhere else — which would route a
-// push past the allowlist by rewriting the destination rather than reaching
-// it. The user granted "my git identity", so that is what is passed.
-var gitConfigDenied = []string{
-	"gpgsign",
-	"gpg.program",
-	"gpg.format",
-	"signingkey",
-	"credential",
-	"helper",
-	"insteadof",
-	"sshcommand",
-	"core.editor",
-	"core.pager",
+// An allowlist, because the file said "only identity is carried over" while
+// the mechanism was a denylist: everything unnamed passed, including
+// settings that run programs — core.fsmonitor, filter.*.clean and .smudge,
+// diff.*.textconv, alias.*, protocol.*.allow. The sandbox contains what
+// those could do, but a list of what to exclude has to be complete to be
+// right, and a list of what to include only has to be useful.
+//
+// What is deliberately absent: anything that signs (the container has no
+// key), anything that hands out credentials, anything that rewrites where a
+// remote points — which would route a push past the allowlist by changing
+// the destination rather than reaching it — and anything naming a program
+// or a path on the host, which is not there.
+var gitConfigCarried = map[string]bool{
+	"user.name":                 true,
+	"user.email":                true,
+	"init.defaultbranch":        true,
+	"core.autocrlf":             true,
+	"core.eol":                  true,
+	"core.ignorecase":           true,
+	"pull.rebase":               true,
+	"pull.ff":                   true,
+	"push.default":              true,
+	"push.autosetupremote":      true,
+	"fetch.prune":               true,
+	"rebase.autostash":          true,
+	"merge.conflictstyle":       true,
+	"diff.algorithm":            true,
+	"status.showuntrackedfiles": true,
 }
 
 // filterGitConfig writes a filtered copy of the user's gitconfig under
 // ~/.dev-envs and returns its path, or "" when there is nothing to copy.
 //
-// Filtering by line rather than by parsing: the goal is to remove settings,
-// and a section header whose body is emptied is harmless, whereas a parser
-// that rewrites the file could change the meaning of something it kept.
+// Line-oriented rather than a full parse: what is written is a subset of
+// what was read, verbatim, so nothing can acquire a meaning it did not
+// have. Section headers are emitted only when something under them
+// survives, which keeps the result readable and avoids an empty [url]
+// section implying a rule that was dropped.
 func filterGitConfig(env *Env) (string, error) {
 	home := filepath.Dir(env.Paths.Home) // ~/.dev-envs -> ~
 	src := filepath.Join(home, ".gitconfig")
@@ -160,21 +174,35 @@ func filterGitConfig(env *Env) (string, error) {
 
 	var b strings.Builder
 	b.WriteString("# Filtered copy of " + src + ", written by dev.\n")
-	b.WriteString("# Only identity is carried over. A container cannot sign, must not\n" +
-		"# be handed tokens, and must not be able to rewrite where a remote points.\n")
+	b.WriteString("# Only identity and workflow preferences are carried over: a container\n" +
+		"# cannot sign, must not be handed tokens, must not be able to rewrite\n" +
+		"# where a remote points, and cannot run programs named on the host.\n")
 	sc := bufio.NewScanner(f)
+	section := ""
+	headerWritten := false
 	for sc.Scan() {
 		line := sc.Text()
-		lower := strings.ToLower(line)
-		// A section header is kept; only settings are dropped, and a
-		// credential or url section becomes an empty one.
-		if drop := !strings.HasPrefix(strings.TrimSpace(lower), "[") &&
-			matchesAny(lower, gitConfigDenied); drop {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "[") {
+			section = sectionName(trimmed)
+			headerWritten = false
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(lower), "[credential") ||
-			strings.HasPrefix(strings.TrimSpace(lower), "[url ") {
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
 			continue
+		}
+		key, _, ok := strings.Cut(trimmed, "=")
+		if !ok {
+			continue
+		}
+		full := section + "." + strings.ToLower(strings.TrimSpace(key))
+		if !gitConfigCarried[full] {
+			continue
+		}
+		if !headerWritten {
+			b.WriteString("[" + section + "]\n")
+			headerWritten = true
 		}
 		b.WriteString(line)
 		b.WriteString("\n")
@@ -196,11 +224,14 @@ func filterGitConfig(env *Env) (string, error) {
 	return out, nil
 }
 
-func matchesAny(line string, needles []string) bool {
-	for _, n := range needles {
-		if strings.Contains(line, n) {
-			return true
-		}
+// sectionName normalizes a section header to the prefix a key is looked up
+// under. A subsection — [url "https://x/"] — keeps only the section, since
+// nothing carried has one and a subsection is how the dangerous rules are
+// written.
+func sectionName(header string) string {
+	inner := strings.Trim(header, "[]")
+	if i := strings.IndexAny(inner, " \t\""); i >= 0 {
+		inner = inner[:i]
 	}
-	return false
+	return strings.ToLower(strings.TrimSpace(inner))
 }

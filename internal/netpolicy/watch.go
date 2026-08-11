@@ -106,6 +106,16 @@ func (w *Watcher) Observe(e Event) {
 		w.seen = map[string]*Notice{}
 		w.total = map[string]int{}
 	}
+	// Bounded for the same reason the proxy's tally is: the key comes from
+	// the workload, and a client retrying against generated names would
+	// grow this in the user's own process for as long as the run lasts.
+	// Destinations already being tracked keep counting; new ones past the
+	// cap are dropped rather than displacing them, because the first few
+	// thousand are the ones a human might still read.
+	if _, known := w.seen[key]; !known && len(w.seen) >= maxTrackedDestinations {
+		w.mu.Unlock()
+		return
+	}
 	w.total[key]++
 	prev, known := w.seen[key]
 	now := w.now()

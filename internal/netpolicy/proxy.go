@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -86,6 +87,16 @@ type Proxy struct {
 	refused map[string]bool
 }
 
+// maxTrackedDestinations bounds the maps keyed by destinations the workload
+// chose. A client retrying against generated names would otherwise grow
+// them without limit, inside the one process that has to survive a whole
+// session — and the report they feed is unreadable long before that.
+const maxTrackedDestinations = 2048
+
+// overflowKey stands in for everything past the cap, so the summary says
+// that it is incomplete rather than quietly being wrong.
+const overflowKey = "(further destinations not recorded)"
+
 // NewProxy returns a proxy enforcing allow.
 func NewProxy(allow *Allowlist) *Proxy {
 	return &Proxy{
@@ -125,7 +136,82 @@ func (p *Proxy) dial(ctx context.Context, addr string) (net.Conn, error) {
 		return p.Dial(ctx, "tcp", addr)
 	}
 	d := net.Dialer{Timeout: 30 * time.Second}
+	// Control is called with the resolved address, after DNS and before
+	// the connection is made, which is the only place the check can be
+	// both correct and unavoidable: checking the resolved IP beforehand
+	// leaves a window in which the answer changes.
+	d.Control = func(_, address string, _ syscall.RawConn) error {
+		return p.permitAddress(address)
+	}
 	return d.DialContext(ctx, "tcp", addr)
+}
+
+// permitAddress refuses to connect to the infrastructure around the
+// sandbox, whatever name resolved to it.
+//
+// An allowlisted hostname whose DNS an attacker influences otherwise
+// becomes a route to the docker gateway, the host, or a cloud metadata
+// endpoint — none of which the allowlist was ever asked about, and all of
+// which are reachable from the sidecar because it is the one container with
+// a way out.
+//
+// A rule naming the address literally still works. Someone proxying to a
+// service on their own network has said so explicitly, which is exactly the
+// distinction the literal-IP rule already makes for the allowlist.
+func (p *Proxy) permitAddress(address string) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !isInfrastructure(ip) {
+		return nil
+	}
+	if a := p.Allowlist(); a != nil && a.AllowsIP(ip) {
+		return nil
+	}
+	return &blockedAddress{Address: address, Host: host}
+}
+
+// blockedAddress is the verdict for a destination that resolved into the
+// machinery around the sandbox. It is a distinct type so the handlers can
+// tell a policy decision from a network fault: reported as "upstream
+// error", a refusal reads as a flaky service, and the run's history records
+// nothing about why the request failed.
+type blockedAddress struct {
+	// Address is host:port as dialled; Host is the address alone, which is
+	// what a grant would have to name.
+	Address string
+	Host    string
+}
+
+func (e *blockedAddress) Error() string {
+	// The remedy is named because this is the one refusal a legitimate
+	// setup hits: an internal service on a private network, reached by a
+	// name that resolves there. Granting the address says "I meant that
+	// machine", which a hostname cannot say on its own.
+	return fmt.Sprintf("refused to connect to %s: it is loopback, a private "+
+		"network, or a metadata endpoint, and no rule names that address. "+
+		"If you meant it, grant the address itself: dev allow %s", e.Host, e.Address)
+}
+
+// isInfrastructure reports whether an address belongs to the machinery
+// around the sandbox rather than to the internet.
+func isInfrastructure(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
+		// Carrier-grade NAT and the IPv6 unique-local range are neither
+		// private by Go's definition nor public in any useful sense.
+		ip.IsInterfaceLocalMulticast() || inCGNAT(ip) || isUniqueLocal(ip)
+}
+
+func inCGNAT(ip net.IP) bool {
+	v4 := ip.To4()
+	return v4 != nil && v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127
+}
+
+func isUniqueLocal(ip net.IP) bool {
+	return ip.To4() == nil && len(ip) == net.IPv6len && ip[0]&0xfe == 0xfc
 }
 
 func (p *Proxy) emit(e Event) {
@@ -139,7 +225,18 @@ func (p *Proxy) emit(e Event) {
 		if e.Port != 0 {
 			key = net.JoinHostPort(e.Host, strconv.Itoa(e.Port))
 		}
-		p.denials[key]++
+		// Bounded: the key is a destination the workload chose, so a client
+		// retrying against generated names grows this without limit inside
+		// the one process that must survive a long session. Past the cap,
+		// known destinations still count — the tally stays accurate for
+		// everything already seen, and stops learning new names.
+		if len(p.denials) < maxTrackedDestinations {
+			p.denials[key]++
+		} else if _, known := p.denials[key]; known {
+			p.denials[key]++
+		} else {
+			p.denials[overflowKey]++
+		}
 		p.mu.Unlock()
 	}
 	if p.Emit != nil {
@@ -165,7 +262,14 @@ func (p *Proxy) Refuse(host string) {
 	if p.refused == nil {
 		p.refused = map[string]bool{}
 	}
-	p.refused[normalizeHost(host)] = true
+	// A refusal is a decision the user made, so it is kept even at the cap:
+	// forgetting one would hold the next attempt for the full timeout again
+	// over a question already answered. The bound is on how many distinct
+	// ones can be recorded, which only a user clicking "no" thousands of
+	// times can reach.
+	if len(p.refused) < maxTrackedDestinations {
+		p.refused[normalizeHost(host)] = true
+	}
 	p.mu.Unlock()
 }
 
@@ -218,6 +322,15 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	upstream, err := p.dial(r.Context(), net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
+		// A refused address is a decision, and belongs in the denial
+		// tally and the run's history with the rest of them.
+		var blocked *blockedAddress
+		if errors.As(err, &blocked) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+				Reason: blocked.Error()})
+			http.Error(w, "proxy: "+blocked.Error(), http.StatusForbidden)
+			return
+		}
 		// An unreachable upstream is a network failure, not a policy
 		// decision. Recording it as a denial made the exit summary claim
 		// the allowlist blocked something it had just allowed.
@@ -310,6 +423,17 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := p.roundTripper().RoundTrip(outreq)
 	if err != nil {
+		// A refused address is a policy decision, not a network fault.
+		// Reported as "upstream error" it read as a flaky service, was
+		// recorded as an error rather than a denial, and left nothing in
+		// the run's history to explain what had happened.
+		var blocked *blockedAddress
+		if errors.As(err, &blocked) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+				Reason: blocked.Error()})
+			http.Error(w, "proxy: "+blocked.Error(), http.StatusForbidden)
+			return
+		}
 		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
 			Reason: "upstream error: " + err.Error()})
 		http.Error(w, "proxy: upstream error", http.StatusBadGateway)

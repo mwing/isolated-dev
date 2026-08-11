@@ -468,3 +468,50 @@ func TestPlainHTTPReusesOneTransport(t *testing.T) {
 		t.Fatalf("dialled upstream %d times for 3 requests; the pool is not being reused", got)
 	}
 }
+
+// An allowlisted name whose DNS an attacker influences is otherwise a route
+// to the docker gateway, the host, or a metadata endpoint — none of which
+// the allowlist was asked about, and all reachable from the sidecar because
+// it is the one container with a way out.
+func TestInfrastructureAddressesAreRefused(t *testing.T) {
+	p := NewProxy(mustParse(t, "anything.example"))
+
+	for _, addr := range []string{
+		"127.0.0.1:80",       // the sidecar itself
+		"10.0.0.5:443",       // private
+		"192.168.1.1:443",    // private
+		"172.17.0.1:2375",    // the docker gateway
+		"169.254.169.254:80", // cloud metadata
+		"100.64.0.1:443",     // carrier-grade NAT
+		"[::1]:443",          // loopback, v6
+		"[fd00::1]:443",      // unique-local, v6
+		"0.0.0.0:80",         // unspecified
+	} {
+		if err := p.permitAddress(addr); err == nil {
+			t.Errorf("%s was permitted", addr)
+		}
+	}
+}
+
+func TestOrdinaryAddressesAreNotRefused(t *testing.T) {
+	p := NewProxy(mustParse(t, "anything.example"))
+	for _, addr := range []string{"93.184.216.34:443", "1.1.1.1:53", "[2606:4700::1111]:443"} {
+		if err := p.permitAddress(addr); err != nil {
+			t.Errorf("%s was refused: %v", addr, err)
+		}
+	}
+}
+
+// Someone proxying to a service on their own network has said so
+// explicitly. That is the same distinction the allowlist already makes
+// between a name and a literal address.
+func TestALiteralGrantReachesAPrivateAddress(t *testing.T) {
+	p := NewProxy(mustParse(t, "10.0.0.5:5432"))
+	if err := p.permitAddress("10.0.0.5:5432"); err != nil {
+		t.Fatalf("a granted private address was refused: %v", err)
+	}
+	// A different private address is still refused: the grant was specific.
+	if err := p.permitAddress("10.0.0.6:5432"); err == nil {
+		t.Fatal("a private address nobody granted was permitted")
+	}
+}

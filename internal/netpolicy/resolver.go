@@ -79,6 +79,20 @@ func (r *Resolver) Resolve(ctx context.Context, name string) ([]net.IP, error) {
 		return nil, &ErrRefused{Name: q}
 	}
 
+	// A wildcard grant reopens the channel the allowlist closed. With
+	// *.example.com granted, the query name itself carries data out:
+	// <payload>.example.com needs no answer to have delivered it, and it
+	// is logged as an allow because the name is, strictly, permitted.
+	//
+	// The shape is what gives it away. Real names are short and few;
+	// encoded ones are long, deep, and arrive in a stream. Refusing on
+	// shape is a heuristic and is treated as one — it refuses the query
+	// rather than revoking the grant, and says which limit was crossed.
+	if why := suspiciousQuery(q); why != "" {
+		r.emit(Event{Action: "deny", Host: q, Method: "DNS", Reason: why})
+		return nil, &ErrRefused{Name: q}
+	}
+
 	up := r.Upstream
 	if up == nil {
 		up = defaultUpstream
