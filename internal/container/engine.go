@@ -455,10 +455,38 @@ func (e *Engine) DiskUsage(ctx context.Context) ([]string, error) {
 		if len(fields) < 4 {
 			continue
 		}
-		out = append(out, fmt.Sprintf("%-15s %4s items  %10s  reclaimable %s",
-			fields[0]+":", fields[1], fields[2], fields[3]))
+		row := fmt.Sprintf("%-15s %4s items  %10s", fields[0]+":", fields[1], fields[2])
+		if r := reclaimable(fields[3]); r != "" {
+			row += "  " + r + " reclaimable"
+		}
+		out = append(out, row)
 	}
 	return out, nil
+}
+
+// reclaimable returns docker's figure when it means something, and nothing
+// when it does not.
+//
+// docker computes this per type and gets it wrong where layers are shared:
+// on a real daemon it printed "-4.034e+09B (-26%)" for images, in its own
+// table as well as through a template. A negative quantity of reclaimable
+// space is not a number a reader can do anything with, and relaying it
+// makes the tool look broken for a fault it does not have. Where the value
+// is not a plain positive size, the column is left out.
+func reclaimable(v string) string {
+	v = strings.TrimSpace(v)
+	size, _, _ := strings.Cut(v, " ")
+	switch {
+	case size == "" || strings.HasPrefix(size, "-"):
+		return ""
+	// Scientific notation is docker falling back on %g for a value it could
+	// not render, which is the same signal.
+	case strings.Contains(size, "e+"), strings.Contains(size, "e-"):
+		return ""
+	case size == "0B":
+		return ""
+	}
+	return v
 }
 
 // ImageLabel reads one label off an image, empty when it carries none.

@@ -93,7 +93,7 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 	// wrong, and disk pressure is one of the things that is wrong.
 	fmt.Fprintf(out, "\nDisk\n")
 	if backendUsable {
-		reportDisk(cmd.Context(), out, container.New(drv))
+		reportDisk(cmd.Context(), env, out, container.New(drv))
 	} else {
 		fmt.Fprintf(out, "  ?  not checked: backend unavailable\n")
 	}
@@ -113,16 +113,40 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 // reportDisk shows what this tool is using on the daemon, which is the
 // number behind "my disk is full" far more often than anything in the
 // project directory.
-func reportDisk(ctx context.Context, out interface{ Write([]byte) (int, error) }, eng *container.Engine) {
+func reportDisk(ctx context.Context, env *Env, out interface{ Write([]byte) (int, error) },
+	eng *container.Engine) {
 	usage, err := eng.DiskUsage(ctx)
 	if err != nil {
 		fmt.Fprintf(out, "  ?  %v\n", err)
-		return
 	}
 	for _, line := range usage {
 		fmt.Fprintf(out, "  %s\n", line)
 	}
-	fmt.Fprintf(out, "  free space:    dev clean --all, dev clean --images, dev clone list\n")
+
+	// What this tool is using, which is the part a reader can act on. The
+	// totals above belong to the daemon and include everything else on it;
+	// listing `dev clean` under them implied otherwise.
+	clones, cerr := scanClones(ctx, env.Runner, clonesRoot(env))
+	if cerr == nil && len(clones) > 0 {
+		var total int64
+		var holding int
+		for _, c := range clones {
+			total += c.Size
+			if c.Dirty > 0 || c.Unmerged > 0 {
+				holding++
+			}
+		}
+		// Same column widths as the daemon's rows above, so the two read
+		// as one table rather than as a table and an afterthought.
+		fmt.Fprintf(out, "  %-15s %4d clones %10s", "dev clones:", len(clones), humanSize(total))
+		if holding > 0 {
+			fmt.Fprintf(out, "  %d holding work", holding)
+		}
+		fmt.Fprintln(out)
+		fmt.Fprintf(out, "  %-15s dev clone prune, dev clean --all\n", "free space:")
+		return
+	}
+	fmt.Fprintf(out, "  %-15s dev clean --all\n", "free space:")
 }
 
 // reportProjectHygiene names the things that make a project slow or
