@@ -128,28 +128,48 @@ tell you what moved.
 
 ---
 
-## 5. A run does not have to touch your working tree
+## 5. An agent does not touch your working tree
 
 ```sh
-dev agent run claude --clone
+dev agent run claude
 ```
 
 mounts a private copy of the repository instead of the directory you are
-editing. Your uncommitted work and untracked files are carried in, so the
-run starts from what you see; anything it does afterwards — including
-`rm -rf` — lands in the clone.
+editing — no flag, that is the default. Your uncommitted work and untracked
+files are carried in, so the run starts from what you see; anything it does
+afterwards, including `rm -rf`, lands in the clone.
 
-The work is not thrown away, it is moved:
+Why agents and not you: an agent cannot reach your SSH keys, but it can
+edit the things your *host* runs later — git hooks, npm scripts, Makefiles,
+CI files. It also acts on instructions from a model rather than from the
+person in the room.
+
+The work is not thrown away, it is moved, and comes back in two commands:
 
 ```sh
-git -C "$(dev clone path)" status     # review with your own tools
-git fetch "$(dev clone path)" HEAD    # bring it back
+dev clone diff     # what it did, read with your own tools
+dev clone apply    # bring it back
 ```
 
-Use it when the run is unattended, when the thing running is not
-trustworthy, or when you want a change to arrive as a diff you approve
-rather than as edits already made. For your own interactive work the plain
-mount is better — the edits just appear.
+`apply` fast-forwards when that needs no decision. Where your branch has
+moved too, it fetches to a branch and shows you the merge, rebase and diff
+options rather than choosing — an automatic merge is a judgement about code
+the tool has not read.
+
+`--in-place` opts out. `dev run` and `dev shell` are unchanged: a human
+editing their own tree is the case the plain mount is right for, and
+`--clone` is there when you want it anyway.
+
+Clones are full copies, so they cost disk:
+
+```sh
+dev clone list     # every clone, its size, and what work is still in it
+dev clone prune    # remove the ones holding nothing
+```
+
+`prune` keeps anything holding commits the project lacks or uncommitted
+changes, and anything touched in the last week. Past 5 GiB the total is
+printed when a clone is made, rather than discovered later.
 
 ---
 

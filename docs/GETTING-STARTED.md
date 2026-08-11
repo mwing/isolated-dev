@@ -230,14 +230,18 @@ dev in a large repository.
 For anything unattended, put the run in a private clone:
 
 ```sh
-dev agent run claude --clone
+dev agent run claude
 ```
 
-Your uncommitted work is carried in; whatever the agent does stays in
-`~/.dev-envs/clones/<project>` and comes back through git when you want
-it — see [USE-CASES.md](USE-CASES.md) for the full patch workflow. On a large
-repository add `--clone-depth 1`, which copies one commit of history
-instead of all of it. Worth making the habit early — it is the difference between reviewing
+That is the default, not a flag: your uncommitted work is carried in,
+whatever the agent does stays in `~/.dev-envs/clones/<project>`, and
+`dev clone diff` then `dev clone apply` bring it back — see
+[USE-CASES.md](USE-CASES.md) for the full workflow. On a large repository
+add `--clone-depth 1`, which copies one commit of history instead of all
+of it, and `--in-place` opts out entirely.
+
+Clones are copies, so `dev clone list` and `dev clone prune` are worth
+knowing before the disk notices. Worth making the habit early — it is the difference between reviewing
 a diff and restoring from a stash.
 
 ---

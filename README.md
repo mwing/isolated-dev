@@ -106,7 +106,7 @@ still uses.
 dev run -c 'CMD'        # run one command in the sandbox
 dev shell               # interactive shell
 dev console             # full-screen: output, egress decisions, prompts
-dev agent run claude    # a coding agent, sandboxed (add --clone)
+dev agent run claude    # a coding agent, sandboxed, in a private clone
 dev status              # what is running, under which policy
 dev scan                # vulnerabilities in the image you actually run
 dev clean               # tear it down

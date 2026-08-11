@@ -72,26 +72,30 @@ written at all — a half-scaffolded directory is worse than a refusal, and
 ## Letting an agent run without risking your working tree
 
 ```sh
-dev agent run claude --clone
-dev run --clone -c './migrate.sh'
+dev agent run claude            # clones by default
+dev run --clone -c './migrate.sh'   # opt in for a plain run
 ```
 
-The container gets a private clone of the repository rather than the
-directory you are editing. Your uncommitted changes and untracked files
-are carried in, so the run starts from what you see; anything it does
-afterwards — including `rm -rf` — lands in the clone.
+An agent gets a private clone rather than the directory you are editing.
+Your uncommitted changes and untracked files are carried in, so the run
+starts from what you see; anything it does afterwards — including
+`rm -rf` — lands in the clone.
 
 ```
-Clone:    ~/.dev-envs/clones/my-project
-          uncommitted changes carried in
-          1 untracked file(s) copied in
-Bring back: git -C . fetch ~/.dev-envs/clones/my-project
+Clone:     ~/.dev-envs/clones/my-project
+           uncommitted changes carried in
+           1 untracked file(s) copied in
+Review:    dev clone diff
+Bring back: dev clone apply
 ```
 
-The work is not thrown away, it is moved: review it with
-`git -C <clone> status`, and fetch what you want back. A second run reuses
-the same clone rather than discarding the first one's work, and says how
-far it has drifted from the project.
+The work is not thrown away, it is moved. A second run reuses the same
+clone rather than discarding the first one's work, and says how far it has
+drifted from the project.
+
+`--in-place` runs the agent in your working tree instead, when you want
+that. `dev run` and `dev shell` already work there — a human editing their
+own files is what the plain mount is for.
 
 Two things it does not carry: ignored files, so dependencies are installed
 inside the sandbox rather than copied, and git objects are copied rather
@@ -104,13 +108,18 @@ For a large repository, copy only the history the run needs:
 dev agent run claude --clone-depth 1
 ```
 
-`--clone-depth` implies `--clone`. It changes the transport git uses, not
-the guarantee: a shallow clone is fetched over `file://`, which copies
-objects rather than sharing them, so the project's own object store is
-still untouched. The cost is that `git log` is short and anything deriving
-a version from `git describe` will see less than the project does.
+On `dev run` and `dev shell`, `--clone-depth` implies `--clone`; an agent
+is already cloning. It changes the transport git uses, not the guarantee: a
+shallow clone is fetched over `file://`, which copies objects rather than
+sharing them, so the project's own object store is still untouched. The
+cost is that `git log` is short and anything deriving a version from
+`git describe` sees less than the project does.
 
-Needs a git repository, and the repository root.
+A clone needs a git repository, and the repository root. `dev run --clone`
+refuses without one, since you asked for it explicitly. An agent run
+continues in your files instead and says so loudly — it clones by default,
+so failing over a flag you never typed would be blaming you for the tool's
+own choice.
 
 ---
 
@@ -123,7 +132,7 @@ the workflow worth learning.
 **1. Do the work in the clone.**
 
 ```sh
-dev agent run claude --clone-depth 1 -- "fix the retry logic in worker.py"
+dev agent run claude -- "fix the retry logic in worker.py"
 ```
 
 Or by hand, which is the same thing:
@@ -141,11 +150,8 @@ commit is what makes the next two steps one command each.
 **2. Look at what came out, from outside.**
 
 ```sh
-CLONE=~/.dev-envs/clones/my-project
-
-git -C $CLONE log --oneline -5
-git -C $CLONE status
-git -C $CLONE diff HEAD~1        # or against whatever it started from
+dev clone diff           # commits the project lacks, then uncommitted changes
+dev clone diff --stat    # by file, when the patch is long
 ```
 
 You are reading this with your own tools, on the host, with the sandbox
@@ -154,20 +160,31 @@ gone. Nothing you are about to merge has run on your machine.
 **3. Bring it back.**
 
 ```sh
-git fetch $CLONE fix-retries          # the branch, by name
-git log --oneline FETCH_HEAD -3       # confirm it is what you read
-git cherry-pick FETCH_HEAD            # one commit
+dev clone apply
 ```
 
-For a series of commits, merge or rebase the fetched branch instead:
+That fetches the clone's commits onto a local branch and fast-forwards
+onto them, which is the whole job when you have not touched the tree
+meanwhile — the common case, since the agent was working while you were
+not.
 
-```sh
-git fetch $CLONE fix-retries:fix-retries   # create the branch locally
-git rebase fix-retries                     # or: git merge fix-retries
+Where your branch has moved too, it stops and hands you the decision:
+
+```
+2 commit(s) fetched onto clone-work.
+
+The current branch has moved too, so this is a decision:
+  git merge clone-work      # keep both histories
+  git rebase clone-work     # replay yours on top
+  git diff HEAD..clone-work # look first
 ```
 
-If the agent worked on `HEAD` without a branch, `git fetch $CLONE HEAD`
-and cherry-pick `FETCH_HEAD` — the commits are reachable either way.
+It will not merge for you. An automatic merge is a judgement about code
+this tool has not read.
+
+Uncommitted changes in the clone are not fetched — git moves commits, not
+working trees — and `apply` says so rather than quietly bringing back less
+than you asked for.
 
 **This works from a shallow clone too.** The new commits sit on top of a
 commit your repository already has, so fetching them needs nothing that
@@ -187,17 +204,31 @@ to work that exists nowhere else. Once you have fetched the commits back,
 it stops objecting: it asks the project whether it contains them, rather
 than asking the clone whether it pushed them.
 
-Nothing outside that directory changed. The next `--clone` run starts
-fresh — which is the point of running it there in the first place.
+Nothing outside that directory changed. The next agent run starts fresh —
+which is the point of running it there in the first place.
 
-### Keeping track of them
+### Keeping the disk honest
 
-Each clone is a full copy of a repository, sitting somewhere nobody looks:
+Every agent run makes one of these, and a clone is a full copy of a
+repository. That adds up quietly, which is the worst way for a disk
+problem to arrive:
 
 ```sh
-dev clone list     # every clone, its size, branch, and what is still in it
-dev clone path     # this project's, for scripting
+dev clone list                      # every clone, its size, and what is in it
+dev clone prune                     # remove the ones holding nothing
+dev clone prune --dry-run           # the number first
+dev clone prune --older-than 30d    # a wider window than the default week
+dev clone prune --force             # take the ones holding work too
+dev clone path                      # this project's, for scripting
 ```
+
+`prune` keeps three kinds of clone and says which: those holding commits
+the project does not have, those with uncommitted changes, and those
+touched within the window — a run that finished this morning is one
+somebody may still be reading.
+
+Past 5 GiB the total is printed when a clone is created, so the number
+arrives while you are there rather than when the disk fills.
 
 ```
   acme-platform            1.2G     fix-retries            2 commit(s) only here
