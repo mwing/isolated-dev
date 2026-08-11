@@ -63,6 +63,7 @@ Useful flags on `run`, `shell` and `console`:
 | `dev agent run NAME -- "prompt"` | pass a prompt or flags through to the agent |
 | `dev agent policy` | the egress policy a run would enforce, without running it |
 | `dev agent logout NAME` | discard the stored login |
+| `dev agent update NAME` | move the agent to the current published version, and say what moved |
 
 Agents run at the untrusted level regardless of the project's trust: they
 act on instructions from a model, so they do not inherit your decision to

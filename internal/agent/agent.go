@@ -98,6 +98,42 @@ func (a *Agent) Pinned() bool {
 	return v != "" && v != "latest"
 }
 
+// InstallCommand renders the install line with the version substituted.
+//
+// A definition writes `npm install -g pkg@{{VERSION}}` and the pin decides
+// what that fetches. Without the placeholder the command is used as
+// written, so a definition that pins by other means still works — but it
+// is then responsible for its own reproducibility, and `dev agent list`
+// has no way to know.
+func (a *Agent) InstallCommand() string {
+	v := strings.TrimSpace(a.Version)
+	if v == "" {
+		v = "latest"
+	}
+	return strings.ReplaceAll(a.Install, "{{VERSION}}", v)
+}
+
+// Package is the npm package a definition installs, when it can be read
+// from the install command.
+//
+// Used to ask an image what it actually installed, which is how `dev agent
+// update` learns the version to pin rather than guessing one.
+func (a *Agent) Package() string {
+	fields := strings.Fields(a.Install)
+	for _, f := range fields {
+		if strings.HasPrefix(f, "-") || f == "npm" || f == "install" {
+			continue
+		}
+		// Strip whatever version spec is attached; the name is what an
+		// image can be queried about.
+		if i := strings.LastIndex(f, "@"); i > 0 {
+			f = f[:i]
+		}
+		return f
+	}
+	return ""
+}
+
 // Source returns where this definition was loaded from.
 func (a *Agent) Source() string {
 	if a.source == "" {

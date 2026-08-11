@@ -80,17 +80,19 @@ dev console -- npm ci                 # same, in the full-screen view
 Grants live in `~/.dev-envs`, never in the repository — configuration
 inside a repository is configuration the repository can grant itself.
 
-**When you are just exploring a large unfamiliar repo**, `--network open`
-first and tighten later is a reasonable order. Run once open, then:
+**When you are exploring a large unfamiliar repo**, run it filtered and let
+it fail. That sounds slower and is not: a blocked run tells you exactly
+what the project wanted, and an open one tells you nothing.
 
 ```sh
-dev history hosts    # everything it actually reached
+dev run --egress-prompt ask -c 'npm ci'   # each blocked host becomes a question
+dev history hosts                         # afterwards: everything it reached
 ```
 
-and grant that list rather than guessing. Nothing is recorded for an open
-run's traffic, though — the proxy is what records — so do this the other
-way around when the answer matters: run filtered, let it fail, read
-`dev history`.
+Nothing is recorded for an open run, because the proxy is what records —
+so `--network open` is the one mode that cannot teach you what to allow.
+Reach for it when you already know a project needs unrestricted egress,
+not while trying to find out.
 
 ---
 

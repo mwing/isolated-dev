@@ -128,7 +128,13 @@ func Dockerfile(a *Agent, base string) string {
 		fmt.Fprintf(&b, "ENV PATH=%s/bin:$PATH\n", RuntimePath)
 	}
 	if a.Install != "" {
-		fmt.Fprintf(&b, "RUN %s\n", a.Install)
+		// The version reaches the install command, which it did not before:
+		// Version was declared, warned about when unpinned, and baked into
+		// the image tag, while `npm install -g pkg` fetched whatever npm
+		// felt like. So the tag named a version nothing had installed, and
+		// two builds of the same "pinned" agent could differ. A pin that
+		// does not reach the fetch is decoration.
+		fmt.Fprintf(&b, "RUN %s\n", a.InstallCommand())
 	}
 	fmt.Fprintf(&b, "RUN mkdir -p %s && chown -R 1000:1000 %s\n", a.ConfigDir, a.ConfigDir)
 	b.WriteString("USER 1000:1000\n")

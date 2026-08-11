@@ -13,8 +13,12 @@ func builtins() []Agent {
 		{
 			Name:        "claude",
 			Description: "Claude Code (Anthropic)",
-			Version:     "latest",
-			Binary:      "claude",
+			// Pinned to a published version, resolved and recorded rather
+			// than tracked. `dev agent update claude` moves it and says
+			// what moved; until then two builds produce the same agent,
+			// which is what `dev pin` asks of every other image.
+			Version: "2.1.227",
+			Binary:  "claude",
 			// The sandbox is the boundary, which is what makes skipping
 			// the per-action prompts reasonable here and nowhere else.
 			Args:         []string{"--dangerously-skip-permissions"},
@@ -23,7 +27,7 @@ func builtins() []Agent {
 			Base:         "debian:bookworm-slim",
 			Runtime:      "node",
 			RuntimeImage: "node:22-bookworm-slim",
-			Install:      "npm install -g @anthropic-ai/claude-code",
+			Install:      "npm install -g @anthropic-ai/claude-code@{{VERSION}}",
 			// Rather than allowlist the telemetry endpoints, turn the
 			// traffic off at the source: nothing to block, nothing to
 			// report, no noise in the notices.
@@ -60,7 +64,7 @@ func builtins() []Agent {
 		{
 			Name:         "codex",
 			Description:  "OpenAI Codex CLI",
-			Version:      "latest",
+			Version:      "0.147.0",
 			Binary:       "codex",
 			Args:         []string{"--dangerously-bypass-approvals-and-sandbox"},
 			ConfigDir:    "/home/dev/.codex",
@@ -68,7 +72,7 @@ func builtins() []Agent {
 			Base:         "debian:bookworm-slim",
 			Runtime:      "node",
 			RuntimeImage: "node:22-bookworm-slim",
-			Install:      "npm install -g @openai/codex",
+			Install:      "npm install -g @openai/codex@{{VERSION}}",
 			AllowHosts: []string{
 				"api.openai.com",
 				"auth.openai.com",

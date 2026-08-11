@@ -33,6 +33,7 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentListCmd(env))
 	cmd.AddCommand(newAgentRunCmd(env))
 	cmd.AddCommand(newAgentLogoutCmd(env))
+	cmd.AddCommand(newAgentUpdateCmd(env))
 	cmd.AddCommand(newAgentPolicyCmd(env))
 	// `accept` stays: it reviews the egress a project's .devenv.yaml
 	// requests on behalf of an agent, and the root already has an `accept`

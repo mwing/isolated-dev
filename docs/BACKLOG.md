@@ -70,7 +70,7 @@ What survives:
 - The documentation duty: say plainly that grants follow the path, not the
   code and not the repository. Done in ROADMAP 4.2.1.
 
-### B3. Stop recommending `--network open` for unfamiliar repos — `todo`
+### B3. Stop recommending `--network open` for unfamiliar repos — `done`
 
 `docs/GETTING-STARTED.md` suggests running open first and tightening after,
 then immediately notes that an open run is not proxied, so the allowlist
@@ -81,7 +81,7 @@ newcomer at the one mode with no observation.
 `--egress-prompt ask` and `dev history` instead. See B14 for the feature
 that should replace it properly.
 
-### B4. Pin the built-in agent versions — `todo`
+### B4. Pin the built-in agent versions — `done`
 
 Both built-ins declare `Version: "latest"` and install with unversioned
 npm commands, so rebuilding an agent image can silently produce a different
