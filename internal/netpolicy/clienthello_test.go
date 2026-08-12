@@ -16,7 +16,7 @@ import (
 // so the parser is tested against the bytes it will actually meet rather
 // than against a fixture written from the RFC by the same hand that wrote
 // the parser.
-func captureClientHello(t *testing.T, cfg *tls.Config) []byte {
+func captureClientHello(t testing.TB, cfg *tls.Config) []byte {
 	t.Helper()
 	client, server := net.Pipe()
 	t.Cleanup(func() {

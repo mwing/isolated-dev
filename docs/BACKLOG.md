@@ -117,13 +117,24 @@ and `dev clone diff` / `dev clone apply` make the round trip one command
 each. `dev run` and `dev shell` stay in place — a human editing their own
 tree is the case the plain mount is right for.
 
-### B7. Fuzz the ClientHello parser — `todo`
+### B7. Fuzz the ClientHello parser — `done`
 
 Hand-rolled binary parsing of attacker-controlled bytes, which has already
 had one bypass (record fragmentation, `8e9423e`).
 
-**Done when:** `FuzzParseClientHello` runs in CI with a seed corpus, and
-the DNS name parser and allowlist entry parser have the same treatment.
+Three targets in `internal/netpolicy/fuzz_test.go`, run per-push for 60s
+each and for 10 minutes on a weekly schedule. The properties are the ones a
+bypass would break, not "does not crash": a name is only reported for input
+that contains one, an unreadable handshake reports unreadable rather than
+absent, and a rule survives being printed and read back.
+
+The ClientHello parser held at 43M executions. The allowlist parser did
+not: `.`, `..`, `*.a b.com` and `[#]:1` all parsed into rules whose printed
+form was empty, unparseable, or — for the last one — a comment, so the
+grant vanished on the next read. The fix replaced a list of banned
+characters with the actual invariant (a hostname label is letters, digits,
+hyphen or underscore, and is never empty), which is what the character
+blacklist had been approximating one finding at a time.
 
 ### B8. One `dev accept` — `todo`
 
@@ -246,6 +257,28 @@ asks for an action and never holds the secret. See ROADMAP 4.3.2 for why
 this rather than injecting credentials at the proxy, which would cost the
 no-TLS-interception property. Wanted when a real case demands it, not
 before.
+
+### B22. Detecting secrets in the workspace — `dropped`
+
+Projects contain `.env` files and other credentials, and the workspace is
+mounted into the container. An agent reads files by default and its own API
+endpoint is an allowlisted bidirectional channel (ROADMAP 4.4), so a secret
+in the tree is the payload that path is worth having.
+
+**Dropped, deliberately:** this tool will not parse project files looking
+for secrets. Detection is a different job with its own failure modes — false
+positives that train people to ignore it, false negatives that imply a
+coverage it does not have — and doing it badly beside a security promise is
+worse than not doing it. There are tools for this.
+
+What is true and free is worth knowing instead: a clone carries tracked
+files and untracked ones, and skips ignored files. So a `.gitignore`d `.env`
+never reaches an agent, which is the common case. A committed secret does,
+and no exclusion this tool could make would help — deleting it from the
+clone's checkout leaves it in the clone's history, one `git show` away.
+
+The remedies that work are the ordinary ones: gitignore it, `git rm` it, or
+run `--offline`.
 
 **Dropped:** removing `dev new`. The conceptual-surface argument is fair,
 but scaffolding is in use and its removal is a product decision, not a

@@ -5,6 +5,11 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Fuzzing finds in minutes what it will not find in seconds, and a PR
+    # cannot afford minutes. The weekly run is where the deeper search
+    # happens; the per-push burst only has to catch regressions.
+    - cron: '17 4 * * 1'
 
 permissions:
   contents: read
@@ -82,6 +87,41 @@ jobs:
           # newer language version than it was compiled against. Raising the
           # `go` directive means raising this too.
           version: v2.12.2
+
+  # The parsers that read bytes an attacker chooses: the TLS ClientHello the
+  # proxy reads a server name out of, the allowlist entries that decide what
+  # a container may reach, and the DNS names the resolver screens. Every one
+  # of them has already had a bug that a hand-written test did not have the
+  # imagination to write — a handshake split across two records read as "no
+  # SNI", which is the allow branch, and allowlist entries that printed back
+  # as something that no longer parsed.
+  #
+  # The seed corpora under testdata/fuzz run as ordinary tests in the job
+  # above, so past findings stay fixed even if this job is skipped.
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [FuzzParseClientHello, FuzzParseAllowlist, FuzzSuspiciousQuery]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26'
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '60s' }}
+        run: |
+          go test ./internal/netpolicy/ -run '^$' \
+            -fuzz='^${{ matrix.target }}$' -fuzztime="$FUZZTIME"
+      - name: Show the failing input
+        if: failure()
+        # The corpus entry is the whole finding, and it is written inside the
+        # runner. Printed here so it can be copied into testdata/ from the
+        # log rather than reproduced by guesswork.
+        run: |
+          find internal/netpolicy/testdata/fuzz -type f -newer go.mod -print -exec cat {} \;
 
   vulncheck:
     runs-on: ubuntu-latest

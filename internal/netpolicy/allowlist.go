@@ -89,6 +89,9 @@ func parseEntry(entry string) (Rule, error) {
 		if parent == "" {
 			return Rule{}, fmt.Errorf("netpolicy: %q: wildcard needs a parent domain (e.g. *.example.com)", entry)
 		}
+		if err := checkHostShape(entry, normalizeHost(parent)); err != nil {
+			return Rule{}, err
+		}
 		// A wildcard is only as narrow as its parent. Under a public
 		// suffix it is not narrow at all: it admits every name anyone can
 		// create there, including one created because the grant exists.
@@ -105,10 +108,65 @@ func parseEntry(entry string) (Rule, error) {
 		return Rule{IP: ip, Ports: ports}, nil
 	}
 
-	if host == "" || strings.ContainsAny(host, "*/ ") {
-		return Rule{}, fmt.Errorf("netpolicy: %q: not a valid host", entry)
+	if err := checkHostShape(entry, normalizeHost(host)); err != nil {
+		return Rule{}, err
 	}
 	return Rule{Host: normalizeHost(host), Ports: ports}, nil
+}
+
+// checkHostShape rejects strings that are not hostnames anyone could reach.
+//
+// Checked after normalizing, not before, and this is the whole point: "."
+// passes every test above and normalizes to nothing, while ".." normalizes
+// to "." and prints back as a rule that no longer parses. Either way the
+// policy ends up holding a grant that cannot be displayed in `dev grants`
+// or read back from the file it was written to — and a grant nobody can
+// review is not a policy. Both were found by fuzzing, within seconds.
+//
+// The empty-label rule is what catches them, and it is the real invariant:
+// a hostname has no empty parts. It also rules out ".example.com" and
+// "a..b", which were accepted before for the same reason.
+func checkHostShape(entry, host string) error {
+	if host == "" {
+		return fmt.Errorf("netpolicy: %q: names no host", entry)
+	}
+	if len(host) > 253 {
+		return fmt.Errorf("netpolicy: %q: hostname is longer than the 253-character limit", entry)
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" {
+			return fmt.Errorf("netpolicy: %q: has an empty part between dots", entry)
+		}
+		if len(label) > 63 {
+			return fmt.Errorf("netpolicy: %q: %q is longer than the 63-character limit for one part of a hostname", entry, label)
+		}
+		for _, r := range label {
+			if !isHostRune(r) {
+				return fmt.Errorf("netpolicy: %q: %q is not something a hostname can contain", entry, r)
+			}
+		}
+	}
+	return nil
+}
+
+// isHostRune reports whether a character may appear in a hostname label:
+// letters, digits, hyphen, and underscore, which real names do use.
+//
+// An allowed set rather than a list of rejected characters, because the
+// rejected list lost. Fuzzing walked straight through each ban in turn —
+// a space, then "#", which prints as a rule that reads back as a comment
+// and takes the grant with it. Non-ASCII is refused earlier and separately,
+// where the reason to refuse it is homoglyphs rather than shape.
+func isHostRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		return true
+	case r >= '0' && r <= '9':
+		return true
+	case r == '-' || r == '_':
+		return true
+	}
+	return false
 }
 
 // normalizeHost lowercases and strips a trailing dot so that
