@@ -132,7 +132,7 @@ func showHistory(env *Env, limit int, deniedOnly bool) error {
 			fmt.Fprintf(env.Stdout, "    reached: %s\n", strings.Join(topKeys(r.Allowed, 6), " "))
 		}
 		for _, line := range netpolicy.Summary(r.Denied) {
-			fmt.Fprintf(env.Stdout, "    ⛔ %s\n", line)
+			fmt.Fprintf(env.Stdout, "    ✗ %s\n", line)
 		}
 	}
 	return nil

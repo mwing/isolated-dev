@@ -50,7 +50,7 @@ func (d *Driver) Docker(ctx context.Context, call backend.Call) (runner.Result, 
 // pretending: a report claiming a running VM on a machine that has none
 // would send someone looking for a problem that is not there.
 func (d *Driver) Probe(ctx context.Context) (backend.Status, error) {
-	st := backend.Status{Backend: d.Name(), VMName: "(none: local daemon)"}
+	st := backend.Status{Backend: d.Name(), CLIName: "docker", VMName: "(none: local daemon)"}
 
 	lookPath := d.LookPath
 	if lookPath == nil {

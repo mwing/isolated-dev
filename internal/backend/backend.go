@@ -26,8 +26,12 @@ type Call struct {
 
 // Status is what `doctor` reports about a backend.
 type Status struct {
-	Backend       string
-	CLIFound      bool
+	Backend  string
+	CLIFound bool
+	// CLIName is the command this backend drives, e.g. "orb" or "docker".
+	// Reported rather than assumed: doctor used to label whatever it found
+	// "orb CLI", so the docker backend claimed an orb it was not using.
+	CLIName       string
 	CLIPath       string
 	VMName        string
 	VMExists      bool

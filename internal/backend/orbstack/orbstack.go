@@ -51,7 +51,7 @@ func (d *Driver) Docker(ctx context.Context, call backend.Call) (runner.Result, 
 // Probe reports OrbStack availability without changing any state: it never
 // starts the VM. `doctor` diagnoses, it does not repair.
 func (d *Driver) Probe(ctx context.Context) (backend.Status, error) {
-	st := backend.Status{Backend: d.Name(), VMName: d.VM}
+	st := backend.Status{Backend: d.Name(), CLIName: "orb", VMName: d.VM}
 
 	path, found := d.lookPath("orb")
 	st.CLIFound, st.CLIPath = found, path

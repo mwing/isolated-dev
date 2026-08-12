@@ -1,6 +1,7 @@
 package wizard
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -154,6 +155,59 @@ func TestCursorStaysInRange(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.Chosen() == nil || m.Chosen().Label != "only" {
 		t.Fatalf("chosen = %v", m.Chosen())
+	}
+}
+
+func TestTheMenuFitsTheTerminalAndFollowsTheCursor(t *testing.T) {
+	// The list used to be drawn in full regardless of height, so on a short
+	// terminal the entries below the fold scrolled away along with the
+	// cursor, and moving down led somewhere the reader could not see.
+	items := make([]Action, 30)
+	for i := range items {
+		items[i] = Action{Label: fmt.Sprintf("action %02d", i), Args: []string{"doctor"}}
+	}
+	m := New("t", []Check{{OK, "a check", ""}}, items)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	countLines := func(s string) int { return strings.Count(s, "\n") }
+	if got := countLines(m.View()); got > 24 {
+		t.Errorf("the menu drew %d lines into a 24-line terminal", got)
+	}
+	if !strings.Contains(m.View(), "action 00") {
+		t.Error("the first entry is not shown with the cursor at the top")
+	}
+
+	for i := 0; i < 29; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+	view := m.View()
+	if !strings.Contains(view, "action 29") {
+		t.Errorf("the cursor moved to an entry that is not on screen:\n%s", view)
+	}
+	if got := countLines(view); got > 24 {
+		t.Errorf("the menu drew %d lines into a 24-line terminal", got)
+	}
+	if !strings.Contains(view, "more above") {
+		t.Errorf("nothing says the list is scrolled:\n%s", view)
+	}
+}
+
+// The explanation block changes with the cursor, and a block that grows and
+// shrinks moves everything under it while the reader is moving through it.
+func TestTheMenuDoesNotJumpAsTheCursorMoves(t *testing.T) {
+	m := New("t", nil, []Action{
+		{Label: "short", Args: []string{"doctor"}, Explain: "brief"},
+		{Label: "long", Args: []string{"doctor"}, Explain: strings.Repeat("many words here ", 20)},
+		{Label: "none", Args: []string{"doctor"}},
+	})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	first := strings.Count(m.View(), "\n")
+	for i := 0; i < 2; i++ {
+		m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		if got := strings.Count(m.View(), "\n"); got != first {
+			t.Fatalf("the view changed height from %d to %d when the cursor moved", first, got)
+		}
 	}
 }
 

@@ -342,7 +342,7 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 		}
 	case "deny":
 		m.blocked++
-		m.addEvent(kindDeny, "⛔ blocked "+dest)
+		m.addEvent(kindDeny, "✗ blocked "+dest)
 	case "timeout":
 		m.blocked++
 		m.addEvent(kindWarn, "⏱ no answer, blocked "+dest)
@@ -464,6 +464,13 @@ func (m *Model) header() string {
 			counts += fmt.Sprintf("  %d blocked", m.blocked)
 		}
 	}
+	// A blocked count is the one number in this header worth interrupting
+	// for, and rendering it in the same faint grey as the rest made it the
+	// easiest thing on screen to miss.
+	countRender := countStyle.Render
+	if m.blocked > 0 {
+		countRender = denyStyle.Render
+	}
 
 	left := truncateWidth(m.Title, m.width)
 	room := m.width - lipgloss.Width(left) - 2
@@ -480,7 +487,7 @@ func (m *Model) header() string {
 		gap = 1
 	}
 	return headerStyle.Render(left) + "  " + dimStyle.Render(middle) +
-		strings.Repeat(" ", gap) + countStyle.Render(right)
+		strings.Repeat(" ", gap) + countRender(right)
 }
 
 // divider labels the strip below it. Unlabelled, the second pane reads as
@@ -620,12 +627,14 @@ func (m *Model) footer() string {
 		}
 		return askStyle.Render(line)
 	}
+	// Once the workload has exited there is nothing left to stop, so the
+	// key that leaves should not be described as stopping it.
+	if m.finished {
+		return dimStyle.Render(truncateWidth(m.status+" — press q to close", m.width))
+	}
 	quit := "q to stop"
 	if m.Term != nil {
 		quit = "ctrl+q or double ctrl+c to leave"
-	}
-	if m.finished {
-		return dimStyle.Render(truncateWidth(m.status+" — press "+quit, m.width))
 	}
 	return dimStyle.Render(truncateWidth(m.status+" — "+quit, m.width))
 }

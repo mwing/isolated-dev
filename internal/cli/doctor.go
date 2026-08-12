@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -32,20 +33,27 @@ func newDoctorCmd(env *Env) *cobra.Command {
 func runDoctor(cmd *cobra.Command, env *Env) error {
 	out := env.Stdout
 	ok := true
+	// What stops a run, gathered as it is found. "Fix the items marked ✗
+	// above" asks the reader to scan back through six sections for a mark
+	// they may not be able to see; the verdict can just say it.
+	var blockers []string
 
-	fmt.Fprintf(out, "dev doctor\n\n")
+	fmt.Fprintf(out, "%s\n\n", sectionStyle.Render("dev doctor"))
 
-	fmt.Fprintf(out, "Host\n")
+	section(out, "Host")
 	fmt.Fprintf(out, "  platform:      %s/%s\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Fprintf(out, "  project dir:   %s\n", env.Paths.ProjectDir)
 
 	cfg, err := config.Load(env.Paths, env.Env)
 	if err != nil {
-		fmt.Fprintf(out, "\nConfiguration\n  ✗ %v\n", err)
+		fmt.Fprintln(out)
+		section(out, "Configuration")
+		fmt.Fprintf(out, "  %s %v\n", failStyle.Render("✗"), err)
 		return err
 	}
 
-	fmt.Fprintf(out, "\nConfiguration\n")
+	fmt.Fprintln(out)
+	section(out, "Configuration")
 	fmt.Fprintf(out, "  global:        %s %s\n", env.Paths.Global, presence(env.Paths.Global))
 	fmt.Fprintf(out, "  project:       %s %s\n", env.Paths.Project, presence(env.Paths.Project))
 	fmt.Fprintf(out, "  vm_name:       %s (%s)\n", cfg.VMName, cfg.Origin("vm_name"))
@@ -63,51 +71,76 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 	}
 
 	for _, n := range cfg.Notes {
-		fmt.Fprintf(out, "  ⚠  %s\n", n)
+		fmt.Fprintf(out, "  %s  %s\n", warnStyle.Render("⚠"), n)
 	}
 
-	fmt.Fprintf(out, "\nBackend\n")
+	fmt.Fprintln(out)
+	section(out, "Backend")
 	drv := env.driver(cfg.VMName)
 	backendUsable := false
 	st, err := drv.Probe(cmd.Context())
 	if err != nil {
-		fmt.Fprintf(out, "  ✗ probing %s: %v\n", drv.Name(), err)
+		fmt.Fprintf(out, "  %s probing %s: %v\n", failStyle.Render("✗"), drv.Name(), err)
+		blockers = append(blockers, fmt.Sprintf("the %s backend could not be probed: %v", drv.Name(), err))
 		ok = false
 	} else {
 		backendUsable = reportStatus(out, st)
 		ok = backendUsable && ok
+		if !backendUsable {
+			blockers = append(blockers,
+				firstNonEmpty(st.Detail, "the container backend is not usable"))
+		}
 	}
 
 	// A missing sidecar image blocks every agent run, and without this it
 	// only surfaced once a run had already built the overlay. Asking the
 	// daemon is a read: doctor never builds the image it reports on.
-	fmt.Fprintf(out, "\nEgress sidecar\n")
+	fmt.Fprintln(out)
+	section(out, "Egress sidecar")
 	if backendUsable {
-		ok = reportProxyImage(cmd.Context(), out, container.New(drv)) && ok
+		present := reportProxyImage(cmd.Context(), out, container.New(drv))
+		if !present {
+			blockers = append(blockers, "the egress sidecar image is missing")
+		}
+		ok = present && ok
 	} else {
-		fmt.Fprintf(out, "  ?  image %s (not checked: backend unavailable)\n", proxyImageTag)
+		fmt.Fprintf(out, "  %s  image %s %s\n", dimStyle.Render("?"), proxyImageTag,
+			dimStyle.Render("(not checked: backend unavailable)"))
 	}
 
 	// v1 had `dev disk` and `dev troubleshoot` as separate commands.
 	// Nobody runs a disk command; people run doctor when something is
 	// wrong, and disk pressure is one of the things that is wrong.
-	fmt.Fprintf(out, "\nDisk\n")
+	fmt.Fprintln(out)
+	section(out, "Disk")
 	if backendUsable {
 		reportDisk(cmd.Context(), env, out, container.New(drv))
 	} else {
-		fmt.Fprintf(out, "  ?  not checked: backend unavailable\n")
+		fmt.Fprintf(out, "  %s  %s\n", dimStyle.Render("?"),
+			dimStyle.Render("not checked: backend unavailable"))
 	}
 
-	fmt.Fprintf(out, "\nThis project\n")
+	fmt.Fprintln(out)
+	section(out, "This project")
 	reportProjectHygiene(out, env)
 
 	fmt.Fprintln(out)
 	if !ok {
-		fmt.Fprintf(out, "Not ready. Fix the items marked ✗ above.\n")
+		fmt.Fprintln(out, failStyle.Render("Not ready."))
+		for _, b := range blockers {
+			fmt.Fprintf(out, "  %s  %s\n", arrowStyle.Render("→"), b)
+		}
 		return fmt.Errorf("doctor: environment not ready")
 	}
-	fmt.Fprintf(out, "Ready.\n")
+	fmt.Fprintln(out, okStyle.Render("Ready."))
 	return nil
+}
+
+// section writes a heading. Bold rather than underlined or boxed: the
+// output is a report someone skims for one line, and headings that draw
+// more attention than the marks under them invert what matters.
+func section(out interface{ Write([]byte) (int, error) }, name string) {
+	fmt.Fprintf(out, "%s\n", sectionStyle.Render(name))
 }
 
 // reportDisk shows what this tool is using on the daemon, which is the
@@ -117,7 +150,7 @@ func reportDisk(ctx context.Context, env *Env, out interface{ Write([]byte) (int
 	eng *container.Engine) {
 	usage, err := eng.DiskUsage(ctx)
 	if err != nil {
-		fmt.Fprintf(out, "  ?  %v\n", err)
+		fmt.Fprintf(out, "  %s  %v\n", dimStyle.Render("?"), err)
 	}
 	for _, line := range usage {
 		fmt.Fprintf(out, "  %s\n", line)
@@ -169,7 +202,7 @@ func reportProjectHygiene(out interface{ Write([]byte) (int, error) }, env *Env)
 	fmt.Fprintf(out, "  .dockerignore: absent — every build sends %s (%d files) to the daemon\n",
 		humanSize(size), files)
 	if size > 200<<20 {
-		fmt.Fprintf(out, "  ⚠  add one: .git, node_modules, .venv, dist, build\n")
+		fmt.Fprintf(out, "  %s  add one: .git, node_modules, .venv, dist, build\n", warnStyle.Render("⚠"))
 	}
 }
 
@@ -204,23 +237,29 @@ func contextSize(dir string) (int64, int, error) {
 
 func reportStatus(out interface{ Write([]byte) (int, error) }, st backend.Status) bool {
 	fmt.Fprintf(out, "  driver:        %s\n", st.Backend)
-	fmt.Fprintf(out, "  %s  orb CLI", mark(st.CLIFound))
+
+	cli := firstNonEmpty(st.CLIName, "container CLI")
+	fmt.Fprintf(out, "  %s  %s", mark(st.CLIFound), cli)
 	if st.CLIPath != "" {
-		fmt.Fprintf(out, " (%s)", st.CLIPath)
+		fmt.Fprintf(out, " %s", dimStyle.Render("("+st.CLIPath+")"))
 	}
 	fmt.Fprintln(out)
 
 	if st.CLIFound {
-		fmt.Fprintf(out, "  %s  VM %q exists\n", mark(st.VMExists), st.VMName)
-		fmt.Fprintf(out, "  %s  VM running\n", mark(st.VMRunning))
+		// A backend with no VM says so in VMName rather than pretending to
+		// have one, so the two VM lines would be noise repeating it.
+		if st.VMName != "" && !strings.HasPrefix(st.VMName, "(none") {
+			fmt.Fprintf(out, "  %s  VM %q exists\n", mark(st.VMExists), st.VMName)
+			fmt.Fprintf(out, "  %s  VM running\n", mark(st.VMRunning))
+		}
 		fmt.Fprintf(out, "  %s  docker daemon", mark(st.DaemonUp))
 		if st.DaemonVersion != "" {
-			fmt.Fprintf(out, " (server %s)", st.DaemonVersion)
+			fmt.Fprintf(out, " %s", dimStyle.Render("(server "+st.DaemonVersion+")"))
 		}
 		fmt.Fprintln(out)
 	}
 	if st.Detail != "" {
-		fmt.Fprintf(out, "  →  %s\n", st.Detail)
+		fmt.Fprintf(out, "  %s  %s\n", arrowStyle.Render("→"), st.Detail)
 	}
 	return st.Ready()
 }
@@ -244,9 +283,9 @@ func reportProxyImage(ctx context.Context, out interface{ Write([]byte) (int, er
 
 func mark(ok bool) string {
 	if ok {
-		return "✓"
+		return okStyle.Render("✓")
 	}
-	return "✗"
+	return failStyle.Render("✗")
 }
 
 func presence(path string) string {

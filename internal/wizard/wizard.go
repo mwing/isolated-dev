@@ -75,7 +75,17 @@ func (a Action) Command() string {
 	if len(a.Args) == 0 {
 		return ""
 	}
-	return "dev " + strings.Join(a.Args, " ")
+	// An empty argument is a slot the wizard fills by asking. Printed as
+	// itself it produced "dev run --command " — a flag with nothing after
+	// it, which reads as a command that would fail if you typed it.
+	parts := make([]string, 0, len(a.Args))
+	for _, arg := range a.Args {
+		if arg == "" {
+			arg = "…"
+		}
+		parts = append(parts, arg)
+	}
+	return "dev " + strings.Join(parts, " ")
 }
 
 // Facts are what the caller observed. Gathering them needs a daemon, a
