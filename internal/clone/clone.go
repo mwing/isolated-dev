@@ -182,8 +182,14 @@ func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) 
 	// dependencies, they are the bulk of a large tree, and a clone that
 	// copied them would take minutes to make. Say so, because a missing
 	// node_modules looks like a bug until you know.
-	notes = append(notes, "ignored files (dependencies, build output) not copied — "+
-		"install them inside the sandbox")
+	//
+	// It is also worth saying what else that covers. A gitignored .env does
+	// not reach the clone either, which is the common shape for local
+	// credentials — not because anything here looks for secrets, but
+	// because "ignored" is where they usually live. A committed one is
+	// carried like any other tracked file.
+	notes = append(notes, "ignored files not copied — dependencies and build output, "+
+		"and any gitignored .env with them")
 	return notes, nil
 }
 
