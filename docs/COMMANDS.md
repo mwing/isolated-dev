@@ -78,8 +78,7 @@ scripts and Makefiles, which are things your host runs later.
 
 | | |
 |---|---|
-| `dev accept` | review the settings this project requests |
-| `dev agent accept` | review the egress it requests |
+| `dev accept` | review everything this project requests: settings and destinations |
 | `dev allow HOST` | grant a destination for this project |
 | `dev revoke HOST` | remove one |
 | `dev grants` | every grant, and whether anything still uses it |
@@ -92,10 +91,14 @@ scripts and Makefiles, which are things your host runs later.
 | `dev status` | what is running, under which policy (`--all` for other projects) |
 
 Grants belong to the project, not to agents: a plain `dev run` consumes the
-same ones. `allow`, `revoke`, `grants` and `config` were once `dev agent`
-subcommands and still answer there, hidden, so existing scripts keep
-working. `dev accept` and `dev agent accept` are different decisions —
-settings the project requests, and egress it requests — and stay separate.
+same ones. `allow`, `revoke`, `grants`, `config` and `accept` were once
+`dev agent` subcommands and still answer there, hidden, so existing scripts
+keep working.
+
+`dev accept` shows settings and destinations together because the project
+asked for both in one file. They remain separate decisions — accept one and
+the other stays pending, and each is checked against its own policy rules —
+but which of the two something is was never the reader's problem.
 
 ---
 

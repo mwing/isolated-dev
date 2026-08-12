@@ -35,11 +35,12 @@ func newAgentCmd(env *Env) *cobra.Command {
 	cmd.AddCommand(newAgentLogoutCmd(env))
 	cmd.AddCommand(newAgentUpdateCmd(env))
 	cmd.AddCommand(newAgentPolicyCmd(env))
-	// `accept` stays: it reviews the egress a project's .devenv.yaml
-	// requests on behalf of an agent, and the root already has an `accept`
-	// for the settings a project requests. Two different decisions, kept
-	// two commands.
-	cmd.AddCommand(newAgentAcceptCmd(env))
+	// Egress acceptance used to live here while settings acceptance lived at
+	// the root, and the docs had to explain why reviewing one repository's
+	// requests took two commands. It took two because of where the code
+	// kept them, which is not the user's problem: `dev accept` now shows
+	// both, and this spelling still works.
+	cmd.AddCommand(moved(env, newAcceptCmd(env), "dev agent accept", "dev accept"))
 
 	// Grants and configuration are not agent-only: a plain `dev run`
 	// consumes the same grants and reads the same file, so the canonical
@@ -600,8 +601,8 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		for _, h := range pending {
 			fmt.Fprintf(env.Stderr, "  %s\n", h)
 		}
-		fmt.Fprintf(env.Stderr, "\nReview with:  dev agent accept --agent %s\n", a.Name)
-		fmt.Fprintf(env.Stderr, "Accept all:   dev agent accept --all --agent %s\n", a.Name)
+		fmt.Fprintf(env.Stderr, "\nReview with:  dev accept%s\n", agentSuffix(a.Name))
+		fmt.Fprintf(env.Stderr, "Accept all:   dev accept --all%s\n", agentSuffix(a.Name))
 		return fmt.Errorf("unaccepted egress request")
 	}
 	accepted := permittedHosts(env, pol, store.AcceptedRequest(a.Name, request))

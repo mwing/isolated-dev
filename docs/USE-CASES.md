@@ -752,10 +752,10 @@ It grants nothing on its own. A teammate cloning the repository sees:
   proxy.golang.org
   sum.golang.org
 
-Review with:  dev agent accept
+Review with:  dev accept
 ```
 
-One `dev agent accept --all` and they are working — rather than
+One `dev accept --all` and they are working — rather than
 rediscovering the allowlist by hitting blocks. Their acceptance is
 recorded on their machine, never in the repository.
 
@@ -836,7 +836,7 @@ policy forbids egress to pastebin.com: matches the denied destination pastebin.c
 $ dev run --allow-host pastebin.com
 policy forbids egress to pastebin.com: matches the denied destination pastebin.com
 
-$ dev agent accept --all           # the project asked for it in .devenv.yaml
+$ dev accept --all                 # the project asked for it in .devenv.yaml
 policy forbids egress to pastebin.com: matches the denied destination pastebin.com
 
 $ dev scan --severity critical

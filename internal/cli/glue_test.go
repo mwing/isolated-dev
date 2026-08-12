@@ -138,6 +138,99 @@ func TestAcceptedHostsApplyToPlainRuns(t *testing.T) {
 	}
 }
 
+// requestBoth is the ordinary case that used to need two commands: one
+// repository, one file, asking for a setting and a destination.
+const requestBoth = `mount_git_config: true
+agents:
+  default:
+    allow_hosts:
+      - internal.example.com
+`
+
+func TestOneAcceptShowsSettingsAndNetworkTogether(t *testing.T) {
+	// The split was where the code kept these, not a distinction the user
+	// made: they cloned one repository. Reviewing half of what a stranger's
+	// project wants is not reviewing it.
+	h := newHarness(t)
+	h.writeProject(t, requestBoth)
+
+	if err := h.run(t, "accept"); err != nil {
+		t.Fatalf("accept: %v\n%s", err, h.stderr.String())
+	}
+	out := h.stdout.String()
+	for _, want := range []string{"Settings", "mount_git_config", "Network", "internal.example.com"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the review does not mention %q:\n%s", want, out)
+		}
+	}
+
+	// Showing is not accepting. A review that records what it displays is
+	// the prompt nobody can decline.
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store.AcceptedSettings()) != 0 || len(store.AcceptedHosts("default")) != 0 {
+		t.Errorf("reviewing recorded something: %v %v",
+			store.AcceptedSettings(), store.AcceptedHosts("default"))
+	}
+}
+
+func TestOneAcceptRecordsBoth(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, requestBoth)
+
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatalf("accept --all: %v\n%s", err, h.stderr.String())
+	}
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.AcceptedSettings()["mount_git_config"]; got != "true" {
+		t.Errorf("the setting was not accepted: %v", store.AcceptedSettings())
+	}
+	if got := store.AcceptedHosts("default"); !contains(got, "internal.example.com") {
+		t.Errorf("the destination was not accepted: %v", got)
+	}
+}
+
+func TestAcceptTakesOneNameOfEitherKind(t *testing.T) {
+	// Naming one thing accepts that thing. The two kinds share a namespace
+	// in the argument list and must not bleed into each other.
+	h := newHarness(t)
+	h.writeProject(t, requestBoth)
+
+	if err := h.run(t, "accept", "internal.example.com"); err != nil {
+		t.Fatalf("accept host: %v\n%s", err, h.stderr.String())
+	}
+	store, err := trust.Load(h.paths.Home, h.paths.ProjectDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(store.AcceptedHosts("default"), "internal.example.com") {
+		t.Errorf("the named destination was not accepted")
+	}
+	if len(store.AcceptedSettings()) != 0 {
+		t.Errorf("naming a destination accepted a setting too: %v", store.AcceptedSettings())
+	}
+}
+
+func TestAcceptRefusesANameThatIsNotPending(t *testing.T) {
+	// Quietly accepting nothing looks exactly like success, and the user
+	// would go on believing the thing they typed had been granted.
+	h := newHarness(t)
+	h.writeProject(t, requestBoth)
+
+	err := h.run(t, "accept", "not.requested.example")
+	if err == nil {
+		t.Fatal("a name nobody requested was accepted without complaint")
+	}
+	if !strings.Contains(err.Error(), "not.requested.example") {
+		t.Errorf("the refusal does not name what was not pending: %v", err)
+	}
+}
+
 func TestAnUnacceptedRequestGrantsNothingToAPlainRun(t *testing.T) {
 	// The project file is a request. A clone must not widen its own egress
 	// by being run.
@@ -646,7 +739,7 @@ func TestAnOrdinaryFailureIsStillExitOne(t *testing.T) {
 const denyEvil = "deny_hosts: [evil.example]\n"
 
 // requestEvil is a project asking for the destination the policy denies —
-// the shape `dev agent accept` walks the user through.
+// the shape `dev accept` walks the user through.
 const requestEvil = `agents:
   default:
     allow_hosts:
@@ -671,7 +764,8 @@ func TestPolicyDeniesAHostOnEveryRouteIn(t *testing.T) {
 			[]string{"agent", "policy", "claude", "--allow-host", "evil.example"}},
 		{"dev console's --allow-host", "",
 			[]string{"console", "--allow-host", "evil.example", "-c", "true"}},
-		{"dev agent accept", requestEvil, []string{"agent", "accept", "--all"}},
+		{"dev accept", requestEvil, []string{"accept", "--all"}},
+		{"dev agent accept, the hidden alias", requestEvil, []string{"agent", "accept", "--all"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)

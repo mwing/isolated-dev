@@ -109,8 +109,7 @@ A request is not a grant. A teammate who clones the repo is told what it
 asks for and accepts once:
 
 ```sh
-dev accept          # settings the project requests
-dev agent accept    # egress destinations it requests
+dev accept          # everything it requests: settings and destinations
 ```
 
 Add tools the whole team needs, rather than each person installing them:

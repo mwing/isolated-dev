@@ -129,22 +129,36 @@ func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trus
 
 func newAcceptCmd(env *Env) *cobra.Command {
 	var all bool
+	var agentName string
 	cmd := &cobra.Command{
-		Use:   "accept [key...]",
+		Use:   "accept [name...]",
 		Short: "Review and accept what this project's .devenv.yaml requests",
 		Long: "A project file states what the project needs. It is a request,\n" +
 			"not a grant: running the project is not consent. Decisions are\n" +
 			"recorded under ~/.dev-envs, never in the repository, so a clone\n" +
-			"cannot bring its own approval with it.",
+			"cannot bring its own approval with it.\n\n" +
+			"Settings and network destinations are separate decisions, recorded\n" +
+			"separately. They are shown together because they arrive together:\n" +
+			"the project asked for both in one file, and reading half of what a\n" +
+			"stranger's repository wants is not reviewing it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAccept(cmd.Context(), env, args, all)
+			return runAccept(cmd.Context(), env, args, all, agentName)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "accept everything requested")
+	cmd.Flags().StringVar(&agentName, "agent", "default",
+		"agent whose requested destinations to review")
 	return cmd
 }
 
-func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
+// runAccept presents everything the project's file requests — settings and
+// egress destinations — and records what the user names.
+//
+// One workflow, still two decisions: settings and hosts remain separate
+// objects, checked against different policy rules and written to different
+// parts of the record. What was merged is the review, because the split was
+// never the user's: they cloned one repository and it asked for both.
+func runAccept(_ context.Context, env *Env, names []string, all bool, agentName string) error {
 	// Resolved rather than just loaded: the build source is one of the
 	// things being accepted, and knowing what it is needs detection.
 	cfg, p, err := resolveProject(env)
@@ -156,10 +170,10 @@ func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
 		return err
 	}
 
-	pending := store.PendingSettings(projectAsks(cfg, p))
-	if len(pending) == 0 {
-		fmt.Fprintln(env.Stdout, "Nothing pending: this project requests no settings you have not accepted.")
-		fmt.Fprintln(env.Stdout, "Egress destinations are accepted with `dev agent accept`.")
+	settings := store.PendingSettings(projectAsks(cfg, p))
+	hosts := store.Pending(agentName, projectRequest(cfg, agentName))
+	if len(settings) == 0 && len(hosts) == 0 {
+		fmt.Fprintln(env.Stdout, "Nothing pending: this project requests nothing you have not accepted.")
 		return nil
 	}
 
@@ -168,53 +182,151 @@ func runAccept(_ context.Context, env *Env, keys []string, all bool) error {
 		return err
 	}
 
-	if !all && len(keys) == 0 {
-		fmt.Fprintf(env.Stdout, "%s requests:\n\n", env.Paths.Project)
-		for _, a := range pending {
+	if !all && len(names) == 0 {
+		showPending(env, pol, settings, hosts, agentName)
+		return nil
+	}
+
+	wantSettings, wantHosts := settings, hosts
+	if !all {
+		wantSettings, wantHosts, err = selectPending(names, settings, hosts)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Policy first, and for everything named, before anything is written.
+	// Accepting half a request and then refusing the rest leaves a record
+	// the user did not choose and would have to unpick.
+	for _, a := range wantSettings {
+		if verr := pol.CheckSetting(a.Key); verr != nil {
+			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, a.Key, verr)
+		}
+	}
+	// Accepting is a route in like any other: a project asks, the user says
+	// yes, and the destination is granted from then on. Without this the
+	// deny list was walked around by writing the host into a .devenv.yaml
+	// and accepting it.
+	if err := checkHosts(env, wantHosts); err != nil {
+		return err
+	}
+
+	addedSettings, err := store.AcceptSettings(wantSettings)
+	if err != nil {
+		return err
+	}
+	addedHosts, err := store.Accept(agentName, wantHosts)
+	if err != nil {
+		return err
+	}
+	if len(addedSettings) == 0 && len(addedHosts) == 0 {
+		fmt.Fprintln(env.Stdout, "Nothing new accepted.")
+		return nil
+	}
+	fmt.Fprintln(env.Stdout, "Accepted:")
+	for _, a := range addedSettings {
+		fmt.Fprintf(env.Stdout, "  + %s: %s\n", a.Key, a.Value)
+	}
+	for _, h := range addedHosts {
+		fmt.Fprintf(env.Stdout, "  + %s\n", h)
+	}
+	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", store.Project.Path())
+	return nil
+}
+
+// showPending prints what is outstanding without recording anything.
+//
+// A destination that policy forbids is marked here rather than only on the
+// way out: offering something for acceptance and refusing it afterwards is
+// the prompt that teaches people prompts do not mean much.
+func showPending(env *Env, pol policyChecker, settings []trust.Ask, hosts []string, agentName string) {
+	fmt.Fprintf(env.Stdout, "%s requests:\n\n", env.Paths.Project)
+
+	if len(settings) > 0 {
+		fmt.Fprintln(env.Stdout, "Settings")
+		for _, a := range settings {
 			fmt.Fprintf(env.Stdout, "  %s: %s\n", a.Key, a.Value)
-			// USE-CASES says a project requesting something forbidden is
-			// refused rather than offered for acceptance. It was offered,
-			// accepted, recorded, and only refused later at the run — which
-			// is the promise arriving one step too late to be believed.
 			if verr := pol.CheckSetting(a.Key); verr != nil {
 				fmt.Fprintf(env.Stdout, "      cannot be accepted: %v\n\n", verr)
 				continue
 			}
 			fmt.Fprintf(env.Stdout, "      %s\n\n", a.Effect)
 		}
-		fmt.Fprintf(env.Stdout, "Accept all:  dev accept --all\n")
-		fmt.Fprintf(env.Stdout, "Accept one:  dev accept %s\n", pending[0].Key)
-		return nil
 	}
 
-	wanted := pending
-	if !all {
-		wanted = nil
-		for _, a := range pending {
-			for _, k := range keys {
-				if a.Key == k {
-					wanted = append(wanted, a)
-				}
+	if len(hosts) > 0 {
+		fmt.Fprintln(env.Stdout, "Network")
+		for _, h := range hosts {
+			if verr := pol.CheckHost(h); verr != nil {
+				fmt.Fprintf(env.Stdout, "  %s  (cannot be accepted: %v)\n", h, verr)
+				continue
+			}
+			fmt.Fprintf(env.Stdout, "  %s\n", h)
+		}
+		fmt.Fprintf(env.Stdout, "\n      Each one is a destination the container may reach, and any\n")
+		fmt.Fprintf(env.Stdout, "      host that accepts writes is a place data can go.\n\n")
+	}
+
+	fmt.Fprintf(env.Stdout, "Accept all:  dev accept --all%s\n", agentSuffix(agentName))
+	fmt.Fprintf(env.Stdout, "Accept one:  dev accept %s\n", firstPendingName(settings, hosts))
+}
+
+// policyChecker is the part of the policy showPending needs, named so the
+// display can be tested without building one.
+type policyChecker interface {
+	CheckSetting(key string) error
+	CheckHost(host string) error
+}
+
+// agentSuffix names the agent in a suggested command, and says nothing when
+// the agent is the default one — a flag that repeats the default is noise
+// in the one line the user is meant to copy.
+func agentSuffix(agentName string) string {
+	if agentName == "" || agentName == "default" {
+		return ""
+	}
+	return " --agent " + agentName
+}
+
+func firstPendingName(settings []trust.Ask, hosts []string) string {
+	if len(settings) > 0 {
+		return settings[0].Key
+	}
+	return hosts[0]
+}
+
+// selectPending resolves the names a user typed against what is pending.
+//
+// A name is a setting key or a destination, and the two cannot collide: a
+// setting key is a fixed identifier and a destination is a hostname. An
+// unmatched name is an error rather than a silent no-op, because the shape
+// of this command is "accept exactly this" and quietly accepting nothing
+// looks identical to success.
+func selectPending(names []string, settings []trust.Ask, hosts []string) ([]trust.Ask, []string, error) {
+	var wantSettings []trust.Ask
+	var wantHosts []string
+	var unknown []string
+
+	for _, name := range names {
+		matched := false
+		for _, a := range settings {
+			if a.Key == name {
+				wantSettings = append(wantSettings, a)
+				matched = true
 			}
 		}
-		if len(wanted) == 0 {
-			return fmt.Errorf("none of %s is pending", strings.Join(keys, ", "))
+		for _, h := range hosts {
+			if h == name {
+				wantHosts = append(wantHosts, h)
+				matched = true
+			}
+		}
+		if !matched {
+			unknown = append(unknown, name)
 		}
 	}
-	for _, a := range wanted {
-		if verr := pol.CheckSetting(a.Key); verr != nil {
-			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, a.Key, verr)
-		}
+	if len(unknown) > 0 {
+		return nil, nil, fmt.Errorf("not pending: %s", strings.Join(unknown, ", "))
 	}
-
-	added, err := store.AcceptSettings(wanted)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(env.Stdout, "Accepted:")
-	for _, a := range added {
-		fmt.Fprintf(env.Stdout, "  + %s: %s\n", a.Key, a.Value)
-	}
-	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", store.Project.Path())
-	return nil
+	return wantSettings, wantHosts, nil
 }

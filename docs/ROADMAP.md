@@ -235,7 +235,7 @@ accident of history — it is the trust model expressed as two files:
 A project file is therefore a *request*, never a grant. On each run the
 tool diffs what the project asks for against what the user has accepted,
 and anything new stops the run with a confirmation showing exactly what is
-being added. `dev agent accept` records the decision; from then on the
+being added. `dev accept` records the decision; from then on the
 project's config applies silently until it changes again. This is the
 trust-on-first-use flow of 4.2 with the request written down instead of
 inferred, which makes it *better* than a purely local file: the team can
@@ -269,7 +269,7 @@ consequences severe enough that inheritance would matter — the docker
 socket above all — should be per-run rather than persistent.
 
 Status: implemented. `.devenv.yaml` may carry an `agents:` section; a run
-stops on anything requested but not accepted, and `dev agent accept`
+stops on anything requested but not accepted, and `dev accept`
 records the decision. Acceptance is an intersection, not a union: a host the
 project stops requesting stops applying, and a host added later is pending
 again, so consent is never a blank cheque for future edits.

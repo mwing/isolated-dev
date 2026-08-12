@@ -363,8 +363,8 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	request := projectRequest(cfg, a.Name)
 	if pending := store.Pending(a.Name, request); len(pending) > 0 {
 		return nil, "", nil, fmt.Errorf(
-			"%s requests egress you have not accepted: %s\nReview with: dev agent accept --agent %s",
-			env.Paths.Project, strings.Join(pending, " "), a.Name)
+			"%s requests egress you have not accepted: %s\nReview with: dev accept%s",
+			env.Paths.Project, strings.Join(pending, " "), agentSuffix(a.Name))
 	}
 
 	saved := store.Resolve(a.Name)

@@ -84,9 +84,12 @@ asks for that you have not accepted stops the run and is shown to you
 first:
 
 ```sh
-dev accept          # settings it requests
-dev agent accept    # egress destinations it requests
+dev accept          # everything it requests: settings and destinations
 ```
+
+Those stay two decisions — accepting a setting grants no destination, and
+each is checked against its own policy rules — but they are reviewed
+together, because the project asked for both in one file.
 
 Grants live outside the repository on purpose: configuration inside a
 repository is configuration the repository can grant itself, so a hostile

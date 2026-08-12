@@ -832,16 +832,21 @@ func TestGrantCommandsLiveAtTheRoot(t *testing.T) {
 	}
 	// The verbs that really are about agents stay where they are.
 	for _, path := range [][]string{{"agent", "run"}, {"agent", "list"},
-		{"agent", "logout"}, {"agent", "policy"}, {"agent", "accept"}} {
+		{"agent", "logout"}, {"agent", "policy"}} {
 		c, _, err := root.Find(path)
 		if err != nil || c == nil || c.Name() != path[1] {
 			t.Errorf("`dev %s` moved or vanished: %v", strings.Join(path, " "), err)
 		}
 	}
-	// `dev accept` is settings, `dev agent accept` is egress. Two decisions,
-	// two commands: merging them would blur the line the trust model rests on.
+	// One `dev accept` for everything the project's file requests. Settings
+	// and destinations are still separate decisions with separate records;
+	// what was merged is the review, because the split was never the user's
+	// — they cloned one repository and it asked for both.
 	if c, _, err := root.Find([]string{"accept"}); err != nil || c == nil || c.Hidden {
 		t.Errorf("`dev accept` is gone or hidden: %v", err)
+	}
+	if c, _, err := root.Find([]string{"agent", "accept"}); err != nil || c == nil || !c.Hidden {
+		t.Errorf("`dev agent accept` should still work and stay out of the help: %v", err)
 	}
 }
 

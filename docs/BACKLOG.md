@@ -136,18 +136,22 @@ characters with the actual invariant (a hostname label is letters, digits,
 hyphen or underscore, and is never empty), which is what the character
 blacklist had been approximating one finding at a time.
 
-### B8. One `dev accept` — `todo`
+### B8. One `dev accept` — `done`
 
-`dev accept` takes settings and `dev agent accept` takes egress, and the
-docs have to explain that egress grants belong to the project rather than
-the agent. The split is an implementation detail leaking into the UX.
+`dev accept` took settings and `dev agent accept` took egress, and the docs
+had to explain that egress grants belong to the project rather than the
+agent. The split was an implementation detail leaking into the UX.
 
 This is not the merge previously rejected: the two decisions stay separate
-objects and separate records. One *workflow* presents both.
+objects and separate records, checked against their own policy rules and
+acceptable one at a time. One *workflow* presents both, under `Settings`
+and `Network` headings, because the project asked for both in one file and
+reading half of what a stranger's repository wants is not reviewing it.
 
-**Done when:** `dev accept` shows host access and network together, the old
-spellings remain as hidden aliases, and no doc has to explain the
-difference.
+`dev agent accept` is now a hidden alias for the same workflow, which does
+widen what its `--all` accepts: it covers settings too. That is the merge
+working as intended — one review, one confirmation — and the review still
+prints everything before anything is recorded.
 
 ### B9. Bare `dev` is the front door — `todo`
 
@@ -217,6 +221,33 @@ Selection is `DEV_BACKEND=docker` and undocumented, which is the right
 amount of exposure for now. Every hardened run is `1000:1000`; macOS file
 sharing hides that and Linux will not. Identity mapping comes first, then
 auto-detection, then the docs.
+
+The driver is done and works: a full `dev run` through it builds, mounts,
+filters DNS, blocks egress and writes back. What is left, from driving it:
+
+- **UID is the whole task.** `runspec.go` sets `1000:1000` and all eight
+  language templates create `appuser` at 1000 and chown `/workspace`, the
+  home directory and the caches to it. So passing the host's uid instead
+  hands the container an image whose own directories belong to someone
+  else — either those become group-writable or this needs userns-remap.
+  Not a one-line change, and macOS cannot show the failure: a container
+  write there arrives on the host owned by the host user.
+- Linux still defaults to the OrbStack driver, so the first run fails with
+  "orb not on PATH" rather than using the daemon that is present.
+- `doctor` says `✓ orb CLI (/usr/bin/docker)` and prints a `vm_name` for a
+  backend that has no VM.
+- The "re-run with `--tty off`" hint is on the OrbStack path only; the
+  docker path leaks docker's own `cannot attach stdin to a TTY-enabled
+  container`.
+- `docs/CONCEPTS.md` says an escape "reaches that VM rather than your Mac".
+  With a local daemon there is no VM and that sentence is false. It has to
+  say so before this is a documented configuration.
+- Rootless docker is unexamined.
+
+The gap that would let the UID break ship: Linux CI covers network
+topology but never runs a container over a mounted workspace, so nothing
+would catch it. That test comes first — it is what makes the rest
+verifiable.
 
 ### B16. Non-HTTP ergonomics — `todo`
 
