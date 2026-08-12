@@ -86,6 +86,9 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 	if info, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil && info.IsDir() {
 		notes, err := driftNotes(ctx, run, projectDir, dest)
 		res.Notes = notes
+		// Also on the reuse path, so clones made before this existed are
+		// repaired rather than left as the one that still cannot commit.
+		res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
 		return res, err
 	}
 
@@ -102,9 +105,67 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 				"a version from tags sees less than the project does", o.Depth))
 	}
 
+	res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
+
 	notes, err := carryUncommitted(ctx, run, projectDir, dest)
 	res.Notes = append(res.Notes, notes...)
 	return res, err
+}
+
+// ensureIdentity writes a committer identity into the clone's own config.
+//
+// Nothing else supplies one. A container gets none of the host's home
+// directory, so there is no ~/.gitconfig in it, and `git clone` copies
+// history rather than configuration — so the first commit inside the clone
+// fails with "please tell me who you are". That is a wall every agent hits
+// the moment it tries to save work, and the work is the whole reason the
+// clone exists: `dev clone diff` and `dev clone apply` have nothing to show
+// or fast-forward until something is committed.
+//
+// The identity is copied from the project when it has one. It is not a
+// secret being handed over: the name and address are already written into
+// every commit in the history the clone just copied. Writing it to the
+// clone's local config rather than a global one keeps it scoped to this
+// clone, and keeps everything else in the host's git configuration —
+// signing keys, credential helpers, insteadOf rewrites — out.
+func ensureIdentity(ctx context.Context, run runner.Runner, src, dest string) []string {
+	// --local, not --get: a plain --get reads the host's global config too,
+	// and the container never sees that. Checking it would mean any machine
+	// whose user has a global git identity — which is to say every machine
+	// that commits — decided the clone already had one and left it without.
+	if got, err := gitOutput(ctx, run, dest, "config", "--local", "--get", "user.email"); err == nil &&
+		strings.TrimSpace(got) != "" {
+		return nil
+	}
+
+	name := strings.TrimSpace(configValue(ctx, run, src, "user.name"))
+	email := strings.TrimSpace(configValue(ctx, run, src, "user.email"))
+	var notes []string
+	if name == "" || email == "" {
+		// A placeholder rather than a failure. The alternative is an agent
+		// that cannot commit at all, and a commit under an obviously
+		// synthetic name is easy to correct later with `git commit --amend`.
+		name, email = "dev sandbox", "dev-sandbox@localhost"
+		notes = append(notes, "no git identity configured here, so the clone commits as "+
+			name+" <"+email+">")
+	}
+	if _, err := git(ctx, run, dest, "config", "user.name", name); err != nil {
+		return notes
+	}
+	if _, err := git(ctx, run, dest, "config", "user.email", email); err != nil {
+		return notes
+	}
+	return notes
+}
+
+// configValue reads one git setting, treating "not set" as empty rather
+// than as an error: `git config --get` exits 1 for a missing key.
+func configValue(ctx context.Context, run runner.Runner, dir, key string) string {
+	out, err := gitOutput(ctx, run, dir, "config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 // cloneArgs builds the git invocation.

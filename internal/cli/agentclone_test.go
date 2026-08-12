@@ -1,9 +1,12 @@
 package cli
 
 import (
+	"context"
 	"os"
 
 	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/container"
+	"github.com/mwing/isolated-dev/internal/trust"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -168,5 +171,66 @@ func TestConsoleHasTheCloneFlags(t *testing.T) {
 		if c.Flags().Lookup(name) == nil {
 			t.Errorf("`dev console` has no --%s", name)
 		}
+	}
+}
+
+// `dev new python` and then an agent produced a sandbox with no python in
+// it: the overlay went on the agent's generic base rather than the
+// project's image, so the agent's first act was to fetch its own runtime.
+// The agent definition already describes the other way round — Base is
+// documented as the fallback "when no project image exists" — and
+// Agent.Runtime exists precisely so the overlay can sit on a project image.
+func TestAnAgentIsBuiltOnTheProjectImage(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeProject(t, "network: allowlist\n")
+	// A Dockerfile makes the project buildable without depending on which
+	// language plugins happen to be installed.
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "Dockerfile"),
+		[]byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := trust.Load(h.paths.Home, p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := container.New(h.env.driver(cfg.VMName))
+
+	got, err := agentBaseImage(context.Background(), h.env, eng, cfg, p, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != p.Image {
+		t.Errorf("agent base = %q, want the project image %q", got, p.Image)
+	}
+}
+
+// With nothing to build from there is no project image, and the agent's own
+// base is the right answer rather than an error.
+func TestAnAgentFallsBackToItsOwnBaseWithNoProject(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := trust.Load(h.paths.Home, p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := container.New(h.env.driver(cfg.VMName))
+
+	got, err := agentBaseImage(context.Background(), h.env, eng, cfg, p, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "" {
+		t.Errorf("agent base = %q, want empty so the agent's own base applies", got)
 	}
 }

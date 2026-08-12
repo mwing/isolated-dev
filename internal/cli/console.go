@@ -404,6 +404,14 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	if base == "" {
 		base = request.Base
 	}
+	if base == "" {
+		// The project's own environment, so the agent has the toolchain of
+		// the thing it is working on. See agentBaseImage.
+		base, err = agentBaseImage(ctx, env, eng, cfg, p, store)
+		if err != nil {
+			return nil, "", nil, err
+		}
+	}
 	opts := agent.Options{
 		Agent:       a,
 		Project:     p.Dir,
@@ -412,6 +420,12 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		Image:       base,
 		Memory:      firstSet(saved.Memory, request.Memory),
 		CPUs:        firstSet(saved.CPUs, request.CPUs),
+		// Without this the agent cannot commit — the container has no
+		// ~/.gitconfig, so git refuses with "please tell me who you are",
+		// and in a clone that means the work has no way back out. `dev agent
+		// run` has always set it; this path did not, so the same agent could
+		// commit or not depending on which command started it.
+		GitIdentity: gitIdentity(env),
 	}
 
 	runner := &agent.Runner{Engine: eng, Out: env.Stdout}

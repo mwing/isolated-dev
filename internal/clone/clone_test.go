@@ -355,3 +355,55 @@ func TestStateStopsCountingWorkOnceItIsMergedBack(t *testing.T) {
 		t.Fatalf("unmerged = %d after merging it back, want 0", unmerged)
 	}
 }
+
+// A container has no ~/.gitconfig, and git will not guess an address from a
+// container hostname: it fails with "unable to auto-detect email address".
+// So without an identity in the clone's own config, the first commit an
+// agent tries fails — and until something is committed, `dev clone diff`
+// and `dev clone apply` have nothing to show or bring back. The clone is
+// the way the work gets out, so it has to be committable.
+func TestCloneCanBeCommittedIn(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"user.name", "user.email"} {
+		got, err := gitOutput(ctx, run, dest, "config", "--local", "--get", key)
+		if err != nil || strings.TrimSpace(got) == "" {
+			t.Fatalf("the clone has no %s of its own: %q %v", key, got, err)
+		}
+	}
+	// Copied from the project rather than invented, so the commits that come
+	// back are attributed the way that repository's commits already are.
+	if got, _ := gitOutput(ctx, run, dest, "config", "--local", "--get", "user.email"); strings.TrimSpace(got) != "t@example.com" {
+		t.Errorf("identity = %q, want the project's", strings.TrimSpace(got))
+	}
+}
+
+// An existing clone predates the fix, and is exactly the one that cannot
+// commit. Reusing it has to repair it rather than leave it broken.
+func TestReusingAnOldCloneGivesItAnIdentity(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"user.name", "user.email"} {
+		_, _ = git(ctx, run, dest, "config", "--local", "--unset", key)
+	}
+
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := gitOutput(ctx, run, dest, "config", "--local", "--get", "user.email")
+	if err != nil || strings.TrimSpace(got) == "" {
+		t.Fatalf("reusing the clone did not repair its identity: %q %v", got, err)
+	}
+}

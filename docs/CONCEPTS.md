@@ -147,6 +147,14 @@ edit the things your *host* runs later — git hooks, npm scripts, Makefiles,
 CI files. It also acts on instructions from a model rather than from the
 person in the room.
 
+The agent runs on **your project's image**, with the agent added on top, so
+it has the toolchain of the thing it is working on — an agent that cannot
+run the project's tests cannot check its own work. `base:` in `.devenv.yaml`
+overrides that, and an agent's own base image is the fallback for a
+directory with no project to build. The clone also carries a git identity,
+copied from the project, because a container has no `~/.gitconfig` and work
+that cannot be committed cannot come back.
+
 The work is not thrown away, it is moved, and comes back in two commands:
 
 ```sh

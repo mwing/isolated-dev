@@ -584,6 +584,24 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if opts.Image == "" && saved.Base != "" {
 		opts.Image = saved.Base
 	}
+	// With nothing chosen anywhere, the overlay goes on the project's own
+	// image rather than the agent's generic base, so the agent has the
+	// toolchain of the project it is working on. A dry run resolves the
+	// same way but must not build anything, so it takes the project image
+	// only if it is already there.
+	if opts.Image == "" {
+		if dryRun {
+			if exists, ierr := eng.ImageExists(ctx, p.Image); ierr == nil && exists {
+				opts.Image = p.Image
+			}
+		} else {
+			base, berr := agentBaseImage(ctx, env, eng, cfg, p, store)
+			if berr != nil {
+				return berr
+			}
+			opts.Image = base
+		}
+	}
 	if opts.Memory == "" {
 		opts.Memory = saved.Memory
 	}

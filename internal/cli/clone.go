@@ -10,6 +10,7 @@ import (
 	"github.com/mwing/isolated-dev/internal/config"
 	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/project"
+	"github.com/mwing/isolated-dev/internal/trust"
 )
 
 // prepareCloneDir makes the private clone for a run and returns the
@@ -84,6 +85,47 @@ func mountWorkspace(spec *container.RunSpec, dir string) {
 			spec.Mounts[i].Source = dir
 		}
 	}
+}
+
+// agentBaseImage is the image an agent's overlay is built on when nothing
+// else was chosen: the project's own environment, built if it does not
+// exist yet, with the project's declared tools on it.
+//
+// This is what the agent definition already describes. `Agent.Base` is
+// documented as "the image to build the overlay on **when no project image
+// exists**", and `Agent.Runtime` exists so the agent's own runtime is
+// installed into the overlay instead of being assumed present — which, as
+// that field's comment puts it, is what "rules out running the agent on the
+// project's own image — and an agent that cannot run the project's tests
+// cannot check its own work". The wiring was simply never done, so
+// `dev new python` followed by an agent produced a sandbox with no python
+// in it, and the agent's first move was to fetch its own.
+//
+// Returns "" when the project has nothing to build, which leaves the
+// agent's own base image as the fallback the definition intends.
+func agentBaseImage(ctx context.Context, env *Env, eng *container.Engine,
+	cfg config.Config, p *project.Project, store *trust.Store) (string, error) {
+	if !projectIsBuildable(p) {
+		return "", nil
+	}
+	exists, err := eng.ImageExists(ctx, p.Image)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+			return "", err
+		}
+	}
+	return ensureTools(ctx, env, eng, p, store, cfg)
+}
+
+// projectIsBuildable reports whether there is anything to build an image
+// from: a recognized language, a Dockerfile, or a devcontainer naming an
+// image.
+func projectIsBuildable(p *project.Project) bool {
+	return p != nil &&
+		(p.Detected.Found() || p.Dockerfile != "" || p.DevcontainerImage != "")
 }
 
 // consoleWantsClone decides whether a console run works in a private clone.
