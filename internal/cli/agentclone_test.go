@@ -2,6 +2,8 @@ package cli
 
 import (
 	"os"
+
+	"github.com/mwing/isolated-dev/internal/config"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -115,5 +117,56 @@ func TestAProjectAskingForTheCloneDefaultNeedsNoConsent(t *testing.T) {
 
 	if err := h.run(t, "agent", "run", "claude", "--tty", "off"); err != nil {
 		t.Fatalf("a project asking for the default was stopped: %v\n%s", err, h.stderr.String())
+	}
+}
+
+// `dev console --agent X` used to be the one way to start an agent that
+// mounted the working tree. What makes the clone right is who is driving —
+// a model rather than the person in the room — not which view they are
+// watching through, and the console documents itself as a view over the
+// same run rather than a second way to start one.
+func TestConsoleClonesForAnAgentByDefault(t *testing.T) {
+	def := config.Config{AgentClone: true}
+	for _, tc := range []struct {
+		name  string
+		cfg   config.Config
+		agent string
+		cl    cloneOpts
+		want  bool
+	}{
+		{"an agent clones with no flag", def, "claude", cloneOpts{}, true},
+		{"--in-place opts out", def, "claude", cloneOpts{inPlace: true}, false},
+		{"--clone wins over agent_clone: false",
+			config.Config{AgentClone: false}, "claude", cloneOpts{use: true}, true},
+		{"agent_clone: false is honoured",
+			config.Config{AgentClone: false}, "claude", cloneOpts{}, false},
+
+		// A console with no agent is a person running their own command,
+		// which is the case the plain mount is right for.
+		{"no agent stays in the working tree", def, "", cloneOpts{}, false},
+		{"no agent, --clone opts in", def, "", cloneOpts{use: true}, true},
+		{"--clone-depth implies --clone", def, "", cloneOpts{depth: 1}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := consoleWantsClone(tc.cfg, tc.agent, tc.cl); got != tc.want {
+				t.Errorf("consoleWantsClone = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The flags have to exist for the behaviour above to be reachable, and
+// `dev console` was the only workspace command without them.
+func TestConsoleHasTheCloneFlags(t *testing.T) {
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+	c, _, err := root.Find([]string{"console"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"clone", "clone-depth", "in-place"} {
+		if c.Flags().Lookup(name) == nil {
+			t.Errorf("`dev console` has no --%s", name)
+		}
 	}
 }

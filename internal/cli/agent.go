@@ -267,67 +267,24 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 			// --in-place opts out, which is the right shape: the safer
 			// behaviour needs no argument, and choosing the other one is
 			// a sentence someone typed.
-			// Three layers, narrowest last: the built-in default, what
-			// config says, and what this invocation says. Someone who runs
-			// agents interactively sets agent_clone once instead of typing
-			// a flag forever; a flag still wins for the run in front of
-			// them, in both directions.
-			wantClone := cfg.AgentClone
-			if inPlace {
-				wantClone = false
-			}
-			if useClone {
-				wantClone = true
-			}
-			if wantClone {
-				dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
+			if wantCloneFor(cfg.AgentClone, inPlace, useClone) {
 				// A dry run says what would happen and does none of it. This
 				// was the one place it did: the clone was copied before the
 				// flag was ever looked at, so the cautious command was the
 				// expensive one.
 				if dryRun {
+					dest := clone.Dir(env.Paths.Home, projectSlug(opts.Project))
 					opts.Workspace = dest
 					fmt.Fprintf(env.Stdout, "Clone:     would prepare %s\n", dest)
 				} else {
-					res, err := clone.Prepare(cmd.Context(), env.Runner, clone.Options{
-						Project: opts.Project, Dest: dest, Depth: cloneDepth,
-					})
-					// A clone needs a repository. Without one there is no
-					// mechanism — and no error the user can act on either,
-					// since they never asked for a clone: it is the default.
-					// So the run continues in place and says so loudly. A
-					// directory with no version control has nothing to
-					// recover from anyway, which is the same reason it is
-					// usually scratch work.
-					if err != nil && !isGitRepo(cmd.Context(), env, opts.Project) {
-						fmt.Fprintf(env.Stderr,
-							"⚠  %s is not a git repository, so there is nothing to clone.\n"+
-								"   The agent edits these files directly, and nothing here\n"+
-								"   can undo that. `git init` first, or --in-place to silence this.\n\n",
-							opts.Project)
-						err = nil
-						res.Path = ""
-					}
+					dir, err := prepareCloneDir(cmd.Context(), env, opts.Project,
+						cloneDepth, env.Stdout)
 					if err != nil {
 						return err
 					}
-					if res.Path != "" {
-						opts.Workspace = res.Path
-						fmt.Fprintf(env.Stdout, "Clone:     %s\n", res.Path)
-						for _, note := range res.Notes {
-							fmt.Fprintf(env.Stdout, "           %s\n", note)
-						}
-						// Named as commands rather than as a git recipe: the
-						// safer path has to cost less than the unsafe one,
-						// and composing a fetch refspec is more than it can
-						// cost.
-						fmt.Fprintf(env.Stdout, "Review:    dev clone diff\n")
-						fmt.Fprintf(env.Stdout, "Bring back: dev clone apply\n")
+					if dir != "" {
+						opts.Workspace = dir
 					}
-					// Now that every agent run makes one of these, the disk
-					// they take is the tool's doing and its business to
-					// report — before it is a surprise rather than after.
-					warnCloneSpace(cmd.Context(), env)
 				}
 			}
 

@@ -169,7 +169,7 @@ func listClones(ctx context.Context, env *Env) error {
 		len(clones), humanSize(total), root)
 	if holding > 0 {
 		fmt.Fprintf(env.Stdout, "%d hold work that is not in their project. "+
-			"`dev clone rm` refuses those until it is fetched back.\n", holding)
+			"`dev clone rm <name>` refuses those until it is fetched back.\n", holding)
 	}
 	return nil
 }
@@ -208,7 +208,12 @@ func newCloneRemoveCmd(env *Env) *cobra.Command {
 				path = filepath.Join(env.Paths.Home, "clones", filepath.Base(args[0]))
 			}
 			if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-				return fmt.Errorf("no clone at %s", path)
+				// Naming the others rather than stopping at the path this
+				// project would have used. `dev clone list` had just shown
+				// them, and its own footer talks about `dev clone rm`, so a
+				// bare "no clone here" reads as a contradiction rather than
+				// as "you are standing in the wrong project".
+				return fmt.Errorf("no clone at %s%s", path, otherClones(cmd.Context(), env, path))
 			}
 
 			dirty, unmerged, _, _ := clone.State(cmd.Context(), env.Runner, path)
@@ -228,4 +233,26 @@ func newCloneRemoveCmd(env *Env) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "delete even if it holds unmerged work")
 	return cmd
+}
+
+// otherClones lists the clones that do exist, for the message shown when
+// this project has none. Empty when there is nothing to add.
+func otherClones(ctx context.Context, env *Env, except string) string {
+	clones, err := scanClones(ctx, env.Runner, clonesRoot(env))
+	if err != nil || len(clones) == 0 {
+		return ""
+	}
+	var names []string
+	for _, c := range clones {
+		if c.Path == except {
+			continue
+		}
+		names = append(names, c.Name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n  A clone belongs to the project it was made from, and this is not"+
+		" one of them.\n  These exist:  %s\n  Remove one:   dev clone rm %s",
+		strings.Join(names, ", "), names[0])
 }

@@ -39,7 +39,7 @@ copy in the project goes stale. Write one when you want to change it —
 | `dev clean` | remove this project's containers, networks and sidecar |
 | `dev clean --all` | the same for every project — frees ports a killed run left held |
 
-Useful flags on `run`, `shell` and `console`:
+Useful flags on `run` and `shell`:
 
 | | |
 |---|---|
@@ -51,6 +51,12 @@ Useful flags on `run`, `shell` and `console`:
 | `--clone-depth N` | copy only N commits of history — for large repositories |
 | `--rebuild` | rebuild the image first |
 | `--tty auto\|on\|off` | allocate a terminal |
+
+`console` takes `--allow-host`, `--clone`, `--clone-depth`, `--in-place`,
+`--rebuild` and `--agent`. It has no `--offline`, `--network` or
+`--egress-prompt`: it requires `network: allowlist` — with nothing filtered
+there is nothing to decide — and holding blocked requests is what it does
+rather than something to ask for. `--shell` takes the place of `--tty`.
 
 ---
 

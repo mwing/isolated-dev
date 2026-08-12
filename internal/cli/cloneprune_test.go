@@ -115,6 +115,27 @@ func TestPruneForceRemovesWork(t *testing.T) {
 	}
 }
 
+// `dev clone list` shows every clone and its footer talks about `dev clone
+// rm`, so running that from a project with no clone of its own looked like
+// the tool contradicting itself. The path it could not find is not the
+// useful half of the answer.
+func TestCloneRemoveFromTheWrongProjectNamesTheOnesThatExist(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	makeClone(t, h.paths.Home, "somewhere-else")
+
+	err := h.run(t, "clone", "rm", "--force")
+	if err == nil {
+		t.Fatal("removed a clone this project does not have")
+	}
+	if !strings.Contains(err.Error(), "somewhere-else") {
+		t.Errorf("the error does not name the clone that exists: %v", err)
+	}
+	if !strings.Contains(err.Error(), "dev clone rm somewhere-else") {
+		t.Errorf("the error does not say what to type instead: %v", err)
+	}
+}
+
 // A dry run that removes something is not a dry run.
 func TestPruneDryRunRemovesNothing(t *testing.T) {
 	h := newHarness(t)

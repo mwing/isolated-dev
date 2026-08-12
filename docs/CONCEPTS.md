@@ -174,9 +174,13 @@ files you are editing. Asking for `agent_clone: true` needs no acceptance:
 it is the default already, and a prompt that grants nothing teaches people
 to click through the ones that matter.
 
+`dev console --agent` clones too, and by the same rule: what makes the
+clone right is *who is driving* — a model rather than the person in the
+room — not which view you happen to be watching through.
+
 `dev run` and `dev shell` are unchanged: a human editing their own tree is
 the case the plain mount is right for, and `--clone` is there when you want
-it anyway.
+it anyway. A `dev console` with no agent is that same case.
 
 Clones are full copies, so they cost disk:
 

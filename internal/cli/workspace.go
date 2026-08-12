@@ -250,7 +250,8 @@ func addWorkspaceFlags(cmd *cobra.Command, command, tty *string, rebuild, offlin
 	cmd.Flags().StringArrayVar(extraHosts, "allow-host", nil, "add a destination for this run")
 }
 
-// addCloneFlag is shared by every command that mounts a workspace.
+// addCloneFlag is shared by run, shell and console — every command that
+// mounts a workspace.
 //
 // --clone-depth implies --clone. Asking for a shallow clone and then being
 // told nothing was cloned would be a pedantic reading of an unambiguous

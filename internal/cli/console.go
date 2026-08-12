@@ -36,6 +36,9 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		record     string
 		replay     string
 		replaySize string
+		useCloneD  bool
+		inPlace    bool
+		cloneDepth int
 	)
 
 	cmd := &cobra.Command{
@@ -51,9 +54,13 @@ func newConsoleCmd(env *Env) *cobra.Command {
 				return replayRecording(env, replay, replaySize)
 			}
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
-				rebuild, extraHosts, shell, agentName, record)
+				rebuild, extraHosts, shell, agentName, record,
+				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth})
 		},
 	}
+	addCloneFlag(cmd, &useCloneD, &cloneDepth)
+	cmd.Flags().BoolVar(&inPlace, "in-place", false,
+		"run an agent in the working tree instead of a private clone")
 	cmd.Flags().StringVarP(&command, "command", "c", "", "command to run")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "rebuild the image first")
 	cmd.Flags().StringArrayVar(&extraHosts, "allow-host", nil, "add a destination for this run")
@@ -107,7 +114,8 @@ func replayRecording(env *Env, path, size string) error {
 }
 
 func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
-	extraHosts []string, interactive bool, agentName string, record string) error {
+	extraHosts []string, interactive bool, agentName string, record string,
+	cl cloneOpts) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
@@ -137,6 +145,27 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		interactive = true
 	}
 
+	// An agent driven from the console gets a private clone by default,
+	// exactly as `dev agent run` does, and for the same reason: what makes
+	// the clone right is who is driving — a model rather than the person in
+	// the room — not which view they are watching through. The console
+	// documents itself as a view over the same run, and a view that quietly
+	// ran agents against the working tree was the weaker way to start one.
+	//
+	// A console with no agent is a person running their own command, which
+	// is the case the plain mount is right for. There --clone is opt-in,
+	// matching `dev run` and `dev shell`.
+	var workspaceDir string
+	if consoleWantsClone(cfg, agentName, cl) {
+		// To stderr, and before the program takes the screen: the clone's
+		// account of itself is several lines, and the full-screen view owns
+		// stdout from here on.
+		workspaceDir, err = prepareCloneDir(ctx, env, p.Dir, cl.depth, env.Stderr)
+		if err != nil {
+			return err
+		}
+	}
+
 	eng := container.New(env.driver(cfg.VMName))
 	exists, err := eng.ImageExists(ctx, p.Image)
 	if err != nil {
@@ -158,6 +187,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command)
 		if err != nil {
 			return err
+		}
+		if workspaceDir != "" {
+			agentOpts.Workspace = workspaceDir
 		}
 		// An agent gets a terminal whether or not a command was given: its
 		// whole interface is interactive.
@@ -267,9 +299,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if term != nil && agentOpts != nil {
 		go runAgentInteractive(runCtx, eng, *agentOpts, topo, prog, term, workloadName)
 	} else if term != nil {
-		go runInteractive(runCtx, eng, p, cfg, grants, command, topo, prog, image, term, workloadName)
+		go runInteractive(runCtx, eng, p, cfg, grants, command, topo, prog, image, term, workloadName, workspaceDir)
 	} else {
-		go runWorkload(runCtx, eng, p, cfg, grants, command, topo, prog, image)
+		go runWorkload(runCtx, eng, p, cfg, grants, command, topo, prog, image, workspaceDir)
 	}
 
 	if _, err := prog.Run(); err != nil {
@@ -433,10 +465,11 @@ func runAgentInteractive(ctx context.Context, eng *container.Engine, opts agent.
 // while the console keeps the surrounding layout.
 func runInteractive(ctx context.Context, eng *container.Engine, p *project.Project,
 	cfg config.Config, grants project.Grants, command []string, topo netpolicy.Topology,
-	prog *tea.Program, image string, term *console.Terminal, name string) {
+	prog *tea.Program, image string, term *console.Terminal, name, workspaceDir string) {
 	spec := p.RunSpec(cfg, grants, command, true)
 	spec.Name = name
 	spec.Image = image
+	mountWorkspace(&spec, workspaceDir)
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
 	spec.Env = append(spec.Env, topo.Env()...)
@@ -496,9 +529,10 @@ func repaint(ctx context.Context, prog *tea.Program, dirty *atomic.Bool) {
 // runWorkload runs the container, forwarding its output line by line.
 func runWorkload(ctx context.Context, eng *container.Engine, p *project.Project,
 	cfg config.Config, grants project.Grants, command []string, topo netpolicy.Topology,
-	prog *tea.Program, image string) {
+	prog *tea.Program, image, workspaceDir string) {
 	spec := p.RunSpec(cfg, grants, command, false)
 	spec.Image = image
+	mountWorkspace(&spec, workspaceDir)
 	spec.Network = topo.InternalNetwork
 	spec.DNS = []string{topo.SidecarIP}
 	spec.Env = append(spec.Env, topo.Env()...)
