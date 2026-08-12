@@ -60,7 +60,9 @@ egress decisions in another, and a blocked destination asked as a question
 while the request waits.
 
 But the menu was also answering "what do I do here?", which a console
-cannot. `dev interactive` still exists for that, rebuilt: it reports what
+cannot. That is what bare `dev` now does — someone who has to be told the
+name of the guided mode has already been failed by it — and `dev
+interactive` remains as its explicit spelling. It reports what
 state the project is in — detected language, image built or not, what is
 requested and unaccepted, whether a `.dockerignore` is missing — and offers
 the next steps, each naming the command it runs. A menu of commands helps

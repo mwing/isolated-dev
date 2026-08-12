@@ -56,12 +56,16 @@ installed from `v1/install.sh`. Run `dev migrate` for what changes.
 ## Start here
 
 ```sh
-dev interactive
+cd your-project
+dev
 ```
 
 Reports what is set up and what is not, then offers the next steps with an
 explanation of each. Every entry maps to a command you could have typed,
 and shows which one.
+
+Outside a project, or without a terminal, `dev` on its own prints help
+instead. `dev interactive` is the same guided view under its own name.
 
 Then, depending on what you came for:
 

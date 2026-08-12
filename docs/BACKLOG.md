@@ -153,14 +153,24 @@ widen what its `--all` accepts: it covers settings too. That is the merge
 working as intended — one review, one confirmation — and the review still
 prints everything before anything is recorded.
 
-### B9. Bare `dev` is the front door — `todo`
+### B9. Bare `dev` is the front door — `done`
 
-The root command has no default action while the README tells newcomers to
+The root command had no default action while the README told newcomers to
 run `dev interactive`. Someone who has to be told the name of the guided
 mode has already been failed by it.
 
-**Done when:** bare `dev` in a project runs the guided view, and bare `dev`
-outside one prints help.
+Bare `dev` runs the guided view in a project, and prints help outside one
+or when there is no terminal to draw a full-screen menu on. `dev
+interactive` remains as the explicit spelling.
+
+Building it surfaced a bug worth more than the feature: `isTerminal` tested
+for a character device, and `/dev/null` is one. So the most common way of
+running without a terminal was reported as having one. That made `--tty
+auto` ask docker for a terminal it could not attach — the "the input device
+is not a TTY" failure that `--tty off` was the workaround for — and it
+would have made bare `dev` open a menu with nobody there to read it. It now
+asks the terminal layer. The test harness had been carrying a comment
+describing the bug and working around it.
 
 ### B10. Tell the truth when a grant will not be usable — `todo`
 

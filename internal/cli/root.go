@@ -125,10 +125,19 @@ func NewRootCmd(env *Env) *cobra.Command {
 		Short: "Isolated development environments",
 		Long: "Run code in a container without learning Docker, in a sandbox that\n" +
 			"is closed by default and opened one deliberate step at a time.\n\n" +
+			"Run `dev` on its own inside a project for the guided view: what is\n" +
+			"set up, what is not, and what each next step would do.\n\n" +
 			"The bash tool this replaces installs itself as `dev1` and stays\n" +
 			"available; `dev migrate` says what changes.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		// Without this cobra hands an unrecognized command to the root's own
+		// RunE as an argument, so `dev buld` would open the menu instead of
+		// saying that `buld` is not a command.
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runFrontDoor(cmd, env)
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			v, err := cmd.Flags().GetBool("verbose")
 			if err != nil {

@@ -14,6 +14,7 @@ import (
 	"github.com/mwing/isolated-dev/internal/clone"
 	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/history"
+	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/trust"
 	"github.com/mwing/isolated-dev/internal/wizard"
 )
@@ -33,6 +34,56 @@ func newInteractiveCmd(env *Env) *cobra.Command {
 			return runWizard(cmd.Context(), env)
 		},
 	}
+}
+
+// runFrontDoor is what bare `dev` does.
+//
+// Someone who has to be told the name of the guided mode has already been
+// failed by it, so the guided mode is what the bare command does — but only
+// where it can work and where it has something to say.
+//
+// Two things make it fall back to help, and both are cases where running the
+// menu would be worse than not:
+//
+//   - No terminal. The menu is a full-screen program; `dev` in a script or
+//     piped into a pager must print something readable rather than fail.
+//   - Not a project. The menu reports on a project, and there is nothing to
+//     report in a directory that has none.
+func runFrontDoor(cmd *cobra.Command, env *Env) error {
+	if !env.stdinIsTerminal() {
+		return cmd.Help()
+	}
+
+	_, p, err := resolveProject(env)
+	if err != nil {
+		// A malformed .devenv.yaml is a real error and printing help over it
+		// would bury the reason. Only "there is no project here" is quiet.
+		return err
+	}
+	if !isProject(p) {
+		fmt.Fprintf(env.Stderr, "No project in %s — nothing to set up yet.\n", p.Dir)
+		fmt.Fprintf(env.Stderr, "`dev new` scaffolds one, or run this from a repository.\n\n")
+		return cmd.Help()
+	}
+	return runWizard(cmd.Context(), env)
+}
+
+// isProject reports whether this directory is something dev can work on:
+// a language it recognizes, a Dockerfile, a devcontainer naming an image,
+// or a project file asking for something.
+//
+// The last one counts on its own because a `.devenv.yaml` is a deliberate
+// act — someone wrote it — and a repository whose language plugin is
+// missing should still lead its owner to the menu that says so.
+func isProject(p *project.Project) bool {
+	if p == nil {
+		return false
+	}
+	if p.Detected.Found() || p.Dockerfile != "" || p.DevcontainerImage != "" {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(p.Dir, ".devenv.yaml"))
+	return err == nil
 }
 
 func runWizard(ctx context.Context, env *Env) error {

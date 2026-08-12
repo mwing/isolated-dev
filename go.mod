@@ -10,6 +10,7 @@ require (
 	github.com/hinshun/vt10x v0.0.0-20220301184237-5011da428d02
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.38.0
 )
 
 require (

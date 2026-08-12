@@ -41,8 +41,8 @@ func newHarness(t *testing.T) *harness {
 	}
 	// Stdin is left nil: no terminal, so egress prompting resolves to
 	// reporting and nothing waits for an answer nobody is there to give.
-	// Inheriting the test binary's stdin would not do — `go test` supplies
-	// /dev/null, which is a character device and so looks like a terminal.
+	// Inheriting the test binary's stdin would tie the suite to how it was
+	// invoked, which is not something a test should depend on.
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
@@ -847,6 +847,79 @@ func TestGrantCommandsLiveAtTheRoot(t *testing.T) {
 	}
 	if c, _, err := root.Find([]string{"agent", "accept"}); err != nil || c == nil || !c.Hidden {
 		t.Errorf("`dev agent accept` should still work and stay out of the help: %v", err)
+	}
+}
+
+func TestDevNullIsNotATerminal(t *testing.T) {
+	// It is a character device, which is what the old check tested for, so
+	// it was reported as a terminal. That is the single most common way of
+	// running without one: it made `--tty auto` ask docker for a terminal it
+	// could not attach, and it made bare `dev` open a full-screen menu with
+	// nobody there to read it.
+	f, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Error("/dev/null reports as a terminal")
+	}
+	if wantTTY("auto", f) {
+		t.Error("`--tty auto` would ask for a terminal with stdin on /dev/null")
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(r) {
+		t.Error("a pipe reports as a terminal")
+	}
+	if isTerminal(nil) {
+		t.Error("no stdin at all reports as a terminal")
+	}
+}
+
+func TestBareDevWithoutATerminalPrintsHelp(t *testing.T) {
+	// The guided view is a full-screen program. Bare `dev` in a script or
+	// piped into a pager has to print something readable instead of failing,
+	// and it must not hang waiting for input nobody will send.
+	h := newHarness(t)
+	h.writeProject(t, "network: allowlist\n")
+
+	if err := h.run(t); err != nil {
+		t.Fatalf("bare dev: %v\n%s", err, h.stderr.String())
+	}
+	if !strings.Contains(h.stdout.String(), "Usage:") {
+		t.Errorf("bare dev printed no help:\n%s", h.stdout.String())
+	}
+}
+
+func TestBareDevOutsideAProjectSaysSo(t *testing.T) {
+	h := newHarness(t)
+
+	if err := h.run(t); err != nil {
+		t.Fatalf("bare dev: %v", err)
+	}
+	if !strings.Contains(h.stdout.String(), "Usage:") {
+		t.Errorf("no help was printed:\n%s", h.stdout.String())
+	}
+}
+
+func TestAMistypedCommandIsNotTheGuidedView(t *testing.T) {
+	// Giving the root a RunE means cobra will hand it an unrecognized
+	// command as an argument unless it is told not to accept any, so `dev
+	// buld` would silently open the menu instead of saying what is wrong.
+	h := newHarness(t)
+
+	err := h.run(t, "buld")
+	if err == nil {
+		t.Fatal("a mistyped command was accepted")
+	}
+	if !strings.Contains(err.Error(), "buld") {
+		t.Errorf("the error does not name what was typed: %v", err)
 	}
 }
 

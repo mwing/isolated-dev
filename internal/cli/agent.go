@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/mwing/isolated-dev/internal/agent"
 	"github.com/mwing/isolated-dev/internal/clone"
@@ -846,12 +847,17 @@ func ensureProxyImage(ctx context.Context, eng *container.Engine, env *Env) (str
 }
 
 // isTerminal reports whether f is an interactive terminal.
+//
+// Asking the terminal layer rather than testing for a character device:
+// /dev/null is a character device and is not a terminal, so the cheap test
+// answered yes for the single most common way of running without one. That
+// made `--tty auto` ask docker for a terminal it could not attach, and it
+// made bare `dev` open a full-screen menu with nothing to read it.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
+	if f == nil {
 		return false
 	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // wantTTY resolves the --tty setting. Auto-detection is a heuristic: stdin

@@ -12,7 +12,8 @@ what it ran.
 
 | | |
 |---|---|
-| `dev interactive` | guided: what state this project is in, and what to do next |
+| `dev` | in a project: guided — what state it is in, and what to do next |
+| `dev interactive` | the same guided view, under its own name |
 | `dev new LANG [dir]` | scaffold a new project from a language plugin |
 | `dev doctor` | backend, sidecar image, disk, and this project's build context |
 | `dev migrate` | what changes coming from the bash tool (`dev1`) |
