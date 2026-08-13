@@ -163,12 +163,13 @@ func TestIntegrationHardenedRunsReapOrphans(t *testing.T) {
 // below this cannot check it: a fake runner reports that a container wrote
 // a file without a filesystem ever being touched.
 //
-// It is also the gap that would let the UID work (BACKLOG B15) ship broken.
-// Every hardened run is `--user 1000:1000`, and macOS file sharing remaps
-// ownership so a write always arrives owned by whoever is running dev —
+// It is also what proved the UID work (BACKLOG B15) necessary and then
+// correct. Runs used to be a fixed `--user 1000:1000`; macOS file sharing
+// remaps ownership so a write always arrives owned by whoever ran dev,
 // which means the developer's machine cannot show the problem. On Linux a
-// bind mount is raw: the file lands owned by uid 1000, and a host user who
-// is not 1000 gets a workspace they cannot edit afterwards.
+// bind mount is raw, and this test failed there with "can't create file:
+// Permission denied" — the container could not write its own workspace at
+// all.
 //
 // So this asserts the property rather than the mechanism: whatever uid the
 // container runs as, work it leaves behind has to be work the person can
@@ -180,7 +181,13 @@ func TestIntegrationTheWorkspaceRoundTrips(t *testing.T) {
 
 	spec := container.Hardened()
 	spec.Image = "alpine"
-	spec.User = "1000:1000"
+	// Deliberately not overridden. Hardened() is where the uid is decided,
+	// and a test that sets its own is a test of the number it chose rather
+	// than of what a run actually does — this one pinned 1000:1000 and so
+	// kept failing after the fix that removed it.
+	if spec.User != container.HostUser() {
+		t.Fatalf("hardened runs use %q, not the host's %q", spec.User, container.HostUser())
+	}
 	spec.Mounts = []container.Mount{{Source: dir, Target: "/workspace"}}
 	spec.WorkDir = "/workspace"
 	spec.Command = []string{"sh", "-c", "echo written-inside > from-container.txt"}
@@ -210,8 +217,8 @@ func TestIntegrationTheWorkspaceRoundTrips(t *testing.T) {
 	f, err := os.OpenFile(written, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		t.Fatalf("the host cannot write to the file the container left "+
-			"(BACKLOG B15: the run is --user 1000:1000 and this host is uid %d): %v",
-			os.Getuid(), err)
+			"(the run is --user %s and this host is uid %d): %v",
+			spec.User, os.Getuid(), err)
 	}
 	_ = f.Close()
 
