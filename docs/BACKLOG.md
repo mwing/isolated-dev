@@ -194,8 +194,9 @@ unchanged, and what has to be wrapped. It fires only for explicitly named
 non-default ports: a note that appears on ordinary grants is a note that
 stops being read.
 
-CONCEPTS carries the table. B16 (a SOCKS listener) remains the way to make
-the second row work by itself rather than by explanation.
+CONCEPTS carries the table. B16 built the SOCKS listener that makes the
+second row work by itself rather than by explanation, and the note now
+names `ALL_PROXY` instead of describing a dead end.
 
 ### B11. Warn about the build context before sending it — `todo`
 
@@ -285,10 +286,35 @@ topology but never runs a container over a mounted workspace, so nothing
 would catch it. That test comes first — it is what makes the rest
 verifiable.
 
-### B16. Non-HTTP ergonomics — `todo`
+### B16. Non-HTTP ergonomics — `done`
 
-A SOCKS listener on the sidecar would let ordinary clients reach granted
-destinations without weakening the topology. Pairs with B10.
+A SOCKS5 listener on the sidecar, so ordinary clients reach granted
+destinations without weakening the topology. `ALL_PROXY` is set in the
+container alongside `HTTP_PROXY`, so a client that reads it needs telling
+nothing.
+
+Verified in a sandbox, the same probe B10 was measured with:
+
+```
+raw TCP:      FAILED ([Errno 101] Network is unreachable)
+via SOCKS5:   reply code 0 (0 = success)  ->  SSH-2.0-...
+```
+
+The topology is untouched — the raw socket still has nowhere to go — and
+an ungranted destination is refused with code 2 (`not allowed by
+ruleset`), including 169.254.169.254, with the denial in the run's report
+like any other.
+
+It is a second door, not a looser one: both front ends call one
+`authorizeTunnel`, so the allowlist, the held-request prompt, the
+infrastructure guard, the SNI check inside the session and the event log
+are shared rather than reimplemented. Two implementations of "may this
+connection happen" would be two chances for one to check less, and the one
+that checks less is the one nobody notices.
+
+Fuzzing the request parser found a zero-length domain accepted as a
+destination naming no host, before it shipped. `FuzzSOCKSRequest` is in
+the CI matrix.
 
 ### B17. ECH on the security roadmap — `todo`
 

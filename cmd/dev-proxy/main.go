@@ -33,6 +33,8 @@ func run() error {
 	var (
 		proxyAddr = flag.String("proxy-addr", ":3128", "listen address for the HTTP CONNECT proxy")
 		dnsAddr   = flag.String("dns-addr", ":53", "listen address for the filtering resolver")
+		socksAddr = flag.String("socks-addr", ":1080",
+			"listen address for the SOCKS5 front end; empty disables it")
 		allowFlag = flag.String("allow", "", "comma-separated allowlist entries")
 		allowFile = flag.String("allow-file", "", "file with one allowlist entry per line")
 		noDNS     = flag.Bool("no-dns", false, "do not serve DNS")
@@ -92,13 +94,24 @@ func run() error {
 		ReadHeaderTimeout: 30 * time.Second,
 	}
 
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	go func() { errs <- srv.ListenAndServe() }()
 	fmt.Fprintf(os.Stderr, "dev-proxy: proxy listening on %s\n", *proxyAddr)
-	// A single line the parent can wait for. Without a readiness signal it
-	// has to guess when the sidecar is up, and a guess is either a race or
-	// a fixed delay on every run.
-	fmt.Fprintln(os.Stderr, readyLine)
+
+	// The same policy behind a second protocol, for the clients that cannot
+	// speak HTTP CONNECT. It shares the Proxy — and therefore the allowlist,
+	// the held-request prompt and the denial tally — rather than deciding
+	// anything of its own.
+	if *socksAddr != "" {
+		socks := &netpolicy.SOCKS{Proxy: proxy}
+		l, socksErrs, err := socks.ListenAndServe(*socksAddr)
+		if err != nil {
+			return fmt.Errorf("starting SOCKS: %w", err)
+		}
+		defer func() { _ = l.Close() }()
+		go func() { errs <- <-socksErrs }()
+		fmt.Fprintf(os.Stderr, "dev-proxy: socks listening on %s\n", *socksAddr)
+	}
 
 	var dnsSrv *netpolicy.DNSServer
 	if !*noDNS {
@@ -139,6 +152,15 @@ func run() error {
 		defer func() { _ = fwd.Close() }()
 		fmt.Fprintf(os.Stderr, "dev-proxy: forwarding %s\n", fwd)
 	}
+
+	// A single line the parent can wait for. Without a readiness signal it
+	// has to guess when the sidecar is up, and a guess is either a race or a
+	// fixed delay on every run.
+	//
+	// Printed once every listener is up, not once the first one is. It used
+	// to go out right after the HTTP proxy, which meant the workload could
+	// start and ask DNS a question before the resolver existed.
+	fmt.Fprintln(os.Stderr, readyLine)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

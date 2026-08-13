@@ -64,17 +64,26 @@ The second one cuts both ways, and it is the part that surprises people:
 **a grant permits a destination, it does not build a road to it.** The
 proxy is the only road, and the client has to know how to use it.
 
+There are two doors, and both enforce the same allowlist:
+
 | | |
 |---|---|
-| works unchanged | anything honouring `HTTP_PROXY`/`HTTPS_PROXY` — curl, wget, git over https, pip, npm, cargo, go |
-| does not | raw TCP clients — psql, mysql, redis-cli, mongosh |
-| ssh | works when something sets `ProxyCommand`; `dev agent run --allow-push` does |
+| `HTTP_PROXY`/`HTTPS_PROXY` | an HTTP CONNECT proxy — curl, wget, git over https, pip, npm, cargo, go |
+| `ALL_PROXY` | a SOCKS5 endpoint (`socks5h://`), for everything that is not HTTP |
+| ssh | `ProxyCommand` through either; `dev agent run --allow-push` wires it |
 
-A raw client fails with `network is unreachable` *even for a destination
-you granted*, because what stops it is the missing route rather than the
-policy — and that error names the network, which is the wrong place to go
-looking. Granting a non-HTTP port says this at the time, rather than
-leaving it to be discovered.
+Both are set in the container. A client that reads `ALL_PROXY` — or that
+takes `--socks5-hostname`, or is wrapped in something like `proxychains` —
+reaches a granted destination on any port. One that reads neither and opens
+a socket itself still gets `network is unreachable`, because what stops it
+is the missing route rather than the policy. Granting a non-HTTP port says
+which case you are in at the time, rather than leaving it to be discovered.
+
+SOCKS is a second door, not a looser one. It is the same allowlist, the
+same held-request prompt, the same refusal of literal addresses under a
+hostname rule, the same check on the name inside the TLS session, and the
+same lines in `dev history` — one function decides, and both front ends
+call it.
 
 Three modes: `allowlist` (default), `open` (no filtering), `none`
 (`--offline`, no network at all).

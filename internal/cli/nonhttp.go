@@ -36,12 +36,12 @@ func explainNonHTTP(out io.Writer, entries []string) {
 	}
 	fmt.Fprintf(out, "\nNote: %s\n", portPhrase(ports))
 	fmt.Fprintf(out, "The destination is permitted, but the container has no route out except\n")
-	fmt.Fprintf(out, "the proxy, so the client has to be the one to use it:\n\n")
-	fmt.Fprintf(out, "  works already   anything honouring HTTP_PROXY/HTTPS_PROXY — curl, wget,\n")
-	fmt.Fprintf(out, "                  git over https, pip, npm, cargo, go\n")
-	fmt.Fprintf(out, "  needs wiring    raw TCP clients — psql, mysql, redis-cli, mongosh.\n")
-	fmt.Fprintf(out, "                  They fail with \"network is unreachable\" until wrapped\n")
-	fmt.Fprintf(out, "                  in something that speaks CONNECT.\n")
+	fmt.Fprintf(out, "the sidecar, so the client has to go through it:\n\n")
+	fmt.Fprintf(out, "  works already   anything reading ALL_PROXY (a SOCKS5 endpoint) or\n")
+	fmt.Fprintf(out, "                  HTTP_PROXY — curl, wget, git, pip, npm, cargo, go\n")
+	fmt.Fprintf(out, "  needs wrapping  clients that open a socket themselves — psql, mysql,\n")
+	fmt.Fprintf(out, "                  redis-cli. They fail with \"network is unreachable\"\n")
+	fmt.Fprintf(out, "                  until pointed at $ALL_PROXY, e.g. through proxychains.\n")
 	fmt.Fprintf(out, "  ssh             `dev agent run --allow-push` wires ProxyCommand for you\n")
 }
 

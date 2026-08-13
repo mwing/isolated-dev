@@ -319,25 +319,79 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.handleHTTP(w, r)
 }
 
+// refusal is why a tunnel was not opened, in the terms each front end needs
+// to render its own kind of "no".
+type refusal struct {
+	reason string
+	kind   refusalKind
+}
+
+func (r *refusal) Error() string { return r.reason }
+
+type refusalKind int
+
+const (
+	// refusedByPolicy: the allowlist did not permit it, or its shape was
+	// refused. The destination is the subject.
+	refusedByPolicy refusalKind = iota
+	// refusedAddress: the name resolved somewhere this proxy will not go —
+	// loopback, a private network, a metadata endpoint. Kept distinct
+	// because the remedy is different and worth printing.
+	refusedAddress
+	// refusedUnreachable: no policy objection; it simply did not connect.
+	// Never counted as a denial, or the exit summary claims the allowlist
+	// blocked something it had just allowed.
+	refusedUnreachable
+)
+
+// authorizeTunnel applies every check a tunnelled connection must pass and,
+// if they all hold, opens it.
+//
+// Shared by the HTTP CONNECT and SOCKS front ends, and shared deliberately.
+// Two implementations of "may this connection happen" are two chances for
+// one of them to check less than the other, and the one that checks less is
+// the one nobody notices — a second door into the same house is only as
+// strong as the weaker lock. Every emission happens here too, so the run's
+// history says the same thing whichever protocol asked.
+func (p *Proxy) authorizeTunnel(ctx context.Context, host string, port int,
+	method string) (net.Conn, error) {
+	if !p.Allowlist().Allows(host, port) {
+		if !p.awaitDecision(ctx, host, port, method) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: method,
+				Reason: "not in allowlist"})
+			return nil, &refusal{reason: "not in allowlist", kind: refusedByPolicy}
+		}
+	}
+	if why := p.exfilShape(host); why != "" {
+		p.emit(Event{Action: "deny", Host: host, Port: port, Method: method, Reason: why})
+		return nil, &refusal{reason: why, kind: refusedByPolicy}
+	}
+
+	upstream, err := p.dial(ctx, net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		// A refused address is a decision, and belongs in the denial
+		// tally and the run's history with the rest of them.
+		var blocked *blockedAddress
+		if errors.As(err, &blocked) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: method,
+				Reason: blocked.Error()})
+			return nil, &refusal{reason: blocked.Error(), kind: refusedAddress}
+		}
+		// An unreachable upstream is a network failure, not a policy
+		// decision. Recording it as a denial made the exit summary claim
+		// the allowlist blocked something it had just allowed.
+		p.emit(Event{Action: "error", Host: host, Port: port, Method: method,
+			Reason: "upstream dial failed: " + err.Error()})
+		return nil, &refusal{reason: "upstream unreachable", kind: refusedUnreachable}
+	}
+	return upstream, nil
+}
+
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host, port, err := splitTarget(r.Host, 443)
 	if err != nil {
 		p.emit(Event{Action: "deny", Host: r.Host, Method: r.Method, Reason: err.Error()})
 		http.Error(w, "invalid CONNECT target", http.StatusBadRequest)
-		return
-	}
-
-	if !p.Allowlist().Allows(host, port) {
-		if !p.awaitDecision(r.Context(), host, port, r.Method) {
-			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
-				Reason: "not in allowlist"})
-			denyResponse(w, host, port)
-			return
-		}
-	}
-	if why := p.exfilShape(host); why != "" {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method, Reason: why})
-		denyResponse(w, host, port)
 		return
 	}
 
@@ -347,23 +401,21 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstream, err := p.dial(r.Context(), net.JoinHostPort(host, strconv.Itoa(port)))
+	upstream, err := p.authorizeTunnel(r.Context(), host, port, r.Method)
 	if err != nil {
-		// A refused address is a decision, and belongs in the denial
-		// tally and the run's history with the rest of them.
-		var blocked *blockedAddress
-		if errors.As(err, &blocked) {
-			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
-				Reason: blocked.Error()})
-			http.Error(w, "proxy: "+blocked.Error(), http.StatusForbidden)
+		var ref *refusal
+		if errors.As(err, &ref) {
+			switch ref.kind {
+			case refusedUnreachable:
+				http.Error(w, "proxy: upstream unreachable", http.StatusBadGateway)
+			case refusedAddress:
+				http.Error(w, "proxy: "+ref.reason, http.StatusForbidden)
+			default:
+				denyResponse(w, host, port)
+			}
 			return
 		}
-		// An unreachable upstream is a network failure, not a policy
-		// decision. Recording it as a denial made the exit summary claim
-		// the allowlist blocked something it had just allowed.
-		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
-			Reason: "upstream dial failed: " + err.Error()})
-		http.Error(w, "proxy: upstream unreachable", http.StatusBadGateway)
+		denyResponse(w, host, port)
 		return
 	}
 	defer func() { _ = upstream.Close() }()

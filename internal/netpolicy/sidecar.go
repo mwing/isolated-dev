@@ -31,6 +31,9 @@ type Topology struct {
 	SidecarIP       string
 	ProxyPort       int
 	DNSPort         int
+	// SOCKSPort is the SOCKS5 listener, for clients that cannot speak HTTP
+	// CONNECT. Same policy, same log; see SOCKS.
+	SOCKSPort int
 }
 
 // ProxyURL is the value for HTTP_PROXY/HTTPS_PROXY inside the workload.
@@ -43,11 +46,16 @@ func (t Topology) ProxyURL() string {
 // Env returns the proxy environment for the workload.
 func (t Topology) Env() []string {
 	url := t.ProxyURL()
+	socks := t.SOCKSURL()
 	return []string{
 		"HTTP_PROXY=" + url,
 		"HTTPS_PROXY=" + url,
 		"http_proxy=" + url,
 		"https_proxy=" + url,
+		// ALL_PROXY is where non-HTTP clients look, and the ones that read
+		// it get the granted destination without being told anything.
+		"ALL_PROXY=" + socks,
+		"all_proxy=" + socks,
 		// Loopback and the sidecar itself must not be proxied.
 		"NO_PROXY=localhost,127.0.0.1," + t.SidecarIP,
 		"no_proxy=localhost,127.0.0.1," + t.SidecarIP,
@@ -90,6 +98,9 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 	if t.DNSPort == 0 {
 		t.DNSPort = 53
 	}
+	if t.SOCKSPort == 0 {
+		t.SOCKSPort = DefaultSOCKSPort
+	}
 
 	if err := s.Engine.NetworkCreate(ctx, t.InternalNetwork, true); err != nil {
 		return t, err
@@ -114,6 +125,7 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 			"--allow", strings.Join(s.Allow, ","),
 			"--proxy-addr", fmt.Sprintf(":%d", t.ProxyPort),
 			"--dns-addr", fmt.Sprintf(":%d", t.DNSPort),
+			"--socks-addr", fmt.Sprintf(":%d", t.SOCKSPort),
 			"--ask-timeout", s.AskTimeout.String(),
 		},
 	}

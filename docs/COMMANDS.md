@@ -57,7 +57,8 @@ docker socket for that run only and records nothing: it is root on the
 docker host, and `dev accept` will not remember it without `--remember`.
 
 `console` takes `--allow-host`, `--clone`, `--clone-depth`, `--in-place`,
-`--allow-docker-socket`, `--rebuild` and `--agent`. It has no `--offline`, `--network` or
+`--allow-docker-socket`, `--rebuild` and `--agent`. It has no `--offline`,
+`--network` or
 `--egress-prompt`: it requires `network: allowlist` — with nothing filtered
 there is nothing to decide — and holding blocked requests is what it does
 rather than something to ask for. `--shell` takes the place of `--tty`.
@@ -106,11 +107,11 @@ same ones. `allow`, `revoke`, `grants`, `config` and `accept` were once
 `dev agent` subcommands and still answer there, hidden, so existing scripts
 keep working.
 
-Granting a non-HTTP port permits the destination but does not make it
-reachable by itself: the container's only route out is the proxy, so a raw
-TCP client such as `psql` still gets `network is unreachable`. `dev allow`
-says so when it happens; [CONCEPTS.md](CONCEPTS.md) has the table of what
-works unchanged.
+Granting a non-HTTP port permits the destination; reaching it means going
+through the sidecar, which offers HTTP CONNECT (`HTTP_PROXY`) and SOCKS5
+(`ALL_PROXY`). A client reading either gets there on any granted port; one
+that opens a socket itself still gets `network is unreachable`. `dev allow`
+says which case you are in; [CONCEPTS.md](CONCEPTS.md) has the table.
 
 `dev accept` shows settings and destinations together because the project
 asked for both in one file. They remain separate decisions — accept one and
