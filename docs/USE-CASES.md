@@ -38,6 +38,7 @@ repository you already have.
 **Review and operations**
 
 - [Reviewing what a project reached](#reviewing-what-a-project-reached)
+- [Tests that need docker, and what that costs](#tests-that-need-docker-and-what-that-costs)
 - [Closing the unsafe paths for a team](#closing-the-unsafe-paths-for-a-team)
 - [The console](#the-console)
 - [When something looks stuck](#when-something-looks-stuck)
@@ -801,6 +802,100 @@ through a file the repository ships. `remoteUser` cannot decide who the
 container runs as, or a project could choose root. A config half-honored
 *silently* is worse than one not read at all, because you would believe
 the file describes what is running.
+
+---
+
+## Tests that need docker, and what that costs
+
+Integration tests that start containers — testcontainers, a compose stack,
+a build that produces an image — need a docker daemon. The sandbox does not
+have one. The socket can be handed in, and this is the one grant the tool
+treats differently from every other.
+
+The project asks in `.devenv.yaml`:
+
+```yaml
+mount_docker_socket: true
+```
+
+That is a request, so a run stops until you answer it. Unlike every other
+setting, "accept it" is not the answer offered first:
+
+```
+.devenv.yaml requests settings you have not accepted:
+
+  mount_docker_socket: true
+      mount the docker socket, which is root on the docker host
+
+Review and accept:  dev accept
+For this run only:   dev run --allow-docker-socket
+Or ignore the file:  --network allowlist
+```
+
+The container also needs a client, which the language images do not carry:
+
+```sh
+dev tools add docker-cli
+dev run --allow-docker-socket -c 'pytest tests/integration'
+```
+
+Use `docker-cli`, not `docker.io`. The tools layer installs with
+`--no-install-recommends`, and on Debian `docker.io` only *recommends* the
+command-line client — you get the daemon's helpers and no `docker`. The
+name `docker-cli` is right on both Debian and Alpine.
+
+What arrives is the socket and the group that can use it:
+
+```
+$ id
+uid=1000(appuser) gid=1000(appuser) groups=1000(appuser),0(root)
+$ docker ps --format '{{.Image}}'
+dev-img-myproject-tools:37f8bf5b
+dev-proxy:latest
+```
+
+Read the second line again. **The container can see, and control, the
+sidecar enforcing its own egress policy.** That is not a flaw in how the
+socket is mounted; it is what the socket is. The docker API can start a
+container with any mount, as any user, on any network — so a workload
+holding it can stop the proxy, or simply run something outside the
+sandbox entirely.
+
+Two consequences worth stating plainly:
+
+| | |
+|---|---|
+| the allowlist | still governs the sandbox's own connections, and governs nothing the *daemon* does on its behalf — an image pulled through the socket is pulled by the host daemon, past the proxy |
+| the isolation | ends here. Everything else in this document assumes the workload cannot reach the host; with the socket it can |
+
+So it is granted one run at a time, and nothing is written down:
+
+```sh
+dev run --allow-docker-socket -c 'pytest tests/integration'   # this run only
+```
+
+Making it permanent takes a second sentence, because an acceptance is keyed
+by the project's *path*:
+
+```sh
+dev accept mount_docker_socket --remember
+```
+
+`dev accept --all` will not do it for you. A remembered grant is inherited
+by whatever occupies that path later — clone a different repository over
+it and the new one asks for exactly the value you already approved, which
+looks identical to the tool. For most settings that trade is fine. For
+root on the host it is not, which is why the default is "ask again".
+
+**Agents never receive it**, at any level of acceptance, with or without
+the flag. An agent runs on instructions from a model; the whole reason it
+gets a private clone is that it should not be able to edit what your host
+runs later, and the docker socket is that with no upper bound.
+
+If the tests only need a service rather than a daemon — a database, a
+queue — the socket is the wrong tool. Run it on the host and grant the
+destination, remembering that a raw TCP client needs the proxy taught to
+it (see [CONCEPTS.md](CONCEPTS.md)).
 
 ---
 

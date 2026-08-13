@@ -123,6 +123,8 @@ An acceptance is keyed by the project's *path*, so anything remembered is
 inherited by whatever occupies that path later — and a new repository
 asking for the same value looks identical to the one you approved. For most
 settings that is a fair trade. For root on the host it is not.
+[USE-CASES.md](USE-CASES.md#tests-that-need-docker-and-what-that-costs)
+works through when it is worth it, and what it costs.
 
 The one thing that constrains **you** is `~/.dev-envs/policy.yaml`, which
 can forbid network modes, settings, registries and destinations outright.
@@ -271,7 +273,9 @@ what your machine reached is not the repository's business.
 ## What it does not do
 
 - **It runs one container, not your stack.** A repo needing a database
-  alongside it is not what a project run gives you.
+  alongside it is not what a project run gives you. Tests that start their
+  own containers need the docker socket, which ends the isolation —
+  [worked through here](USE-CASES.md#tests-that-need-docker-and-what-that-costs).
 - **Ports do not publish in allowlist mode** unless the sidecar forwards
   them; the run says which are published.
 - **A container is not a VM.** On macOS everything already runs inside the
