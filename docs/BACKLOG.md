@@ -172,16 +172,30 @@ would have made bare `dev` open a menu with nobody there to read it. It now
 asks the terminal layer. The test harness had been carrying a comment
 describing the bug and working around it.
 
-### B10. Tell the truth when a grant will not be usable — `todo`
+### B10. Tell the truth when a grant will not be usable — `done`
 
 `dev allow db.example.com:5432` reads as "Postgres is now reachable". It is
 not: the workload has no route, and a Postgres client will not speak HTTP
 CONNECT. Only the proxy-aware clients and the agent's explicit
 `ProxyCommand` get through.
 
-**Done when:** granting a non-HTTP port says plainly that the destination
-is permitted but the client must be taught to use the proxy, and the docs
-say which protocols work out of the box.
+Measured in a sandbox before writing the message, both lines from the same
+container to the same granted destination in the same run:
+
+```
+raw TCP:      FAILED (OSError: [Errno 101] Network is unreachable)
+via CONNECT:  HTTP/1.1 200 Connection established  →  SSH-2.0-...
+```
+
+So the grant is real and the reachability is not, and the error a user gets
+names the network rather than the policy — which sends them to the wrong
+place. `dev allow` and `dev accept` now say what is permitted, what works
+unchanged, and what has to be wrapped. It fires only for explicitly named
+non-default ports: a note that appears on ordinary grants is a note that
+stops being read.
+
+CONCEPTS carries the table. B16 (a SOCKS listener) remains the way to make
+the second row work by itself rather than by explanation.
 
 ### B11. Warn about the build context before sending it — `todo`
 

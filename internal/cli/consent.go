@@ -231,6 +231,7 @@ func runAccept(_ context.Context, env *Env, names []string, all bool, agentName 
 		fmt.Fprintf(env.Stdout, "  + %s\n", h)
 	}
 	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", store.Project.Path())
+	explainNonHTTP(env.Stdout, addedHosts)
 	return nil
 }
 

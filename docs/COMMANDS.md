@@ -86,7 +86,7 @@ scripts and Makefiles, which are things your host runs later.
 | | |
 |---|---|
 | `dev accept` | review everything this project requests: settings and destinations |
-| `dev allow HOST` | grant a destination for this project |
+| `dev allow HOST` | grant a destination for this project (`HOST:PORT` for a port other than 80/443) |
 | `dev revoke HOST` | remove one |
 | `dev grants` | every grant, and whether anything still uses it |
 | `dev grants prune` | offer back the ones no recorded run reached |
@@ -101,6 +101,12 @@ Grants belong to the project, not to agents: a plain `dev run` consumes the
 same ones. `allow`, `revoke`, `grants`, `config` and `accept` were once
 `dev agent` subcommands and still answer there, hidden, so existing scripts
 keep working.
+
+Granting a non-HTTP port permits the destination but does not make it
+reachable by itself: the container's only route out is the proxy, so a raw
+TCP client such as `psql` still gets `network is unreachable`. `dev allow`
+says so when it happens; [CONCEPTS.md](CONCEPTS.md) has the table of what
+works unchanged.
 
 `dev accept` shows settings and destinations together because the project
 asked for both in one file. They remain separate decisions — accept one and

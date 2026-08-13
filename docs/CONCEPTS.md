@@ -60,6 +60,22 @@ Two consequences worth knowing:
 - **A process that ignores `HTTP_PROXY` gets nowhere.** The variables are
   a convenience for well-behaved clients, never the boundary.
 
+The second one cuts both ways, and it is the part that surprises people:
+**a grant permits a destination, it does not build a road to it.** The
+proxy is the only road, and the client has to know how to use it.
+
+| | |
+|---|---|
+| works unchanged | anything honouring `HTTP_PROXY`/`HTTPS_PROXY` — curl, wget, git over https, pip, npm, cargo, go |
+| does not | raw TCP clients — psql, mysql, redis-cli, mongosh |
+| ssh | works when something sets `ProxyCommand`; `dev agent run --allow-push` does |
+
+A raw client fails with `network is unreachable` *even for a destination
+you granted*, because what stops it is the missing route rather than the
+policy — and that error names the network, which is the wrong place to go
+looking. Granting a non-HTTP port says this at the time, rather than
+leaving it to be discovered.
+
 Three modes: `allowlist` (default), `open` (no filtering), `none`
 (`--offline`, no network at all).
 

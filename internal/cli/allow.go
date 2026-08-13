@@ -70,6 +70,7 @@ func newAllowCmd(env *Env) *cobra.Command {
 				fmt.Fprintf(env.Stdout, "  + %s\n", h)
 			}
 			fmt.Fprintf(env.Stdout, "\nStored in %s\n", scope.Path())
+			explainNonHTTP(env.Stdout, added)
 			return nil
 		},
 	}
