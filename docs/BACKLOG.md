@@ -345,11 +345,22 @@ inspecting it stops answering "which site is this". Currently documented as
 a known limitation that fails closed. Decide deliberately before it is
 common.
 
-### B18. Group the command help — `todo`
+### B18. Group the command help — `done`
 
-Twenty-odd root commands read as a development platform rather than "run
-this project safely". Grouping the help output is cheap and changes the
-impression without removing anything.
+Twenty-nine root commands in one alphabetical column read as a development
+platform rather than "run this project safely", and buried the three or
+four commands most people need under the twenty-five they do not.
+
+Seven groups, titled with the words `docs/COMMANDS.md` already uses so the
+reference and `--help` do not need learning twice. Nothing was removed or
+renamed. A test asserts every visible command is in a real group, since
+falling into cobra's "Additional Commands" is silent, and another asserts
+the titles still match the reference — it caught the first drift
+immediately, the help calling a group "This machine" while the docs still
+said "The VM".
+
+Also renamed `newEnvCmd`, which built the `vm` command and carried a doc
+comment calling itself `vmCommands`. It named neither.
 
 ### B19. SBOM emission — `todo`
 

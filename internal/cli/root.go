@@ -154,35 +154,64 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.PersistentFlags().BoolP("verbose", "v", false,
 		"print every external command before running it")
 
-	root.AddCommand(newVersionCmd(env))
-	root.AddCommand(newDoctorCmd(env))
-	root.AddCommand(newAgentCmd(env))
-	root.AddCommand(newBuildCmd(env))
-	root.AddCommand(newRunCmd(env))
-	root.AddCommand(newShellCmd(env))
-	root.AddCommand(newStatusCmd(env))
-	root.AddCommand(newAcceptCmd(env))
-	// Egress grants and the file that records them. They belong to the
-	// project, not to agents: a plain `dev run` consumes the same grants, so
-	// `dev agent allow` named the wrong owner. The old spellings survive as
-	// hidden aliases under `dev agent`.
-	root.AddCommand(newAllowCmd(env))
-	root.AddCommand(newRevokeCmd(env))
-	root.AddCommand(newGrantsCmd(env))
-	root.AddCommand(newConfigCmd(env))
-	root.AddCommand(newMigrateCmd(env))
-	root.AddCommand(newConsoleCmd(env))
-	root.AddCommand(newToolsCmd(env))
-	root.AddCommand(newPinCmd(env))
-	root.AddCommand(newScanCmd(env))
-	root.AddCommand(newPolicyCmd(env))
-	root.AddCommand(newUpdateCmd(env))
-	root.AddCommand(newNewCmd(env))
-	root.AddCommand(newDevcontainerCmd(env))
-	root.AddCommand(newHistoryCmd(env))
-	root.AddCommand(newCloneCmd(env))
-	root.AddCommand(newInteractiveCmd(env))
-	root.AddCommand(newLanguagesCmd(env))
+	// Grouped rather than listed. Twenty-nine commands in one alphabetical
+	// column read as a development platform, which is the wrong first
+	// impression for a tool whose job is "run this project safely" — and it
+	// buries the three or four commands most people ever need under the
+	// twenty-five they do not.
+	//
+	// The titles are the ones docs/COMMANDS.md uses, deliberately: someone
+	// moving between the reference and `--help` should not have to learn the
+	// vocabulary twice.
+	root.AddGroup(
+		&cobra.Group{ID: groupStart, Title: "Starting out"},
+		&cobra.Group{ID: groupRun, Title: "Running things"},
+		&cobra.Group{ID: groupAgents, Title: "Agents"},
+		&cobra.Group{ID: groupTrust, Title: "Egress and trust"},
+		&cobra.Group{ID: groupEnv, Title: "The environment"},
+		&cobra.Group{ID: groupClones, Title: "Private clones"},
+		&cobra.Group{ID: groupMachine, Title: "This machine"},
+	)
+
+	root.AddCommand(
+		inGroup(groupStart, newInteractiveCmd(env)),
+		inGroup(groupStart, newNewCmd(env)),
+		inGroup(groupStart, newDoctorCmd(env)),
+		inGroup(groupStart, newMigrateCmd(env)),
+
+		inGroup(groupRun, newRunCmd(env)),
+		inGroup(groupRun, newShellCmd(env)),
+		inGroup(groupRun, newConsoleCmd(env)),
+		inGroup(groupRun, newBuildCmd(env)),
+		inGroup(groupRun, newCleanCmd(env)),
+
+		inGroup(groupAgents, newAgentCmd(env)),
+
+		// Egress grants and the file that records them. They belong to the
+		// project, not to agents: a plain `dev run` consumes the same grants,
+		// so `dev agent allow` named the wrong owner. The old spellings
+		// survive as hidden aliases under `dev agent`.
+		inGroup(groupTrust, newAcceptCmd(env)),
+		inGroup(groupTrust, newAllowCmd(env)),
+		inGroup(groupTrust, newRevokeCmd(env)),
+		inGroup(groupTrust, newGrantsCmd(env)),
+		inGroup(groupTrust, newHistoryCmd(env)),
+		inGroup(groupTrust, newPolicyCmd(env)),
+		inGroup(groupTrust, newStatusCmd(env)),
+		inGroup(groupTrust, newConfigCmd(env)),
+
+		inGroup(groupEnv, newToolsCmd(env)),
+		inGroup(groupEnv, newPinCmd(env)),
+		inGroup(groupEnv, newScanCmd(env)),
+		inGroup(groupEnv, newUpdateCmd(env)),
+		inGroup(groupEnv, newDevcontainerCmd(env)),
+		inGroup(groupEnv, newLanguagesCmd(env)),
+
+		inGroup(groupClones, newCloneCmd(env)),
+
+		inGroup(groupMachine, newVersionCmd(env)),
+		inGroup(groupMachine, newVMCmd(env)),
+	)
 
 	// Completion covers every command in the tree, so this has to run
 	// after the tree is built.
@@ -192,10 +221,29 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root.InitDefaultCompletionCmd()
 	if c, _, err := root.Find([]string{"completion"}); err == nil && c != nil {
 		c.AddCommand(newCompletionInstallCmd(env))
+		c.GroupID = groupStart
 	}
-	root.AddCommand(newCleanCmd(env))
-	root.AddCommand(newEnvCmd(env))
+	// help is about the tool rather than about a project, and cobra would
+	// otherwise file it under "Additional Commands" on its own.
+	root.SetHelpCommandGroupID(groupMachine)
 	return root
+}
+
+// Command groups for the root help.
+const (
+	groupStart   = "start"
+	groupRun     = "run"
+	groupAgents  = "agents"
+	groupTrust   = "trust"
+	groupEnv     = "env"
+	groupClones  = "clones"
+	groupMachine = "machine"
+)
+
+// inGroup files a command under a heading in the root help.
+func inGroup(id string, cmd *cobra.Command) *cobra.Command {
+	cmd.GroupID = id
+	return cmd
 }
 
 // Main wires the real process environment and runs the tree. It returns a

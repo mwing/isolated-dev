@@ -253,8 +253,9 @@ func dedupe(in []string) []string {
 	return out
 }
 
-// vmCommands manages the OrbStack VM the containers run in.
-func newEnvCmd(env *Env) *cobra.Command {
+// newVMCmd manages the VM the containers run in. It was called newEnvCmd,
+// which named neither the command it builds nor anything else.
+func newVMCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "vm",
 		Short: "Inspect and control the container VM",

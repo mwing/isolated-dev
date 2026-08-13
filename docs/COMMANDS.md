@@ -152,12 +152,13 @@ but which of the two something is was never the reader's problem.
 
 ---
 
-## The VM
+## This machine
 
 | | |
 |---|---|
 | `dev vm status` | VM and daemon state |
 | `dev vm start` | start it |
+| `dev version` | version, commit and build time |
 
 ---
 

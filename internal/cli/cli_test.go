@@ -1077,3 +1077,51 @@ func TestSSHHostOfEveryRemoteSpelling(t *testing.T) {
 		}
 	}
 }
+
+// A command added without a group lands under cobra's "Additional
+// Commands", which is where things go to be missed. The grouping is only
+// worth having if it stays complete, and that is not something anyone
+// remembers when adding the thirtieth command.
+func TestEveryVisibleCommandIsInAGroup(t *testing.T) {
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	groups := map[string]bool{}
+	for _, g := range root.Groups() {
+		groups[g.ID] = true
+	}
+	if len(groups) == 0 {
+		t.Fatal("the root help has no groups at all")
+	}
+
+	for _, c := range root.Commands() {
+		if c.Hidden || c.Name() == "help" {
+			continue
+		}
+		if c.GroupID == "" {
+			t.Errorf("`dev %s` is in no group, so it lands under Additional Commands", c.Name())
+			continue
+		}
+		if !groups[c.GroupID] {
+			t.Errorf("`dev %s` names group %q, which does not exist", c.Name(), c.GroupID)
+		}
+	}
+}
+
+// The help groups and docs/COMMANDS.md use the same words on purpose:
+// someone moving between them should not have to learn the vocabulary
+// twice.
+func TestHelpGroupsMatchTheReferenceHeadings(t *testing.T) {
+	h := newHarness(t)
+	root := NewRootCmd(h.env)
+
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "COMMANDS.md"))
+	if err != nil {
+		t.Skipf("no reference to compare against: %v", err)
+	}
+	for _, g := range root.Groups() {
+		if !strings.Contains(string(doc), "## "+g.Title) {
+			t.Errorf("help group %q has no matching heading in COMMANDS.md", g.Title)
+		}
+	}
+}
