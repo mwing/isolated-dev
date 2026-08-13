@@ -53,3 +53,60 @@ jobs:
           # own token cannot reach. Without it the release still publishes
           # and the formula is skipped.
           TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+
+      # Versioned casks accumulate, one per release. Homebrew can only
+      # install a version the tap still carries, so "keep the last few"
+      # is a real operation rather than a policy statement.
+      #
+      # Failure here must not fail the release: the binaries are published
+      # and signed by this point, and a tap left with extra files is untidy
+      # rather than broken.
+      - name: Prune old versioned casks
+        continue-on-error: true
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          KEEP: '3'
+        run: |
+          set -euo pipefail
+          # Guarded here rather than in `if`: a step's own env is not
+          # dependable in its own condition, and a secret is not readable
+          # there at all — the check would have been silently always-false.
+          if [ -z "${TAP_GITHUB_TOKEN:-}" ]; then
+            echo "no tap token; nothing to prune"
+            exit 0
+          fi
+
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/mwing/homebrew-tap.git" tap
+          cd tap
+
+          shopt -s nullglob
+          files=(Casks/dev@*.rb)
+          if [ "${#files[@]}" -le "$KEEP" ]; then
+            echo "${#files[@]} versioned cask(s); keeping all"
+            exit 0
+          fi
+
+          # sort -V, so 0.10.0 sorts after 0.9.0 — which plain sort gets
+          # wrong in exactly the release that makes it matter.
+          #
+          # A while-read loop rather than mapfile: mapfile needs bash 4, so
+          # the script could not be tried on a mac before shipping it, and
+          # an untested release step is one that runs for the first time
+          # when it matters.
+          sorted=()
+          while IFS= read -r line; do
+            sorted+=("$line")
+          done < <(printf '%s\n' "${files[@]}" | sort -V)
+
+          drop=$(( ${#sorted[@]} - KEEP ))
+          echo "keeping the newest $KEEP of ${#sorted[@]}"
+          for f in "${sorted[@]:0:$drop}"; do
+            echo "removing $f"
+            git rm -q "$f"
+          done
+
+          git -c user.name='goreleaser' \
+              -c user.email='goreleaser@users.noreply.github.com' \
+              commit -m "Prune versioned casks, keeping the newest $KEEP"
+          git push

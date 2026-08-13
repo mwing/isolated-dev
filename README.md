@@ -29,6 +29,17 @@ dev completion install
 Needs a container backend — on macOS, OrbStack:
 `brew install --cask orbstack`.
 
+`dev` follows the latest release. To pin, or to go back after a bad
+upgrade, the last few releases are also published under their own names:
+
+```sh
+brew install --cask mwing/tap/dev@0.4.0
+```
+
+`brew search mwing/tap` lists the ones the tap still carries. Older
+versions are pruned from the tap but stay on the
+[releases page](https://github.com/mwing/isolated-dev/releases) forever.
+
 The binary is the whole product: the egress sidecar's source and the
 language plugins travel inside it, so the first filtered run builds what it
 needs and nothing else has to be fetched or kept in step.

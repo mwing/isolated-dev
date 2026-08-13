@@ -100,6 +100,45 @@ homebrew_casks:
       The first filtered run builds the egress sidecar image from source
       carried inside the binary, which takes a few minutes once.
 
+  # The same release under a pinned name, so an older version stays
+  # installable. `dev` is whatever is current; `dev@0.4.0` is that release
+  # for as long as it is kept.
+  #
+  # A rolling cask alone means the only version anyone can install is the
+  # newest one — a regression leaves no way back except downloading a
+  # tarball by hand, which is the moment someone is least able to do it.
+  #
+  # These accumulate, one file per release, so the workflow prunes to the
+  # most recent few after publishing. Homebrew has no notion of a version
+  # this tap does not carry, so pruning is what "a few of the latest"
+  # actually means.
+  - name: dev@{{ .Version }}
+    directory: Casks
+    repository:
+      owner: mwing
+      name: homebrew-tap
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
+    binaries:
+      - dev
+    homepage: https://github.com/mwing/isolated-dev
+    description: Run code in a container without learning Docker (pinned to {{ .Version }})
+    # conflicts_with rather than silence: two casks installing the same
+    # `dev` binary would otherwise both claim it, and brew would report the
+    # collision only when the second one failed to link.
+    conflicts_with:
+      casks:
+        - dev
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr",
+                           args: ["-dr", "com.apple.quarantine", "#{staged_path}/dev"]
+          end
+    caveats: |
+      This is dev pinned to a specific version. `brew install --cask
+      mwing/tap/dev` follows the latest release instead.
+
 changelog:
   sort: asc
   filters:
