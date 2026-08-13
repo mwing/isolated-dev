@@ -292,7 +292,7 @@ func Menu(f Facts) []Action {
 //
 // It is deliberately conservative: excluding too little costs build time,
 // excluding too much breaks a build in a way that is hard to attribute.
-func Dockerignore(language string) string {
+func ignoreEntries(language string) []string {
 	common := []string{".git", ".DS_Store", "*.log", "tmp", ".cache"}
 	byLang := map[string][]string{
 		"node":   {"node_modules", "**/node_modules", "dist", "build", ".next", "coverage"},
@@ -307,6 +307,11 @@ func Dockerignore(language string) string {
 	lines := append([]string(nil), common...)
 	lines = append(lines, byLang[language]...)
 	sort.Strings(lines)
+	return lines
+}
+
+func Dockerignore(language string) string {
+	lines := ignoreEntries(language)
 
 	var b strings.Builder
 	b.WriteString("# Written by `dev interactive`. Everything here is excluded from the\n")

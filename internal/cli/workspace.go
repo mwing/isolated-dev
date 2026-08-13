@@ -124,6 +124,10 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	}
 	fmt.Fprintln(env.Stdout)
 
+	// Said here, not only in `dev doctor`: nobody runs doctor while waiting
+	// for a build, and the wait is the symptom.
+	warnBuildContext(env, p.Dir)
+
 	eng := container.New(env.driver(cfg.VMName))
 	// The build context is the project directory, but the Dockerfile comes
 	// from stdin so a rendered template needs no temporary file in the

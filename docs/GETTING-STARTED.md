@@ -203,8 +203,16 @@ is most of your disk:
 Sending build context to Docker daemon  7.444GB
 ```
 
-That is a measured number from a repo with no `.dockerignore`. Adding one
-turns every rebuild from minutes into seconds:
+That is a measured number from a repo with no `.dockerignore`. You do not
+have to go looking for it — a build over 200 MB says so before it starts,
+and names what is responsible:
+
+```
+⚠  No .dockerignore: this build sends 7.4G in at least 200000 files to the daemon.
+   Biggest: node_modules 4.1G, .git 2.2G, .worktrees 900M
+```
+
+Adding one turns every rebuild from minutes into seconds:
 
 ```
 .git

@@ -198,14 +198,36 @@ CONCEPTS carries the table. B16 built the SOCKS listener that makes the
 second row work by itself rather than by explanation, and the note now
 names `ALL_PROXY` instead of describing a dead end.
 
-### B11. Warn about the build context before sending it — `todo`
+### B11. Warn about the build context before sending it — `done`
 
-`dev doctor` reports an absent `.dockerignore`; the build does not, which
-is where the seconds are actually lost. The measured case in the docs is
-7.4 GB.
+`dev doctor` reported an absent `.dockerignore`; the build did not, which
+is where the seconds are actually lost. Nobody runs doctor while waiting
+for a build, and the wait is the symptom.
 
-**Done when:** a build whose context exceeds a threshold says so and offers
-the `.dockerignore` the wizard already generates.
+A build over 200 MiB of context now says so, and names the directories
+responsible:
+
+```
+⚠  No .dockerignore: this build sends 420M in 5 files to the daemon.
+   Biggest: node_modules 260M, .git 120M, dist 40M
+   None of it is needed to build the image — your working tree is mounted
+   at /workspace when a run starts regardless. `dev` offers to write one.
+```
+
+Naming the entries is the actionable half: a total says there is a
+problem, `node_modules 260M, .git 120M` says which two lines fix it. No
+generic pattern list is printed — a suggestion derived from the tree in
+front of the user beats one guessed from the language.
+
+It stays quiet under the threshold and once a `.dockerignore` exists, since
+a warning that cannot be made to go away is one people learn to scroll
+past.
+
+Found on the way: `contextSize` stopped walking at 20,000 files and
+returned the partial total as if it were the whole one — so on exactly the
+oversized tree this feature targets, doctor understated the number and the
+threshold might never have tripped. The walk now reports that it stopped,
+and both doctor and the build say "at least" when it did.
 
 ### B12. Docker socket as break-glass — `done`  *(promoted from P1: absorbs B2)*
 

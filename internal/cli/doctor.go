@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -194,45 +193,23 @@ func reportProjectHygiene(out interface{ Write([]byte) (int, error) }, env *Env)
 		return
 	}
 
-	size, files, err := contextSize(dir)
-	if err != nil {
+	rep, err := measureContext(dir)
+	if err != nil && rep.Files == 0 {
 		fmt.Fprintf(out, "  .dockerignore: absent\n")
 		return
 	}
-	fmt.Fprintf(out, "  .dockerignore: absent — every build sends %s (%d files) to the daemon\n",
-		humanSize(size), files)
-	if size > 200<<20 {
+	atLeast := ""
+	if rep.Truncated {
+		atLeast = "at least "
+	}
+	fmt.Fprintf(out, "  .dockerignore: absent — every build sends %s%s (%s%d files) to the daemon\n",
+		atLeast, humanSize(rep.Bytes), atLeast, rep.Files)
+	if named := namedEntries(rep.Largest, 3); named != "" {
+		fmt.Fprintf(out, "  %-15s %s\n", "biggest:", named)
+	}
+	if rep.Bytes > contextWarnBytes {
 		fmt.Fprintf(out, "  %s  add one: .git, node_modules, .venv, dist, build\n", warnStyle.Render("⚠"))
 	}
-}
-
-// contextSize measures what docker would send. It stops early: the answer
-// only has to be good enough to say "this is large", and walking a
-// multi-gigabyte tree to report a number nobody reads precisely would make
-// doctor the slow command.
-func contextSize(dir string) (int64, int, error) {
-	const limit = 20000
-	var total int64
-	var count int
-	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		total += info.Size()
-		count++
-		if count > limit {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return total, count, err
 }
 
 func reportStatus(out interface{ Write([]byte) (int, error) }, st backend.Status) bool {
