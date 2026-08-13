@@ -154,6 +154,7 @@ func newRunCmd(env *Env) *cobra.Command {
 		image        string
 		useCloneDir  bool
 		cloneDepth   int
+		dockerSocket bool
 	)
 
 	cmd := &cobra.Command{
@@ -172,12 +173,14 @@ func newRunCmd(env *Env) *cobra.Command {
 				Clone:        useCloneDir,
 				CloneDepth:   cloneDepth,
 				BuildSource:  buildSourceFlag(cmd),
+				DockerSocket: dockerSocket,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
 	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
+	addDockerSocketFlag(cmd, &dockerSocket)
 	return cmd
 }
 
@@ -193,6 +196,7 @@ func newShellCmd(env *Env) *cobra.Command {
 		image        string
 		useCloneDir  bool
 		cloneDepth   int
+		dockerSocket bool
 	)
 
 	cmd := &cobra.Command{
@@ -217,12 +221,14 @@ func newShellCmd(env *Env) *cobra.Command {
 				Clone:        useCloneDir,
 				CloneDepth:   cloneDepth,
 				BuildSource:  buildSourceFlag(cmd),
+				DockerSocket: dockerSocket,
 			})
 		},
 	}
 	addWorkspaceFlags(cmd, &command, &tty, &rebuild, &offline, &network, &extraHosts, &image)
 	addEgressPromptFlag(cmd, &egressPrompt)
 	addCloneFlag(cmd, &useCloneDir, &cloneDepth)
+	addDockerSocketFlag(cmd, &dockerSocket)
 	return cmd
 }
 
@@ -261,6 +267,20 @@ func addCloneFlag(cmd *cobra.Command, clone *bool, depth *int) {
 		"work in a private clone of the repository, not the working tree")
 	cmd.Flags().IntVar(depth, "clone-depth", 0,
 		"copy only this many commits of history into the clone (0: all)")
+}
+
+// addDockerSocketFlag is the break-glass grant, per run and never
+// remembered. Named on the invocation rather than accepted once, because
+// the acceptance would be keyed by project path and inherited by whatever
+// occupies that path later.
+func addDockerSocketFlag(cmd *cobra.Command, on *bool) {
+	cmd.Flags().BoolVar(on, "allow-docker-socket", false,
+		"mount the docker socket for this run only (root on the docker host)")
+}
+
+// runGrants is what this invocation authorizes outright.
+func (o workspaceOpts) runGrants() runGrants {
+	return runGrants{dockerSocket: o.DockerSocket}
 }
 
 // egressPromptFlag is shared by run and shell.
@@ -304,6 +324,9 @@ type workspaceOpts struct {
 	// BuildSource picks what a build uses: "project", "template", or empty
 	// to use what was accepted.
 	BuildSource string
+	// DockerSocket authorizes the docker socket for this run alone. It is
+	// never remembered: see breakGlass.
+	DockerSocket bool
 }
 
 // workspaceAllowlist is the egress policy a plain run enforces: the
@@ -367,7 +390,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		return err
 	}
 	// A project file is a request; running the project is not consent.
-	if err := enforceConsent(env, cfg, p, store); err != nil {
+	if err := enforceConsent(env, cfg, p, store, o.runGrants()); err != nil {
 		return err
 	}
 
@@ -429,7 +452,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	// Host access the user authorized. Resolved after the image is known
 	// because reading the group that owns a mounted socket needs a container
 	// to read it from.
-	grants, err := resolveGrants(ctx, env, eng, cfg, store, image)
+	grants, err := resolveGrants(ctx, env, eng, cfg, store, image, o.runGrants())
 	if err != nil {
 		return err
 	}

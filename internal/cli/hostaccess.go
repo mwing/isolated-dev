@@ -31,6 +31,32 @@ import (
 // already does that. Implementing the mount would have meant contradicting a
 // security promise to satisfy a config key nobody had honored anyway.
 
+// breakGlass names the settings whose acceptance is not remembered by
+// default: the run in front of you gets them, and the next one asks again.
+//
+// Only the docker socket so far, and for a reason the other keys do not
+// share. Mounting it is root on the docker host — the sandbox contains
+// nothing that can reach that — and a persistent acceptance is keyed by
+// project *path*, so whatever occupies that path later inherits it. A new
+// repository cloned over an old one asks for exactly the value already
+// accepted, so value-sensitivity does not notice. Per-run closes that
+// without needing to decide whose repository it is, which is the question
+// B2 could not answer.
+var breakGlass = map[string]bool{
+	"mount_docker_socket": true,
+}
+
+// runGrants is host access authorized for this run alone, by a flag someone
+// typed, rather than by a recorded acceptance.
+type runGrants struct {
+	dockerSocket bool
+}
+
+// authorizes reports whether this run was given the key outright.
+func (r runGrants) authorizes(key string) bool {
+	return key == "mount_docker_socket" && r.dockerSocket
+}
+
 // resolveGrants turns configuration into the host access a run may actually
 // receive, resolving what the acceptance authorizes against what the host
 // really has.
@@ -40,7 +66,7 @@ import (
 // it is their machine and nobody else asked. That distinction is the whole
 // reason config records provenance.
 func resolveGrants(ctx context.Context, env *Env, eng *container.Engine,
-	cfg config.Config, store *trust.Store, image string) (project.Grants, error) {
+	cfg config.Config, store *trust.Store, image string, run runGrants) (project.Grants, error) {
 	var g project.Grants
 
 	if granted(cfg, store, "pass_env_vars", passEnvValue(cfg)) {
@@ -62,7 +88,9 @@ func resolveGrants(ctx context.Context, env *Env, eng *container.Engine,
 		g.GitConfig = path
 	}
 
-	if cfg.MountDockerSocket && granted(cfg, store, "mount_docker_socket", "true") {
+	if cfg.MountDockerSocket &&
+		(run.authorizes("mount_docker_socket") ||
+			granted(cfg, store, "mount_docker_socket", "true")) {
 		g.DockerSocket = project.DockerSocketPath
 		// The socket's group has to be read from inside a container: host
 		// file sharing decides the ownership the container sees, so a stat

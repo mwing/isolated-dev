@@ -52,8 +52,12 @@ Useful flags on `run` and `shell`:
 | `--rebuild` | rebuild the image first |
 | `--tty auto\|on\|off` | allocate a terminal |
 
+`--allow-docker-socket` is on `run`, `shell` and `console`. It mounts the
+docker socket for that run only and records nothing: it is root on the
+docker host, and `dev accept` will not remember it without `--remember`.
+
 `console` takes `--allow-host`, `--clone`, `--clone-depth`, `--in-place`,
-`--rebuild` and `--agent`. It has no `--offline`, `--network` or
+`--allow-docker-socket`, `--rebuild` and `--agent`. It has no `--offline`, `--network` or
 `--egress-prompt`: it requires `network: allowlist` — with nothing filtered
 there is nothing to decide — and holding blocked requests is what it does
 rather than something to ask for. `--shell` takes the place of `--tty`.

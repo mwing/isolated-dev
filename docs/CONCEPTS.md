@@ -111,6 +111,19 @@ Grants live outside the repository on purpose: configuration inside a
 repository is configuration the repository can grant itself, so a hostile
 project would widen its own access before anyone read it.
 
+One request is not remembered at all. Mounting the docker socket is root on
+the docker host, so it is granted for a single run:
+
+```sh
+dev run --allow-docker-socket          # this run, nothing written down
+dev accept mount_docker_socket --remember   # if you really mean always
+```
+
+An acceptance is keyed by the project's *path*, so anything remembered is
+inherited by whatever occupies that path later — and a new repository
+asking for the same value looks identical to the one you approved. For most
+settings that is a fair trade. For root on the host it is not.
+
 The one thing that constrains **you** is `~/.dev-envs/policy.yaml`, which
 can forbid network modes, settings, registries and destinations outright.
 It is not a defense against the machine's owner — who can edit it — but it

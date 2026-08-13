@@ -158,6 +158,13 @@ following paragraph as the behavior:
 - **trusted** and **privileged** are not states a project is in; they are
   what accepting a particular setting buys, one setting at a time. Accepting
   `mount_docker_socket` does not also open egress.
+- **the docker socket is break-glass**: it is authorized for one run at a
+  time, with `--allow-docker-socket`, and `dev accept` refuses to remember
+  it unless told `--remember`. Mounting it is root on the docker host, and
+  an acceptance is keyed by project *path* — so a remembered one is
+  inherited by whatever occupies that path later, asking for exactly the
+  value already accepted. Per-run closes that without having to decide
+  whose repository it is (see BACKLOG B2, B12).
 - **ssh keys are never mounted, at any level.** `mount_ssh_keys` is retired
   with a note pointing at ssh-agent forwarding (`--allow-push`), which is
   what the "socket only, never key files" row below means.

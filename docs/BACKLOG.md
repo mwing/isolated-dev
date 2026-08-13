@@ -206,19 +206,31 @@ is where the seconds are actually lost. The measured case in the docs is
 **Done when:** a build whose context exceeds a threshold says so and offers
 the `.dockerignore` the wizard already generates.
 
-### B12. Docker socket as break-glass — `todo`  *(promoted from P1: absorbs B2)*
+### B12. Docker socket as break-glass — `done`  *(promoted from P1: absorbs B2)*
 
 Mounting it is root on the docker host, and the sandbox does not contain
-it. It currently travels the same path as allowing a hostname.
+it. It travelled the same path as allowing a hostname.
 
-It also carries the one consequence that made B2 look worth doing: a
+It also carried the one consequence that made B2 look worth doing: a
 persistent acceptance at a path is inherited by whatever occupies that path
 later, and value-sensitivity does not help because the new request matches
-the old value exactly. Making this per-run closes that without needing to
-know whose repository it is.
+the old value exactly. Per-run closes that without needing to know whose
+repository it is.
 
-**Done when:** it is per-run rather than quietly persistent, remembering it
-takes a deliberate flag, and the run header keeps saying what it means.
+`--allow-docker-socket` on `run`, `shell` and `console` authorizes it for
+one run and writes nothing down — verified against a live daemon: the
+socket arrives in the container and no project record is created at all.
+`dev accept` refuses the key outright unless given `--remember`, so
+`dev accept --all` — a sentence about the project in front of you — cannot
+also be the sentence that hands over the daemon a year from now. A blocked
+run names the per-run flag, because "accept it" is the hint that works for
+every other setting and is a dead end for this one.
+
+The flag also has to satisfy the consent check, not just the grant.
+Otherwise the run stops for the very setting the flag exists to permit, and
+the break-glass is unreachable — there is a test for exactly that.
+
+Agents are unaffected: they receive none of the host grants at any time.
 
 ### B13. Pin CI dependencies — `done`
 

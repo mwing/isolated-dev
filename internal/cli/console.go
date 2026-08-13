@@ -39,6 +39,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		useCloneD  bool
 		inPlace    bool
 		cloneDepth int
+		dockSocket bool
 	)
 
 	cmd := &cobra.Command{
@@ -55,10 +56,12 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			}
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
 				rebuild, extraHosts, shell, agentName, record,
-				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth})
+				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth},
+				runGrants{dockerSocket: dockSocket})
 		},
 	}
 	addCloneFlag(cmd, &useCloneD, &cloneDepth)
+	addDockerSocketFlag(cmd, &dockSocket)
 	cmd.Flags().BoolVar(&inPlace, "in-place", false,
 		"run an agent in the working tree instead of a private clone")
 	cmd.Flags().StringVarP(&command, "command", "c", "", "command to run")
@@ -115,7 +118,7 @@ func replayRecording(env *Env, path, size string) error {
 
 func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	extraHosts []string, interactive bool, agentName string, record string,
-	cl cloneOpts) error {
+	cl cloneOpts, run runGrants) error {
 	cfg, p, err := resolveProject(env)
 	if err != nil {
 		return err
@@ -124,7 +127,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if err != nil {
 		return err
 	}
-	if err := enforceConsent(env, cfg, p, store); err != nil {
+	if err := enforceConsent(env, cfg, p, store, run); err != nil {
 		return err
 	}
 	if p.Network != project.NetworkAllowlist {
@@ -203,7 +206,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		// The console is a view over the same run, so it honors the same
 		// grants. An agent deliberately gets none of them: it runs at the
 		// untrusted level whatever the project's own trust.
-		grants, err = resolveGrants(ctx, env, eng, cfg, store, image)
+		grants, err = resolveGrants(ctx, env, eng, cfg, store, image, run)
 		if err != nil {
 			return err
 		}

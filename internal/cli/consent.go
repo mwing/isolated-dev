@@ -96,7 +96,12 @@ func agentAsks(cfg config.Config, p *project.Project) []trust.Ask {
 
 // enforceConsent stops a run when the project asks for something the user
 // has not accepted. A project file is a request; running it is not consent.
-func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trust.Store) error {
+//
+// run carries what a flag on this invocation authorizes outright. Without
+// that the break-glass flag would be unreachable: the run would stop for
+// the very setting the flag exists to permit.
+func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trust.Store,
+	run runGrants) error {
 	pol, err := loadPolicy(env)
 	if err != nil {
 		return err
@@ -113,7 +118,13 @@ func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trus
 		return err
 	}
 
-	pending := store.PendingSettings(projectAsks(cfg, p))
+	var pending []trust.Ask
+	for _, a := range store.PendingSettings(projectAsks(cfg, p)) {
+		if run.authorizes(a.Key) {
+			continue
+		}
+		pending = append(pending, a)
+	}
 	if len(pending) == 0 {
 		return nil
 	}
@@ -123,13 +134,29 @@ func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trus
 		fmt.Fprintf(env.Stderr, "      %s\n", a.Effect)
 	}
 	fmt.Fprintf(env.Stderr, "\nReview and accept:  dev accept\n")
+	// The break-glass keys have no "accept once and forget" answer, so the
+	// hint that works for everything else would be a dead end for them.
+	for _, a := range pending {
+		if breakGlass[a.Key] {
+			fmt.Fprintf(env.Stderr, "For this run only:   %s\n", breakGlassFlag(a.Key))
+		}
+	}
 	fmt.Fprintf(env.Stderr, "Or ignore the file:  --network allowlist\n")
 	return fmt.Errorf("unaccepted project settings")
+}
+
+// breakGlassFlag names the per-run flag that authorizes a break-glass key.
+func breakGlassFlag(key string) string {
+	if key == "mount_docker_socket" {
+		return "dev run --allow-docker-socket"
+	}
+	return "dev accept " + key + " --remember"
 }
 
 func newAcceptCmd(env *Env) *cobra.Command {
 	var all bool
 	var agentName string
+	var remember bool
 	cmd := &cobra.Command{
 		Use:   "accept [name...]",
 		Short: "Review and accept what this project's .devenv.yaml requests",
@@ -142,12 +169,14 @@ func newAcceptCmd(env *Env) *cobra.Command {
 			"the project asked for both in one file, and reading half of what a\n" +
 			"stranger's repository wants is not reviewing it.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAccept(cmd.Context(), env, args, all, agentName)
+			return runAccept(cmd.Context(), env, args, all, agentName, remember)
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "accept everything requested")
 	cmd.Flags().StringVar(&agentName, "agent", "default",
 		"agent whose requested destinations to review")
+	cmd.Flags().BoolVar(&remember, "remember", false,
+		"record a break-glass setting for every future run, not just this one")
 	return cmd
 }
 
@@ -158,7 +187,8 @@ func newAcceptCmd(env *Env) *cobra.Command {
 // objects, checked against different policy rules and written to different
 // parts of the record. What was merged is the review, because the split was
 // never the user's: they cloned one repository and it asked for both.
-func runAccept(_ context.Context, env *Env, names []string, all bool, agentName string) error {
+func runAccept(_ context.Context, env *Env, names []string, all bool, agentName string,
+	remember bool) error {
 	// Resolved rather than just loaded: the build source is one of the
 	// things being accepted, and knowing what it is needs detection.
 	cfg, p, err := resolveProject(env)
@@ -201,6 +231,21 @@ func runAccept(_ context.Context, env *Env, names []string, all bool, agentName 
 	for _, a := range wantSettings {
 		if verr := pol.CheckSetting(a.Key); verr != nil {
 			return fmt.Errorf("%s requests %s, but %w", env.Paths.Project, a.Key, verr)
+		}
+	}
+	// A break-glass key is not remembered unless someone says so in as many
+	// words. `dev accept --all` is a sentence about the project in front of
+	// you; it must not also be the sentence that hands the docker daemon to
+	// whatever occupies this path next year.
+	if !remember {
+		for _, a := range wantSettings {
+			if breakGlass[a.Key] {
+				return fmt.Errorf(
+					"%s is root on the docker host, so it is not remembered by default.\n"+
+						"  For one run:      %s\n"+
+						"  To remember it:   dev accept %s --remember",
+					a.Key, breakGlassFlag(a.Key), a.Key)
+			}
 		}
 	}
 	// Accepting is a route in like any other: a project asks, the user says
