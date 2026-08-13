@@ -1,7 +1,22 @@
 FROM rust:{{VERSION}}-slim
 
-# Create non-root user with explicit UID 1000
-RUN groupadd -g 1000 appuser && useradd -u 1000 -g appuser -m -s /bin/bash appuser
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+
+# The account the workload runs as, created with the uid of the person who
+# ran `dev`. A bind mount on Linux carries host ownership through
+# unchanged, so a container running as some other uid cannot write to the
+# workspace at all — and files it did write would not be editable
+# afterwards. macOS remaps ownership and hides both halves, which is why
+# this was wrong for so long.
+#
+# Numeric throughout, and tolerant of a base image that already has
+# somebody at that id: `node` ships a user at 1000, and the name is not
+# ours to assume.
+RUN set -eux; \
+    getent group "$DEV_GID" >/dev/null || groupadd -g "$DEV_GID" appuser; \
+    getent passwd "$DEV_UID" >/dev/null || \
+      useradd -u "$DEV_UID" -g "$DEV_GID" -m -s /bin/bash appuser
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,13 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set working directory and change ownership
 WORKDIR /workspace
-RUN chown -R appuser:appuser /workspace
+RUN chown -R "$DEV_UID":"$DEV_GID" /workspace
 
-# Switch to non-root user
-USER appuser
-
+USER $DEV_UID:$DEV_GID
 # Copy Cargo files if they exist
-COPY --chown=appuser:appuser Cargo*.toml* ./
+COPY --chown=$DEV_UID:$DEV_GID Cargo*.toml* ./
 RUN if [ -f Cargo.toml ] && [ -f src/main.rs -o -f src/lib.rs ]; then cargo fetch; fi
 
 # Keep container running

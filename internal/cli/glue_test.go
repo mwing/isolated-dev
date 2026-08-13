@@ -32,7 +32,7 @@ func TestWorkspaceRunRendersAHardenedContainerOnTheInternalNetwork(t *testing.T)
 
 	args := h.workloadRun(t)
 	for _, want := range []string{
-		"--user", "1000:1000", // the tool sets the uid, not the image
+		"--user", container.HostUser(), // the tool sets the uid, not the image
 		"--network", internalNetwork, // no route out except the sidecar
 		"--dns", "172.31.0.2", // the sidecar's filtering resolver
 	} {

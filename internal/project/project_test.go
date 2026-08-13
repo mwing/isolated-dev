@@ -1,6 +1,7 @@
 package project
 
 import (
+	"github.com/mwing/isolated-dev/internal/container"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,7 +163,8 @@ func TestRunSpecIsHardenedAndMountsOnlyTheWorkspace(t *testing.T) {
 	spec := p.RunSpec(config.Defaults(), Grants{}, []string{"echo", "hi"}, false)
 
 	args := strings.Join(spec.Args(), " ")
-	for _, want := range []string{"--user 1000:1000", "--cap-drop ALL", "--security-opt no-new-privileges:true"} {
+	for _, want := range []string{"--user " + container.HostUser(), "--cap-drop ALL",
+		"--security-opt no-new-privileges:true"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("missing %q in %s", want, args)
 		}

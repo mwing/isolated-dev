@@ -188,7 +188,7 @@ func TestDockerfileDoesNotTouchProjectImageAndEndsUnprivileged(t *testing.T) {
 			lastUser = l
 		}
 	}
-	if lastUser != "USER 1000:1000" {
+	if lastUser != "USER $DEV_UID:$DEV_GID" {
 		t.Errorf("overlay must end unprivileged, got %q", lastUser)
 	}
 	if !strings.Contains(df, "npm i -g x") {
@@ -209,7 +209,7 @@ func TestSpecPinsAgentToUntrustedPosture(t *testing.T) {
 
 	args := strings.Join(spec.Args(), " ")
 	for _, want := range []string{
-		"--user 1000:1000",
+		"--user " + container.HostUser(),
 		"--cap-drop ALL",
 		"--security-opt no-new-privileges:true",
 		"--network proj-int",
@@ -583,7 +583,7 @@ func TestForwardedSocketGroupIsAdded(t *testing.T) {
 	}
 	// The uid must not change: running as the socket's owner would hand
 	// the container the host user's identity.
-	if !strings.Contains(args, "--user 1000:1000") {
+	if !strings.Contains(args, "--user "+container.HostUser()) {
 		t.Errorf("uid changed to reach the socket: %s", args)
 	}
 }

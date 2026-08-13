@@ -112,9 +112,17 @@ func Dockerfile(a *Agent, base string) string {
 		"DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends " +
 		"git curl ca-certificates netcat-openbsd && rm -rf /var/lib/apt/lists/*) || " +
 		"(command -v apk >/dev/null && apk add --no-cache git curl ca-certificates netcat-openbsd) || true\n")
-	b.WriteString("RUN (getent group 1000 || groupadd -g 1000 dev) >/dev/null 2>&1 || true\n")
-	b.WriteString("RUN (id -u 1000 >/dev/null 2>&1) || useradd -u 1000 -g 1000 -m -d " + HomePath + " -s /bin/bash dev\n")
-	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R 1000:1000 " + HomePath + "\n")
+	// The account matches the host's, for the same reason the project image
+	// does: the agent works in a clone on a bind mount, and on Linux a
+	// container running as anyone else cannot write to it. The overlay may
+	// sit on the project image, which already created this uid, so both
+	// steps tolerate it existing.
+	b.WriteString("ARG DEV_UID=1000\n")
+	b.WriteString("ARG DEV_GID=1000\n")
+	b.WriteString("RUN (getent group \"$DEV_GID\" || groupadd -g \"$DEV_GID\" dev) >/dev/null 2>&1 || true\n")
+	b.WriteString("RUN (getent passwd \"$DEV_UID\" >/dev/null 2>&1) || " +
+		"useradd -u \"$DEV_UID\" -g \"$DEV_GID\" -m -d " + HomePath + " -s /bin/bash dev\n")
+	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R \"$DEV_UID\":\"$DEV_GID\" " + HomePath + "\n")
 	if a.Runtime == "node" {
 		// Copied into its own prefix rather than /usr/local, so a base
 		// image that keeps a toolchain there (golang) survives intact.
@@ -136,8 +144,8 @@ func Dockerfile(a *Agent, base string) string {
 		// does not reach the fetch is decoration.
 		fmt.Fprintf(&b, "RUN %s\n", a.InstallCommand())
 	}
-	fmt.Fprintf(&b, "RUN mkdir -p %s && chown -R 1000:1000 %s\n", a.ConfigDir, a.ConfigDir)
-	b.WriteString("USER 1000:1000\n")
+	fmt.Fprintf(&b, "RUN mkdir -p %s && chown -R \"$DEV_UID\":\"$DEV_GID\" %s\n", a.ConfigDir, a.ConfigDir)
+	b.WriteString("USER $DEV_UID:$DEV_GID\n")
 	fmt.Fprintf(&b, "WORKDIR %s\n", WorkspacePath)
 	return b.String()
 }
@@ -290,8 +298,9 @@ func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string
 	// adds only the agent, so it needs no build context at all. Passing
 	// --file - as well is what docker rejects.
 	err := r.Engine.Build(ctx, container.BuildSpec{
-		Tag:     tag,
-		Context: "-",
+		Tag:       tag,
+		Context:   "-",
+		BuildArgs: container.UIDBuildArgs(),
 	}, strings.NewReader(df), r.Out)
 	if err != nil {
 		return "", err

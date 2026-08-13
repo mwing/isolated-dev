@@ -7,6 +7,7 @@ package agent
 
 import (
 	"fmt"
+	"github.com/mwing/isolated-dev/internal/container"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -153,7 +154,11 @@ func (a *Agent) ImageTag(projectImage string) string {
 	if v == "" {
 		v = "latest"
 	}
-	return fmt.Sprintf("dev-agent-%s-%s:%s", a.Name, base, v)
+	// The uid is in the tag for the same reason it is in the project
+	// image's: the overlay creates an account with it, so an image built by
+	// one person must not be reused by another. When the base is a project
+	// image it already carries the uid, and repeating it is harmless.
+	return fmt.Sprintf("dev-agent-%s-%s%s:%s", a.Name, base, uidSuffix(), v)
 }
 
 // Registry holds the known agents.
@@ -231,4 +236,14 @@ func (r *Registry) List() []*Agent {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// uidSuffix distinguishes agent images built for different host uids, and
+// is empty for the historical default so the common case reads unchanged.
+func uidSuffix() string {
+	uid := container.HostUID()
+	if uid == container.FallbackUID {
+		return ""
+	}
+	return fmt.Sprintf("-u%d", uid)
 }
