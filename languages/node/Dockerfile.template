@@ -1,7 +1,22 @@
 FROM node:{{VERSION}}-slim
 
-# Use existing node user (UID 1000) instead of creating new user
-# Node.js images already include a 'node' user with UID 1000
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+
+# The account the workload runs as, created with the uid of the person who
+# ran `dev`. A bind mount on Linux carries host ownership through
+# unchanged, so a container running as some other uid cannot write to the
+# workspace at all — and files it did write would not be editable
+# afterwards. macOS remaps ownership and hides both halves, which is why
+# this was wrong for so long.
+#
+# Numeric throughout, and tolerant of a base image that already has
+# somebody at that id: `node` ships a user at 1000, and the name is not
+# ours to assume.
+RUN set -eux; \
+    getent group "$DEV_GID" >/dev/null || groupadd -g "$DEV_GID" appuser; \
+    getent passwd "$DEV_UID" >/dev/null || \
+      useradd -u "$DEV_UID" -g "$DEV_GID" -m -s /bin/bash appuser
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -18,15 +33,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Set working directory and change ownership
 WORKDIR /workspace
-RUN chown -R node:node /workspace
+RUN chown -R "$DEV_UID":"$DEV_GID" /workspace
 
-# Switch to non-root user
-USER node
+# Global npm installs go somewhere this uid owns. /home/node belongs to the
+# account the base image ships at 1000, which is not where this user's home
+# is when the uid came from the host.
+RUN mkdir -p /opt/npm-global && chown -R "$DEV_UID":"$DEV_GID" /opt/npm-global
 
-# Configure npm to use user directory for global packages
-RUN mkdir -p /home/node/.npm-global && \
-    npm config set prefix '/home/node/.npm-global'
-ENV PATH=/home/node/.npm-global/bin:$PATH
+USER $DEV_UID:$DEV_GID
+RUN npm config set prefix /opt/npm-global
+ENV PATH=/opt/npm-global/bin:$PATH
 
 # Note: package.json will be available via mounted /workspace volume
 # Run 'npm install' manually after container starts if needed

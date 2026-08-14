@@ -116,6 +116,12 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 		Detach:  true,
 		Remove:  true,
 		// The sidecar needs no privileges of its own; it only moves bytes.
+		//
+		// Fixed at 1000 on purpose, unlike a workload. It has no bind mount
+		// from the host, so there is no host ownership to match — and its
+		// own image creates that account and chowns /run to it, so the pair
+		// has to agree with each other rather than with the person running
+		// dev. See container.HostUser for why a workload is different.
 		User:        "1000:1000",
 		CapDrop:     []string{"ALL"},
 		SecurityOpt: []string{"no-new-privileges:true"},

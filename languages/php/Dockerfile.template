@@ -1,7 +1,14 @@
 FROM php:{{VERSION}}-cli-alpine
 
-# Create non-root user
-RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+
+# See the note in the debian-based templates: the uid is the host's, so a
+# bind mount is writable on Linux, where ownership is not remapped.
+RUN set -eux; \
+    getent group "$DEV_GID" >/dev/null || addgroup -g "$DEV_GID" appuser; \
+    getent passwd "$DEV_UID" >/dev/null || \
+      adduser -D -u "$DEV_UID" -G "$(getent group "$DEV_GID" | cut -d: -f1)" appuser
 
 # Install system dependencies and PHP extensions
 RUN apk add --no-cache \
@@ -27,13 +34,11 @@ RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local
 
 # Set working directory and change ownership
 WORKDIR /workspace
-RUN chown -R appuser:appuser /workspace
+RUN chown -R "$DEV_UID":"$DEV_GID" /workspace
 
-# Switch to non-root user
-USER appuser
-
+USER $DEV_UID:$DEV_GID
 # Copy Composer files if they exist
-COPY --chown=appuser:appuser composer*.json* ./
+COPY --chown=$DEV_UID:$DEV_GID composer*.json* ./
 RUN if [ -f composer.json ]; then composer install --no-dev --optimize-autoloader; fi
 
 # Keep container running

@@ -46,7 +46,18 @@ func newHarness(t *testing.T) *harness {
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
-		Env:    nil,
+		// The backend is named rather than left to the platform: these
+		// tests fake orb's answers, so which driver they get must not
+		// depend on which machine runs the suite — the same reason
+		// LookPath is injected.
+		//
+		// Set in two places, which is not redundancy. Here, for tests that
+		// reach h.env.driver() directly and never call run(). And again in
+		// run(), because a test that sets Env for its own reasons replaces
+		// this slice wholesale. Removing either brings back a Linux-only
+		// failure for a different subset of the suite; both were found
+		// exactly that way.
+		Env:    []string{"DEV_BACKEND=orbstack"},
 		Paths:  paths,
 		Runner: h.fake,
 	}
@@ -55,6 +66,19 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) run(t *testing.T, args ...string) error {
 	t.Helper()
+	// The backend is named rather than left to the platform. These tests
+	// fake orb's answers, so which driver they get must not depend on which
+	// machine runs them — the same reason LookPath is injected.
+	//
+	// Applied here rather than in the Env literal because tests set Env for
+	// their own reasons and would silently drop it. Without this the suite
+	// passed on macOS and failed on Linux the moment the default became
+	// platform-dependent, with "the egress sidecar exited immediately with
+	// no output" — which is what a fake keyed to orb's commands says when
+	// it is handed docker's.
+	if lookupEnv(h.env.Env, "DEV_BACKEND") == "" {
+		h.env.Env = append(h.env.Env, "DEV_BACKEND=orbstack")
+	}
 	cmd := NewRootCmd(h.env)
 	cmd.SetArgs(args)
 	cmd.SetOut(h.stdout)
@@ -1123,5 +1147,27 @@ func TestHelpGroupsMatchTheReferenceHeadings(t *testing.T) {
 		if !strings.Contains(string(doc), "## "+g.Title) {
 			t.Errorf("help group %q has no matching heading in COMMANDS.md", g.Title)
 		}
+	}
+}
+
+// Two backends, two sentences for the same failure. Only orb's was
+// recognized, so the docker backend passed docker's own wording through
+// with no remedy attached.
+func TestBothBackendsTTYFailuresAreExplained(t *testing.T) {
+	for _, out := range []string{
+		"the input device is not a TTY",
+		"cannot attach stdin to a TTY-enabled container because stdin is not a terminal",
+	} {
+		hint := explainTTYFailure(out)
+		if hint == "" {
+			t.Errorf("no remedy offered for %q", out)
+			continue
+		}
+		if !strings.Contains(hint, "--tty off") {
+			t.Errorf("the remedy does not name the flag: %q", hint)
+		}
+	}
+	if explainTTYFailure("some unrelated docker error") != "" {
+		t.Error("an unrelated failure was explained as a TTY problem")
 	}
 }

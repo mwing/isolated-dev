@@ -1,6 +1,9 @@
 package devcontainer
 
 import (
+	"fmt"
+
+	"github.com/mwing/isolated-dev/internal/container"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,7 +212,7 @@ func TestGenerateSaysEgressIsNotReproduced(t *testing.T) {
 func TestGenerateRunsAsTheSameUnprivilegedUser(t *testing.T) {
 	js := Generate(Options{Name: "app", Dockerfile: "FROM debian\n"}).
 		Files[filepath.Join(".devcontainer", "devcontainer.json")]
-	for _, want := range []string{`"remoteUser": "1000"`, "--cap-drop=ALL", "no-new-privileges"} {
+	for _, want := range []string{fmt.Sprintf(`"remoteUser": "%d"`, container.HostUID()), "--cap-drop=ALL", "no-new-privileges"} {
 		if !strings.Contains(js, want) {
 			t.Fatalf("missing %q in %s", want, js)
 		}

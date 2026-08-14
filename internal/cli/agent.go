@@ -853,8 +853,15 @@ func wantTTY(mode string, stdin *os.File) bool {
 // explainTTYFailure recognizes docker's TTY error and says what to do about
 // it, rather than leaving the user with a bare message from three layers
 // down.
+// Two wordings, because two things say it. `orb -m <vm> sudo docker` fails
+// with "the input device is not a TTY"; a local daemon says "cannot attach
+// stdin to a TTY-enabled container because stdin is not a terminal". Only
+// the first was recognized, so the docker backend handed the user docker's
+// own sentence and no remedy — the same message, twice as far from an
+// answer.
 func explainTTYFailure(output string) string {
-	if !strings.Contains(output, "input device is not a TTY") {
+	if !strings.Contains(output, "input device is not a TTY") &&
+		!strings.Contains(output, "cannot attach stdin to a TTY-enabled container") {
 		return ""
 	}
 	return "the backend did not pass a terminal through; re-run with --tty off " +

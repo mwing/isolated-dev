@@ -137,6 +137,10 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 		Context:  p.Dir,
 		Platform: platform,
 		NoCache:  noCache,
+		// The account inside the image is created with the uid of whoever
+		// is running dev, so a bind mount is writable on a platform that
+		// does not remap ownership.
+		BuildArgs: container.UIDBuildArgs(),
 	}, pinned, env.Stdout)
 }
 

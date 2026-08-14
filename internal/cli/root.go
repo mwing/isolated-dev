@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -94,23 +95,40 @@ func (e *Env) stdinIsTerminal() bool { return isTerminal(e.Stdin) }
 // driver returns the container backend, carrying the injected PATH lookup
 // so every command probes the host the same way.
 //
-// OrbStack unless told otherwise. DEV_BACKEND=docker selects a local
-// daemon, which is what a Linux machine has and what the integration tests
-// need — they cannot reach a VM that is not there, and a test tier that
-// cannot reach a daemon is the gap that let every bug in the review through.
+// DEV_BACKEND names one outright. Otherwise: OrbStack on macOS, and a
+// local daemon anywhere else, because anywhere else is where one is.
 //
-// An environment variable rather than a config key, for now: this selects
-// where the tests run, and a setting in ~/.dev-envs that silently changes
-// which daemon a run uses is a bigger promise than the docker backend has
-// earned.
+// Linux used to get the OrbStack driver and fail with "orb CLI not on
+// PATH; install OrbStack from https://orbstack.dev" — advice for a
+// different operating system, on a machine that already had a working
+// daemon. Choosing by platform is not a heuristic here; OrbStack does not
+// run on Linux at all.
+//
+// The environment variable stays, and stays first: it is how the
+// integration tests reach a daemon on a mac, and how someone on macOS who
+// uses Docker Desktop selects it.
 func (e *Env) driver(vmName string) backend.Backend {
-	if lookupEnv(e.Env, "DEV_BACKEND") == "docker" {
-		d := docker.New(e.Runner)
-		if e.LookPath != nil {
-			d.LookPath = e.LookPath
-		}
-		return d
+	switch lookupEnv(e.Env, "DEV_BACKEND") {
+	case "docker":
+		return e.dockerDriver()
+	case "orbstack":
+		return e.orbstackDriver(vmName)
 	}
+	if runtime.GOOS != "darwin" {
+		return e.dockerDriver()
+	}
+	return e.orbstackDriver(vmName)
+}
+
+func (e *Env) dockerDriver() backend.Backend {
+	d := docker.New(e.Runner)
+	if e.LookPath != nil {
+		d.LookPath = e.LookPath
+	}
+	return d
+}
+
+func (e *Env) orbstackDriver(vmName string) backend.Backend {
 	d := orbstack.New(vmName, e.Runner)
 	if e.LookPath != nil {
 		d.LookPath = e.LookPath

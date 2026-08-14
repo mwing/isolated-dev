@@ -274,39 +274,57 @@ recorded, unknown destinations are permitted for that run, and afterwards
 the run offers to save what it reached. Weaker for one run, auditable, and
 it converges on the right allowlist instead of away from it.
 
-### B15. Plain-docker backend, after UID/GID — `todo`
+### B15. Plain-docker backend, after UID/GID — `done`
 
-Selection is `DEV_BACKEND=docker` and undocumented, which is the right
-amount of exposure for now. Every hardened run is `1000:1000`; macOS file
-sharing hides that and Linux will not. Identity mapping comes first, then
-auto-detection, then the docs.
+**UID/GID: done.** The image is built for the host's uid — every language
+template takes `DEV_UID`/`DEV_GID`, creates the account with them, and
+refers to ownership numerically — and runs pass `--user <hostuid>:<hostgid>`.
+The uid is part of the image tag, so two people on one machine cannot hand
+each other an image whose account is the other one.
 
-The driver is done and works: a full `dev run` through it builds, mounts,
-filters DNS, blocks egress and writes back. What is left, from driving it:
+It was worse than this entry predicted. On Linux the container could not
+write to the workspace *at all*:
 
-- **UID is the whole task.** `runspec.go` sets `1000:1000` and all eight
-  language templates create `appuser` at 1000 and chown `/workspace`, the
-  home directory and the caches to it. So passing the host's uid instead
-  hands the container an image whose own directories belong to someone
-  else — either those become group-writable or this needs userns-remap.
-  Not a one-line change, and macOS cannot show the failure: a container
-  write there arrives on the host owned by the host user.
-- Linux still defaults to the OrbStack driver, so the first run fails with
-  "orb not on PATH" rather than using the daemon that is present.
-- `doctor` says `✓ orb CLI (/usr/bin/docker)` and prints a `vm_name` for a
-  backend that has no VM.
-- The "re-run with `--tty off`" hint is on the OrbStack path only; the
-  docker path leaks docker's own `cannot attach stdin to a TTY-enabled
-  container`.
-- `docs/CONCEPTS.md` says an escape "reaches that VM rather than your Mac".
-  With a local daemon there is no VM and that sentence is false. It has to
-  say so before this is a documented configuration.
-- Rootless docker is unexamined.
+```
+sh: can't create from-container.txt: Permission denied
+```
 
-The gap that would let the UID break ship: Linux CI covers network
-topology but never runs a container over a mounted workspace, so nothing
-would catch it. That test comes first — it is what makes the rest
-verifiable.
+Every run that wrote anything failed. The fix had to be the image knowing
+the uid rather than merely being passed it — measured on one image:
+
+```
+as baked uid 1000:  whoami -> appuser        home write: OK
+as host uid 501:    whoami: unknown uid 501  home write: DENIED
+```
+
+so passing the host uid alone would have fixed the workspace and broken
+home and the caches, on both platforms.
+
+The integration test came first, deliberately, and earned it: Linux CI
+covered network topology and orphan reaping but had never run a container
+over a mounted workspace, so the one platform that could see this was not
+looking. It went red on the first push, which was the finding.
+
+**The rest, also done.** The backend is chosen by platform unless
+`DEV_BACKEND` says otherwise — OrbStack does not run on Linux at all, so
+telling a Linux user to install it was advice for a different operating
+system on a machine that already had a daemon. The `--tty off` hint now
+recognizes docker's wording as well as orb's; they are two sentences for
+one failure and only one was understood. CONCEPTS says plainly that an
+escape reaches the OrbStack VM on macOS and the host on Linux, which is a
+real difference in what this tool is worth on the two platforms and not
+one the sandbox can close.
+
+The doctor items were already fixed while grouping the UI, and this entry
+had gone stale saying otherwise.
+
+**Rootless docker is detected and reported, not supported.** It maps
+container uid 0 to the host user and every other uid into a subuid range,
+so running as the host's own uid — the thing that makes a bind mount
+writable everywhere else — lands files under a subuid instead. `doctor`
+says so. Accommodating it means running as container uid 0, which is a
+different posture and wants its own decision; there is no rootless daemon
+here to verify against, and guessing at it would be worse than naming it.
 
 ### B16. Non-HTTP ergonomics — `done`
 

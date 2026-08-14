@@ -13,6 +13,7 @@ package devcontainer
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mwing/isolated-dev/internal/container"
 	"os"
 	"path/filepath"
 	"sort"
@@ -267,8 +268,11 @@ func Generate(o Options) Generated {
 	b.WriteString("  \"workspaceMount\": " +
 		"\"source=${localWorkspaceFolder},target=/workspace,type=bind\",\n")
 	// The same unprivileged uid dev runs as, so files written in the
-	// editor belong to the same user as files written by dev.
-	b.WriteString("  \"remoteUser\": \"1000\",\n")
+	// editor belong to the same user as files written by dev — which is the
+	// uid of the person at the keyboard, not a fixed 1000. On Linux a bind
+	// mount carries host ownership through unchanged, so anything else
+	// produces a workspace the editor cannot write.
+	fmt.Fprintf(&b, "  \"remoteUser\": \"%d\",\n", container.HostUID())
 
 	if len(o.Ports) > 0 {
 		parts := make([]string, 0, len(o.Ports))

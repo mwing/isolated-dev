@@ -82,7 +82,7 @@ func TestHardenedDefaults(t *testing.T) {
 
 	// Identity is set by the tool, never inherited from the image: a
 	// project Dockerfile declaring USER root must not win (ROADMAP 4.1).
-	if !argsContain(args, "--user", "1000:1000") {
+	if !argsContain(args, "--user", HostUser()) {
 		t.Error("--user not set")
 	}
 	if !argsContain(args, "--cap-drop", "ALL") {

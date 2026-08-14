@@ -122,7 +122,14 @@ func Resolve(dir string, cfg config.Config, set *langs.Set) (*Project, error) {
 	}
 	// Same shape as v1 so images built by either tool are distinguishable
 	// at a glance but do not collide.
-	p.Image = fmt.Sprintf("%s-img-%s", prefix, name)
+	//
+	// The uid is part of the tag because it is baked into the image: the
+	// account inside is created with the uid of whoever built it, so two
+	// people sharing a machine must not hand each other an image whose user
+	// is the other one. Without this the second person silently reuses a
+	// cached image they cannot write the workspace with, which is the exact
+	// failure the uid work exists to remove.
+	p.Image = fmt.Sprintf("%s-img-%s%s", prefix, name, imageUIDSuffix())
 	p.Container = fmt.Sprintf("%s-ctn-%s", prefix, name)
 	p.Ports = detect.Ports(cfg.ForwardPorts, p.Detected)
 
@@ -472,4 +479,17 @@ func (p *Project) Registries() []string {
 		return nil
 	}
 	return append([]string(nil), p.Detected.Language.Registries...)
+}
+
+// imageUIDSuffix distinguishes images built for different host uids.
+//
+// Empty for the historical default, so the overwhelmingly common case —
+// one person on a machine, uid 501 on macOS or 1000 on Linux — does not
+// grow a suffix nobody needs to read. It is a disambiguator, not a label.
+func imageUIDSuffix() string {
+	uid := container.HostUID()
+	if uid == container.FallbackUID {
+		return ""
+	}
+	return fmt.Sprintf("-u%d", uid)
 }

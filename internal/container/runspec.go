@@ -125,7 +125,7 @@ type RunSpec struct {
 // VM down with it.
 func Hardened() RunSpec {
 	return RunSpec{
-		User:    "1000:1000",
+		User:    HostUser(),
 		CapDrop: []string{"ALL"},
 		CapAdd:  []string{"CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"},
 		// Every hardened run gets an init: PidsLimit makes leaked zombies

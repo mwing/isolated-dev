@@ -235,6 +235,18 @@ func reportStatus(out interface{ Write([]byte) (int, error) }, st backend.Status
 		}
 		fmt.Fprintln(out)
 	}
+	// Said out loud because this tool has not been run against one. A
+	// rootless daemon maps container uid 0 to the host user and every other
+	// uid into a subuid range, so the workspace ownership this tool arranges
+	// — running as the uid of the person at the keyboard — is arranged
+	// against a different mapping than it assumes. Better to name that than
+	// to let someone find it as a permissions error with no explanation.
+	if st.Rootless {
+		fmt.Fprintf(out, "  %s  rootless daemon: uids inside a container map into a subuid\n",
+			warnStyle.Render("⚠"))
+		fmt.Fprintf(out, "     range, so files a run writes may not belong to you. This\n")
+		fmt.Fprintf(out, "     configuration is not one dev has been tested against.\n")
+	}
 	if st.Detail != "" {
 		fmt.Fprintf(out, "  %s  %s\n", arrowStyle.Render("→"), st.Detail)
 	}

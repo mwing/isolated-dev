@@ -22,7 +22,15 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # An exact patch, not '1.26'. setup-go matches the runner's cached
+          # toolchain when the constraint allows it, so '1.26' sat on
+          # 1.26.5 while 1.26.6 carried the fix for GO-2026-6090 in
+          # crypto/tls — a stdlib vulnerability shipped inside every
+          # released binary. Pinning has the cost this tool argues about
+          # for image digests: the ground stops moving, and patches stop
+          # arriving on their own. govulncheck below is what says to move
+          # it.
+          go-version: '1.26.6'
 
       # The suite runs on every push already; it runs again here because a
       # tag is the one build that people install without reading anything.

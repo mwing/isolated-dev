@@ -287,9 +287,13 @@ what your machine reached is not the repository's business.
   [worked through here](USE-CASES.md#tests-that-need-docker-and-what-that-costs).
 - **Ports do not publish in allowlist mode** unless the sidecar forwards
   them; the run says which are published.
-- **A container is not a VM.** On macOS everything already runs inside the
-  OrbStack VM, so a container escape reaches that VM rather than your Mac —
-  but containers there share a kernel with each other.
+- **A container is not a VM, and what an escape reaches depends on where
+  you are.** On macOS everything already runs inside the OrbStack VM, so an
+  escape reaches that VM rather than your Mac — though containers there
+  share a kernel with each other. On Linux, with a local daemon, there is
+  no VM in the way: an escape reaches the host. That is a real difference
+  in what this tool is worth on the two platforms, and it is not one the
+  sandbox can close.
 - **Builds are not filtered.** Egress control governs a running container;
   what a build fetches is governed by pinning. See ROADMAP 4.3.1. Because
   of that, a repository's own `Dockerfile` is not built until you accept it

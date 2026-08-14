@@ -1,7 +1,14 @@
 FROM golang:{{VERSION}}-alpine
 
-# Create non-root user
-RUN addgroup -g 1000 appuser && adduser -D -u 1000 -G appuser appuser
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+
+# See the note in the debian-based templates: the uid is the host's, so a
+# bind mount is writable on Linux, where ownership is not remapped.
+RUN set -eux; \
+    getent group "$DEV_GID" >/dev/null || addgroup -g "$DEV_GID" appuser; \
+    getent passwd "$DEV_UID" >/dev/null || \
+      adduser -D -u "$DEV_UID" -G "$(getent group "$DEV_GID" | cut -d: -f1)" appuser
 
 # Install system dependencies
 RUN apk add --no-cache \
@@ -18,13 +25,11 @@ RUN apk add --no-cache \
 
 # Set working directory and change ownership
 WORKDIR /workspace
-RUN chown -R appuser:appuser /workspace
+RUN chown -R "$DEV_UID":"$DEV_GID" /workspace
 
-# Switch to non-root user
-USER appuser
-
+USER $DEV_UID:$DEV_GID
 # Copy go mod files if they exist
-COPY --chown=appuser:appuser go.mod go.sum* ./
+COPY --chown=$DEV_UID:$DEV_GID go.mod go.sum* ./
 RUN if [ -f go.mod ]; then go mod download; fi
 
 # Keep container running

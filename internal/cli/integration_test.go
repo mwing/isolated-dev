@@ -158,3 +158,84 @@ func TestIntegrationHardenedRunsReapOrphans(t *testing.T) {
 			"PidsLimit turns that into fork failures", got)
 	}
 }
+
+// The workspace mount is the one thing every run depends on, and the tier
+// below this cannot check it: a fake runner reports that a container wrote
+// a file without a filesystem ever being touched.
+//
+// It is also what proved the UID work (BACKLOG B15) necessary and then
+// correct. Runs used to be a fixed `--user 1000:1000`; macOS file sharing
+// remaps ownership so a write always arrives owned by whoever ran dev,
+// which means the developer's machine cannot show the problem. On Linux a
+// bind mount is raw, and this test failed there with "can't create file:
+// Permission denied" — the container could not write its own workspace at
+// all.
+//
+// So this asserts the property rather than the mechanism: whatever uid the
+// container runs as, work it leaves behind has to be work the person can
+// pick up.
+func TestIntegrationTheWorkspaceRoundTrips(t *testing.T) {
+	env, _ := realEnv(t)
+	eng := engineFor(t, env)
+	dir := env.Paths.ProjectDir
+
+	spec := container.Hardened()
+	spec.Image = "alpine"
+	// Deliberately not overridden. Hardened() is where the uid is decided,
+	// and a test that sets its own is a test of the number it chose rather
+	// than of what a run actually does — this one pinned 1000:1000 and so
+	// kept failing after the fix that removed it.
+	if spec.User != container.HostUser() {
+		t.Fatalf("hardened runs use %q, not the host's %q", spec.User, container.HostUser())
+	}
+	spec.Mounts = []container.Mount{{Source: dir, Target: "/workspace"}}
+	spec.WorkDir = "/workspace"
+	spec.Command = []string{"sh", "-c", "echo written-inside > from-container.txt"}
+
+	var out bytes.Buffer
+	res, err := eng.Run(context.Background(), spec, nil, &out, &out)
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("the container could not write to its own workspace (exit %d):\n%s",
+			res.ExitCode, out.String())
+	}
+
+	written := filepath.Join(dir, "from-container.txt")
+	body, err := os.ReadFile(written)
+	if err != nil {
+		t.Fatalf("the file never reached the host: %v", err)
+	}
+	if strings.TrimSpace(string(body)) != "written-inside" {
+		t.Fatalf("workspace content = %q", body)
+	}
+
+	// The half that macOS hides. Appending is what an editor, a formatter
+	// or the next `git commit` does; a file the host cannot reopen for
+	// writing is work the container has taken hostage.
+	f, err := os.OpenFile(written, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("the host cannot write to the file the container left "+
+			"(the run is --user %s and this host is uid %d): %v",
+			spec.User, os.Getuid(), err)
+	}
+	_ = f.Close()
+
+	// And the run has to be able to work with what is already there, which
+	// is the ordinary case: a repository checked out by the host.
+	existing := filepath.Join(dir, "from-host.txt")
+	if err := os.WriteFile(existing, []byte("written-outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec.Command = []string{"sh", "-c", "echo appended >> from-host.txt"}
+	out.Reset()
+	res, err = eng.Run(context.Background(), spec, nil, &out, &out)
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out.String())
+	}
+	if res.ExitCode != 0 {
+		t.Fatalf("the container cannot modify a file the host created (exit %d, host uid %d):\n%s",
+			res.ExitCode, os.Getuid(), out.String())
+	}
+}
