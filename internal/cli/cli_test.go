@@ -46,7 +46,12 @@ func newHarness(t *testing.T) *harness {
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
-		Env:    nil,
+		// The backend is named rather than left to the platform. These
+		// tests fake orb's answers, so which driver they get must not
+		// depend on which machine runs them — the same reason LookPath is
+		// injected. Without it the suite passed on macOS and failed on
+		// Linux the moment the default became platform-dependent.
+		Env:    []string{"DEV_BACKEND=orbstack"},
 		Paths:  paths,
 		Runner: h.fake,
 	}
