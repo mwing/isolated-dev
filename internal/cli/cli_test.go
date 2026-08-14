@@ -46,9 +46,18 @@ func newHarness(t *testing.T) *harness {
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
-		// Env is set in run(), where a test cannot drop it by setting its
-		// own.
-		Env:    nil,
+		// The backend is named rather than left to the platform: these
+		// tests fake orb's answers, so which driver they get must not
+		// depend on which machine runs the suite — the same reason
+		// LookPath is injected.
+		//
+		// Set in two places, which is not redundancy. Here, for tests that
+		// reach h.env.driver() directly and never call run(). And again in
+		// run(), because a test that sets Env for its own reasons replaces
+		// this slice wholesale. Removing either brings back a Linux-only
+		// failure for a different subset of the suite; both were found
+		// exactly that way.
+		Env:    []string{"DEV_BACKEND=orbstack"},
 		Paths:  paths,
 		Runner: h.fake,
 	}
