@@ -29,7 +29,15 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # An exact patch, not '1.26'. setup-go matches the runner's cached
+          # toolchain when the constraint allows it, so '1.26' sat on
+          # 1.26.5 while 1.26.6 carried the fix for GO-2026-6090 in
+          # crypto/tls — a stdlib vulnerability shipped inside every
+          # released binary. Pinning has the cost this tool argues about
+          # for image digests: the ground stops moving, and patches stop
+          # arriving on their own. govulncheck below is what says to move
+          # it.
+          go-version: '1.26.6'
 
       - name: Verify formatting
         run: |
@@ -60,7 +68,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # Exact patch; see the note in the `test` job.
+          go-version: '1.26.6'
       - name: Integration tests against a real docker daemon
         env:
           DEV_BACKEND: docker
@@ -72,7 +81,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # Exact patch; see the note in the `test` job.
+          go-version: '1.26.6'
       # v7 of the action, because the config is golangci-lint v2 and v6 of
       # the action refuses a v2 version outright. That mismatch is why this
       # job had been failing on every push: `version: latest` resolved to a
@@ -108,7 +118,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # Exact patch; see the note in the `test` job.
+          go-version: '1.26.6'
       - name: Fuzz ${{ matrix.target }}
         env:
           FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '60s' }}
@@ -129,7 +140,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: '1.26'
+          # Exact patch; see the note in the `test` job.
+          go-version: '1.26.6'
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
