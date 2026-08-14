@@ -46,12 +46,9 @@ func newHarness(t *testing.T) *harness {
 	h.env = &Env{
 		Stdout: h.stdout,
 		Stderr: h.stderr,
-		// The backend is named rather than left to the platform. These
-		// tests fake orb's answers, so which driver they get must not
-		// depend on which machine runs them — the same reason LookPath is
-		// injected. Without it the suite passed on macOS and failed on
-		// Linux the moment the default became platform-dependent.
-		Env:    []string{"DEV_BACKEND=orbstack"},
+		// Env is set in run(), where a test cannot drop it by setting its
+		// own.
+		Env:    nil,
 		Paths:  paths,
 		Runner: h.fake,
 	}
@@ -60,6 +57,19 @@ func newHarness(t *testing.T) *harness {
 
 func (h *harness) run(t *testing.T, args ...string) error {
 	t.Helper()
+	// The backend is named rather than left to the platform. These tests
+	// fake orb's answers, so which driver they get must not depend on which
+	// machine runs them — the same reason LookPath is injected.
+	//
+	// Applied here rather than in the Env literal because tests set Env for
+	// their own reasons and would silently drop it. Without this the suite
+	// passed on macOS and failed on Linux the moment the default became
+	// platform-dependent, with "the egress sidecar exited immediately with
+	// no output" — which is what a fake keyed to orb's commands says when
+	// it is handed docker's.
+	if lookupEnv(h.env.Env, "DEV_BACKEND") == "" {
+		h.env.Env = append(h.env.Env, "DEV_BACKEND=orbstack")
+	}
 	cmd := NewRootCmd(h.env)
 	cmd.SetArgs(args)
 	cmd.SetOut(h.stdout)
