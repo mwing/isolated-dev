@@ -11,6 +11,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mwing/isolated-dev/internal/backend"
 	"github.com/mwing/isolated-dev/internal/runner"
@@ -77,6 +78,17 @@ func (d *Driver) Probe(ctx context.Context) (backend.Status, error) {
 	}
 	st.DaemonUp = true
 	st.DaemonVersion = trimLine(res.Stdout)
+
+	// Asked separately because it changes the meaning of every uid this
+	// tool sets. A rootless daemon maps container uid 0 to the host user
+	// and everything else into a subuid range, so running as the host's own
+	// uid — which is what makes a bind mount writable everywhere else —
+	// lands files under a subuid instead.
+	sec, err := d.Docker(ctx, backend.Call{
+		Args: []string{"info", "--format", "{{.SecurityOptions}}"}})
+	if err == nil && sec.ExitCode == 0 && strings.Contains(sec.Stdout, "rootless") {
+		st.Rootless = true
+	}
 	return st, nil
 }
 

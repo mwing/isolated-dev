@@ -1125,3 +1125,25 @@ func TestHelpGroupsMatchTheReferenceHeadings(t *testing.T) {
 		}
 	}
 }
+
+// Two backends, two sentences for the same failure. Only orb's was
+// recognized, so the docker backend passed docker's own wording through
+// with no remedy attached.
+func TestBothBackendsTTYFailuresAreExplained(t *testing.T) {
+	for _, out := range []string{
+		"the input device is not a TTY",
+		"cannot attach stdin to a TTY-enabled container because stdin is not a terminal",
+	} {
+		hint := explainTTYFailure(out)
+		if hint == "" {
+			t.Errorf("no remedy offered for %q", out)
+			continue
+		}
+		if !strings.Contains(hint, "--tty off") {
+			t.Errorf("the remedy does not name the flag: %q", hint)
+		}
+	}
+	if explainTTYFailure("some unrelated docker error") != "" {
+		t.Error("an unrelated failure was explained as a TTY problem")
+	}
+}

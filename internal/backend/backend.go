@@ -38,6 +38,12 @@ type Status struct {
 	VMRunning     bool
 	DaemonUp      bool
 	DaemonVersion string
+	// Rootless reports a daemon running as an ordinary user. It changes
+	// what a uid means: container uid 0 maps to the host user and every
+	// other uid maps into a subuid range, so the uid a workload runs as is
+	// not the uid its files land under. Reported rather than accommodated —
+	// see doctor.
+	Rootless bool
 	// Detail carries a backend-specific explanation when something is off.
 	Detail string
 }

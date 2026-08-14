@@ -274,7 +274,7 @@ recorded, unknown destinations are permitted for that run, and afterwards
 the run offers to save what it reached. Weaker for one run, auditable, and
 it converges on the right allowlist instead of away from it.
 
-### B15. Plain-docker backend, after UID/GID — `doing`
+### B15. Plain-docker backend, after UID/GID — `done`
 
 **UID/GID: done.** The image is built for the host's uid — every language
 template takes `DEV_UID`/`DEV_GID`, creates the account with them, and
@@ -305,13 +305,26 @@ covered network topology and orphan reaping but had never run a container
 over a mounted workspace, so the one platform that could see this was not
 looking. It went red on the first push, which was the finding.
 
-**Still to do:** Linux still defaults to the OrbStack driver, so the first
-run fails with "orb not on PATH" rather than using the daemon that is
-there; `doctor` says `✓ orb CLI (/usr/bin/docker)` and prints a `vm_name`
-for a backend with no VM; the "re-run with `--tty off`" hint is on the
-OrbStack path only; `docs/CONCEPTS.md` still says an escape "reaches that
-VM rather than your Mac", which is false with a local daemon; and rootless
-docker is unexamined.
+**The rest, also done.** The backend is chosen by platform unless
+`DEV_BACKEND` says otherwise — OrbStack does not run on Linux at all, so
+telling a Linux user to install it was advice for a different operating
+system on a machine that already had a daemon. The `--tty off` hint now
+recognizes docker's wording as well as orb's; they are two sentences for
+one failure and only one was understood. CONCEPTS says plainly that an
+escape reaches the OrbStack VM on macOS and the host on Linux, which is a
+real difference in what this tool is worth on the two platforms and not
+one the sandbox can close.
+
+The doctor items were already fixed while grouping the UI, and this entry
+had gone stale saying otherwise.
+
+**Rootless docker is detected and reported, not supported.** It maps
+container uid 0 to the host user and every other uid into a subuid range,
+so running as the host's own uid — the thing that makes a bind mount
+writable everywhere else — lands files under a subuid instead. `doctor`
+says so. Accommodating it means running as container uid 0, which is a
+different posture and wants its own decision; there is no rootless daemon
+here to verify against, and guessing at it would be worse than naming it.
 
 ### B16. Non-HTTP ergonomics — `done`
 
