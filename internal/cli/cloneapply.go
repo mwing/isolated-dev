@@ -109,10 +109,15 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	// Saying so beats a silent partial result: the user asked for what is
 	// in there, and this is the part that is not coming.
 	if dirty, _, _, _ := clone.State(ctx, env.Runner, path); dirty > 0 {
-		fmt.Fprintf(env.Stderr, "⚠  %d uncommitted change(s) in the clone are not fetched.\n",
-			dirty)
-		fmt.Fprintf(env.Stderr, "   Commit them there first, or copy them by hand:\n")
-		fmt.Fprintf(env.Stderr, "     git -C %s status\n\n", path)
+		// Stated as the contract, not as a shortfall. `apply` moves
+		// commits; committing is the act that says "this is work", and
+		// reaching into a working tree would mean deciding about untracked
+		// files, ignored files and partial staging — judgements about code
+		// this command has not read.
+		fmt.Fprintf(env.Stderr, "Note: %d uncommitted change(s) stay in the clone — apply moves "+
+			"commits.\n", dirty)
+		fmt.Fprintf(env.Stderr, "      Commit them there and apply again if you want them:\n")
+		fmt.Fprintf(env.Stderr, "        git -C %s status\n\n", path)
 	}
 
 	out, err := projectGit(ctx, env, project, "fetch", path,
@@ -137,11 +142,19 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	// anything and cannot produce a conflict; everything else is a
 	// judgement about code this command has not read.
 	if _, err := projectGit(ctx, env, project, "merge", "--ff-only", branch); err != nil {
-		fmt.Fprintf(env.Stdout, "%s commit(s) fetched onto %s.\n", strings.TrimSpace(ahead), branch)
-		fmt.Fprintf(env.Stdout, "\nThe current branch has moved too, so this is a decision:\n")
-		fmt.Fprintf(env.Stdout, "  git merge %s      # keep both histories\n", branch)
-		fmt.Fprintf(env.Stdout, "  git rebase %s     # replay yours on top\n", branch)
-		fmt.Fprintf(env.Stdout, "  git diff HEAD..%s # look first\n", branch)
+		// Lead with the branch the user is standing on. The command is
+		// called `apply`, so "fetched onto clone-work" reads as a detail
+		// while they look at an unchanged working tree and conclude it did
+		// nothing — reported exactly that way. What happened to *their*
+		// branch is the answer to the question they asked.
+		fmt.Fprintf(env.Stdout, "Your branch is unchanged. The clone's %s commit(s) are here, "+
+			"on %s.\n", strings.TrimSpace(ahead), branch)
+		fmt.Fprintf(env.Stdout, "\nBoth histories have moved, so combining them is a judgement "+
+			"about code\nthis command has not read. Yours to make:\n")
+		fmt.Fprintf(env.Stdout, "  git log --oneline HEAD..%s  # what it did\n", branch)
+		fmt.Fprintf(env.Stdout, "  git cherry-pick %s          # take it, if it is one commit\n", branch)
+		fmt.Fprintf(env.Stdout, "  git merge %s                # keep both histories\n", branch)
+		fmt.Fprintf(env.Stdout, "  git rebase %s               # replay yours on top\n", branch)
 		return nil
 	}
 	fmt.Fprintf(env.Stdout, "Fast-forwarded onto %s commit(s) from the clone.\n",
