@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -329,12 +330,67 @@ func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
 		return err
 	}
 	if exists {
-		return nil
+		return r.repairVolumeOwner(ctx, a)
 	}
 	if err := r.Engine.VolumeCreate(ctx, a.VolumeName()); err != nil {
 		return err
 	}
+	// No ownership repair on this path. A new volume is seeded from the
+	// image, and the image tag carries the uid, so the one that seeds it
+	// was built for the uid this run uses. Probing here would be a
+	// container started to confirm something already true.
 	return r.adoptLegacyVolume(ctx, a)
+}
+
+// repairVolumeOwner makes an existing home volume belong to the uid the
+// agent now runs as.
+//
+// The volume outlives the image, and docker only seeds one when it is
+// created — an existing volume keeps whatever ownership it was populated
+// with. So when runs stopped being a fixed uid 1000 and became the host's,
+// every already-logged-in agent found a home directory it could not write:
+// the OAuth exchange succeeded, "Logged in as ..." was printed, and the
+// credential could not be saved, so the next command was logged out again.
+// A failure that reports success is the worst shape available, and this is
+// the migration that stops it.
+//
+// Checked before changing anything, because -R over a home directory that
+// has accumulated caches is not free, and because doing it every run would
+// be a chown nobody asked for.
+func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
+	want := fmt.Sprintf("%d:%d", container.HostUID(), container.HostGID())
+
+	var out bytes.Buffer
+	probe := container.RunSpec{
+		Image:   "alpine",
+		Remove:  true,
+		User:    "0:0",
+		Command: []string{"stat", "-c", "%u:%g", HomePath},
+		Mounts: []container.Mount{
+			{Source: a.VolumeName(), Target: HomePath, Volume: true},
+		},
+	}
+	if _, err := r.Engine.Run(ctx, probe, nil, &out, io.Discard); err != nil {
+		// Not fatal: the agent may still work, and refusing to start it
+		// over a check would be worse than the thing being checked.
+		return nil
+	}
+	if strings.TrimSpace(out.String()) == want {
+		return nil
+	}
+
+	fix := probe
+	fix.Command = []string{"chown", "-R", want, HomePath}
+	if _, err := r.Engine.Run(ctx, fix, nil, io.Discard, io.Discard); err != nil {
+		fmt.Fprintf(r.Out, "⚠  %s belongs to %s and this run is %s, so the agent may not be\n"+
+			"   able to save its login. Repair it with:\n"+
+			"     docker run --rm -u 0 -v %s:%s alpine chown -R %s %s\n",
+			a.VolumeName(), strings.TrimSpace(out.String()), want,
+			a.VolumeName(), HomePath, want, HomePath)
+		return nil
+	}
+	fmt.Fprintf(r.Out, "Adjusted %s to uid %s, which this run uses.\n", a.VolumeName(), want)
+	return nil
 }
 
 // legacyVolumeName is what this volume was called before the tool was
