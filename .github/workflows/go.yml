@@ -134,6 +134,25 @@ jobs:
         run: |
           find internal/netpolicy/testdata/fuzz -type f -newer go.mod -print -exec cat {} \;
 
+  # The release config is only exercised by a tag, which is the worst
+  # moment to learn it does not parse: v0.5.0 failed here on a field that
+  # does not exist in HomebrewCask, after the tag was already pushed. This
+  # runs on every push instead.
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          # Exact patch; see the note in the `test` job.
+          go-version: '1.26.6'
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        with:
+          # The same version the release uses. Checking against a different
+          # one would answer a question nobody asked.
+          version: v2.17.1
+          args: check
+
   vulncheck:
     runs-on: ubuntu-latest
     steps:

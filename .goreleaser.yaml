@@ -122,12 +122,11 @@ homebrew_casks:
       - dev
     homepage: https://github.com/mwing/isolated-dev
     description: Run code in a container without learning Docker (pinned to {{ .Version }})
-    # conflicts_with rather than silence: two casks installing the same
-    # `dev` binary would otherwise both claim it, and brew would report the
-    # collision only when the second one failed to link.
-    conflicts_with:
-      casks:
-        - dev
+    # Declared rather than left silent: two casks installing the same `dev`
+    # binary would otherwise both claim it, and brew would report the
+    # collision only when the second failed to link.
+    conflicts:
+      - cask: dev
     hooks:
       post:
         install: |
