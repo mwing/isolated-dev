@@ -309,11 +309,28 @@ clone this package exists to make, and `diff.external=` makes git try to
 execute the empty string. The first belongs on a specific fetch; the second
 is `--no-ext-diff`, now on the one diff this package runs.
 
-**Still to do:** config quarantine, which is the only thing that closes
-`filter.<driver>` named by an in-tree `.gitattributes` — the driver name is
-the attacker's to choose, so there is no finite set of keys to blank. It
-needs a restore that survives a crash and a signal, since a
-half-quarantined clone has lost its identity and its remote. Then: refusing
+**Done, second pass: the config quarantine.** Host reads of a clone run
+with its repository config renamed aside and a minimal tool-authored one in
+its place, which is the only thing that closes `filter.<driver>` named by
+an in-tree `.gitattributes` — the driver name is the attacker's to choose,
+so there is no key to blank. Tested with exactly that shape.
+
+Crash safety is the design rather than a caveat: the original is renamed,
+never rewritten and never deleted, so the worst a crash leaves is the real
+config beside the stand-in under a known name — with a comment in the
+stand-in saying so. Every call repairs that before doing anything else, so
+recovery is an ordinary path exercised constantly rather than one that runs
+only after the crash nobody planned for. Restore refuses if it finds a
+config it did not write, rather than choosing between two.
+
+**Still to do:** `State` asks the clone where the project is
+(`remote get-url origin`), which is the shape B2 named — reading an
+identity out of the repository whose identity is in question. It is
+deliberately outside the quarantine, because the quarantine removes it, and
+the fix is for the caller to pass the project in. That is a signature change
+through every caller of `State`, so it is the next increment.
+
+Also still to do: refusing
 clone-derived strings as git arguments, sanitizing control characters out
 of commit subjects and author names, and reporting anomalies
 (`refs/replace/*`, an unexpected `.git/shallow`) instead of working around

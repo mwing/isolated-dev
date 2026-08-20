@@ -257,7 +257,7 @@ func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) 
 // driftNotes describes how a reused clone differs from the project.
 func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]string, error) {
 	notes := []string{"reusing the existing clone"}
-	if shallow, err := gitOutput(ctx, run, dest, "rev-parse", "--is-shallow-repository"); err == nil &&
+	if shallow, err := cloneGitOutput(ctx, run, dest, "rev-parse", "--is-shallow-repository"); err == nil &&
 		strings.TrimSpace(shallow) == "true" {
 		notes = append(notes, "the clone is shallow")
 	}
@@ -283,7 +283,7 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 	if err != nil {
 		return notes, nil
 	}
-	destHead, err := gitOutput(ctx, run, dest, "rev-parse", "HEAD")
+	destHead, err := cloneGitOutput(ctx, run, dest, "rev-parse", "HEAD")
 	if err != nil {
 		return notes, nil
 	}
@@ -292,10 +292,10 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 	// object presence because the project's newer commits are not in the
 	// clone to compute a merge-base against.
 	if strings.TrimSpace(srcHead) != strings.TrimSpace(destHead) {
-		if _, err := git(ctx, run, dest, "cat-file", "-e",
+		if _, err := cloneGit(ctx, run, dest, "cat-file", "-e",
 			strings.TrimSpace(srcHead)+"^{commit}"); err != nil {
 			behind := ""
-			if base, berr := gitOutput(ctx, run, dest, "rev-parse",
+			if base, berr := cloneGitOutput(ctx, run, dest, "rev-parse",
 				"origin/"+destBranch); berr == nil {
 				if n, nerr := gitOutput(ctx, run, src, "rev-list", "--count",
 					strings.TrimSpace(base)+"..HEAD"); nerr == nil {
@@ -310,7 +310,7 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 		}
 	}
 
-	if status, err := gitOutput(ctx, run, dest, "status", "--porcelain"); err == nil {
+	if status, err := cloneGitOutput(ctx, run, dest, "status", "--porcelain"); err == nil {
 		if n := len(nonEmptyLines(status)); n > 0 {
 			notes = append(notes, fmt.Sprintf("%d uncommitted change(s) already in the clone", n))
 		}
@@ -410,6 +410,34 @@ func hardenedGitEnv() []string {
 	)
 }
 
+// cloneGit runs git against a clone: hardened flags, and the clone's own
+// repository config set aside for the duration.
+//
+// Separate from git() because git() is also used against the user's own
+// project, where quarantining their config would be both wrong and rude.
+// The distinction is which repository the command is pointed at, and it is
+// the caller's to make.
+func cloneGit(ctx context.Context, run runner.Runner, dir string,
+	args ...string) (res runner.Result, err error) {
+	qerr := withQuarantinedConfig(dir, func() error {
+		res, err = git(ctx, run, dir, args...)
+		return nil
+	})
+	if qerr != nil {
+		return res, qerr
+	}
+	return res, err
+}
+
+func cloneGitOutput(ctx context.Context, run runner.Runner, dir string,
+	args ...string) (string, error) {
+	res, err := cloneGit(ctx, run, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(res.Stdout, "\n"), nil
+}
+
 func git(ctx context.Context, run runner.Runner, dir string, args ...string) (runner.Result, error) {
 	full := append(append([]string(nil), hardenedGitArgs...), args...)
 	cmd := runner.Command{Path: "git", Args: full, Dir: dir, Env: hardenedGitEnv()}
@@ -502,16 +530,16 @@ func Remove(path string) error {
 // --force, which is how the guard stops working.
 func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged int,
 	branch string, shallow bool) {
-	if status, err := gitOutput(ctx, run, path, "status", "--porcelain"); err == nil {
+	if status, err := cloneGitOutput(ctx, run, path, "status", "--porcelain"); err == nil {
 		dirty = len(nonEmptyLines(status))
 	}
-	branch, _ = gitOutput(ctx, run, path, "rev-parse", "--abbrev-ref", "HEAD")
-	if out, err := gitOutput(ctx, run, path, "rev-parse", "--is-shallow-repository"); err == nil {
+	branch, _ = cloneGitOutput(ctx, run, path, "rev-parse", "--abbrev-ref", "HEAD")
+	if out, err := cloneGitOutput(ctx, run, path, "rev-parse", "--is-shallow-repository"); err == nil {
 		shallow = strings.TrimSpace(out) == "true"
 	}
 
 	// Commits on local branches that no remote has: the candidates.
-	out, err := gitOutput(ctx, run, path, "log", "--branches", "--not", "--remotes",
+	out, err := cloneGitOutput(ctx, run, path, "log", "--branches", "--not", "--remotes",
 		"--format=%H")
 	if err != nil {
 		return dirty, unmerged, branch, shallow
@@ -521,6 +549,13 @@ func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged
 		return dirty, unmerged, branch, shallow
 	}
 
+	// Read outside the quarantine, because the quarantine removes it: the
+	// stand-in config has no remote. Which is the uncomfortable part —
+	// this asks the clone where the project is, and the clone is what an
+	// agent has been writing to. B24 records the fix (the caller passes the
+	// project in) and it is a signature change through every caller of
+	// State, so it is the next increment rather than this one. Until then
+	// the code-execution class is closed and this trust is not.
 	origin, err := gitOutput(ctx, run, path, "remote", "get-url", "origin")
 	if err != nil {
 		// No origin to check against, so every candidate has to count.

@@ -513,3 +513,83 @@ func TestHostSideGitDoesNotRunProgramsFromTheClone(t *testing.T) {
 		t.Error("driftNotes reported nothing about a reused clone")
 	}
 }
+
+// The class flags cannot close: the filter driver is named by an in-tree
+// .gitattributes, so there is no key to blank with -c. Only the repository
+// config not being there while host git reads works.
+func TestAnAttackerNamedFilterDoesNotRunOnTheHost(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	marker := "FILTER-RAN"
+	write(t, filepath.Join(dest, "pwn.sh"), "#!/bin/sh\necho "+marker+"\ncat\n")
+	if err := os.Chmod(filepath.Join(dest, "pwn.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dest, ".gitattributes"), "* filter=whatever\n")
+	if _, err := git(ctx, run, dest, "config", "filter.whatever.clean", "./pwn.sh"); err != nil {
+		t.Fatal(err)
+	}
+
+	notes, _ := driftNotes(ctx, run, src, dest)
+	if strings.Contains(strings.Join(notes, "\n"), marker) {
+		t.Fatalf("a filter named by the clone ran on the host:\n%s", strings.Join(notes, "\n"))
+	}
+
+	// The clone's own config has to be back, or the quarantine has eaten
+	// the identity and remote that make the clone usable.
+	body, err := os.ReadFile(filepath.Join(dest, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "filter.whatever") && !strings.Contains(string(body), "whatever") {
+		t.Errorf("the clone's config was not restored:\n%s", body)
+	}
+	if strings.Contains(string(body), "Written by dev") {
+		t.Errorf("the clone was left with the tool's stand-in config:\n%s", body)
+	}
+}
+
+// A crash leaves the original alongside under a known name. The next call
+// repairs it before doing anything else, so recovery is an ordinary path
+// rather than one that runs only after the crash nobody planned for.
+func TestAnInterruptedQuarantineIsRepairedOnNextUse(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := filepath.Join(dest, ".git", "config")
+	original, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exactly the state a crash mid-quarantine leaves.
+	if err := os.Rename(cfg, filepath.Join(dest, ".git", quarantinedName)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg, []byte(minimalConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, _ = State(ctx, run, dest); true {
+		body, rerr := os.ReadFile(cfg)
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		if string(body) != string(original) {
+			t.Errorf("the clone's config was not restored after an interrupted quarantine:\n%s", body)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, ".git", quarantinedName)); err == nil {
+		t.Error("the set-aside copy is still there after recovery")
+	}
+}
