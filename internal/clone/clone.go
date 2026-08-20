@@ -267,11 +267,23 @@ func configValue(ctx context.Context, run runner.Runner, dir, key string) string
 // that transport copies objects anyway, so the same property holds by a
 // different route.
 func cloneArgs(o Options) []string {
+	// Always the smart transport, never git's local mode. A local clone
+	// copies the whole object database, so every other branch, tag and
+	// unreachable blob comes with it — hidden from `branch -a` and readable
+	// by sha. --no-hardlinks protected the source from modification and
+	// said nothing about what the agent could read. Measured: with the
+	// local clone a commit on another branch is fetchable by sha and `git
+	// show` prints its contents; over file:// it is absent.
+	//
+	// --single-branch and --no-tags are what make that true: the clone
+	// carries the history leading to the branch it starts from and nothing
+	// else. An agent therefore cannot see other branches to rebase onto,
+	// which is a deliberate narrowing rather than an oversight.
+	args := []string{"clone", "--single-branch", "--no-tags"}
 	if o.Depth > 0 {
-		return []string{"clone", "--depth", strconv.Itoa(o.Depth),
-			"file://" + o.Project, o.Dest}
+		args = append(args, "--depth", strconv.Itoa(o.Depth))
 	}
-	return []string{"clone", "--no-hardlinks", o.Project, o.Dest}
+	return append(args, "file://"+o.Project, o.Dest)
 }
 
 // carryUncommitted reproduces the working tree's uncommitted state in the

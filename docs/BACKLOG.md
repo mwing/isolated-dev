@@ -416,7 +416,7 @@ invariants are the tests those fixes should be verified against, and the
 thing most likely to catch the next composition failure before a reviewer
 does.
 
-### B25. A clone hands over more history than the run needs — `todo`
+### B25. A clone hands over more history than the run needs — `done`
 
 *Pre-release. Numbered late, placed here because it is a confidentiality
 property that does not hold today.*
@@ -469,11 +469,18 @@ run needs". Note from that earlier measurement that depth 20 and depth 1
 are within 1MB of each other, so a default of 20 costs nothing over 1 and
 keeps `git log` and `blame` useful.
 
-**Two things to decide deliberately, not silently:** `--single-branch`
-means an agent genuinely cannot see `main` to rebase onto, and a shallow
-clone cannot either. And a run that needs another branch has no way to
-fetch one — the container cannot reach the project path, which is a
-property this design relies on elsewhere.
+**Done:** clones use `file:// --single-branch --no-tags`, always, with
+`--depth` when asked for. The invariant test that found it now asserts a
+commit from another branch is absent from the clone's object store.
+
+**The cost is real and accepted, not hidden.** An agent cannot see `main`
+to rebase onto, and cannot fetch it — the container cannot reach the
+project path, which this design relies on elsewhere. That is a narrowing
+of what an agent can do, chosen because the alternative was handing over
+every branch and every deleted blob in the repository. If a run genuinely
+needs the base branch, the answer is to fetch that one ref deliberately
+rather than to widen the clone back to everything; that is a smaller
+feature and is not built.
 
 ### B26. Composition failures around clones and captures — `todo`
 
@@ -493,6 +500,12 @@ mechanisms meeting.*
   the bug the capture path was just fixed for: the clone may still be on
   the previous branch. Keep what was recorded at creation, and fail closed
   on a branch mismatch rather than warning and continuing.
+- **Captures are append-only — done.** The fetch no longer uses `--force`,
+  so a capture ref can fast-forward and nothing else. Two runs sharing an
+  id and holding different histories now produce two refs, the second
+  named by its own tip, rather than one overwriting the other. The
+  invariant that found it asserts earlier work stays reachable. Random ids
+  are still worth doing; they are no longer load-bearing.
 - **Concurrent runs share one working tree.** `clone.Dir` is one mutable
   directory per project with no cross-process serialization, so two runs
   write the same index and refs. Related: `captureID` is

@@ -59,8 +59,29 @@ func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, id s
 	// following, and a tag from a clone feeds `git describe` and release
 	// tooling in the user's own repository.
 	err := WhileQuarantined(clonePath, func() error {
-		_, ferr := git(ctx, run, projectDir, "fetch", "--no-tags", "--force",
+		// No --force. A capture ref is append-only: it may fast-forward,
+		// and anything else would move it off commits it is holding. The
+		// ids are meant to be unique, but "meant to" is what fails when two
+		// runs land in the same second — and the cost of that is the work
+		// this exists to keep.
+		_, ferr := git(ctx, run, projectDir, "fetch", "--no-tags",
 			clonePath, "HEAD:"+ref)
+		if ferr == nil {
+			return nil
+		}
+		// The ref exists and this is not a fast-forward of it, which means
+		// two runs shared an id and hold different histories. Neither is
+		// disposable, so the second gets a ref of its own rather than an
+		// error: the tip's own name cannot collide with anything.
+		if !strings.Contains(ferr.Error(), "non-fast-forward") {
+			return ferr
+		}
+		tip, terr := gitOutput(ctx, run, clonePath, "rev-parse", "--short=9", "HEAD")
+		if terr != nil {
+			return ferr
+		}
+		ref += "-" + strings.TrimSpace(tip)
+		_, ferr = git(ctx, run, projectDir, "fetch", "--no-tags", clonePath, "HEAD:"+ref)
 		return ferr
 	})
 	if err != nil {
