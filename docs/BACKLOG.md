@@ -659,6 +659,52 @@ against itself:
 automating the lifecycle turns user-initiated host-side git against an
 untrusted clone into unattended host-side git against one.
 
+**Fetch at both ends, not only at the end.** As first written, the
+automatic fetch happened when a run finished — so a container that is
+killed, runs out of memory or hits a bug never fetches, and its work sits
+in the clone exactly as it does today. Silently, and precisely when it is
+most wanted. The fetch is idempotent and lossless, so it belongs at run
+*start* as well: a crashed session's commits are then captured by the next
+run without anyone remembering to ask. That makes the mechanism
+self-healing rather than dependent on a clean shutdown, which is the right
+property for something that runs unattended.
+
+**Recovery is plain git, deliberately.** Because these are ordinary refs,
+nothing is trapped in a tool-specific format:
+
+```sh
+git for-each-ref refs/dev/clone/          # every run captured, with dates
+git log --oneline refs/dev/clone/<id>     # what one run did
+git branch recovered refs/dev/clone/<id>  # make it a branch and carry on
+```
+
+What the tool still has to add, because things will go wrong in ways this
+list does not predict: `dev clone list` showing unapplied runs; `apply`
+naming each ref it sweeps; a way to drop refs once landed, since a ref
+pins its objects against `gc` forever; and `dev clone diff` learning about
+the namespace — after an automatic fetch it would otherwise report
+"nothing in the clone the project does not have", which is true of the
+clone and false of the situation.
+
+**Not worktrees.** A linked worktree is a window into the parent
+repository, not an isolation boundary. Measured:
+
+```
+<worktree>/.git            ->  gitdir: <parent>/.git/worktrees/linked
+git -C <worktree> branch -a ->  main, secret-branch  (all of them)
+git rev-parse --git-common-dir -> <parent>/.git
+```
+
+It shares the parent's object store and every ref, so handing one to a
+container would give it read and write access to the repository the clone
+exists to protect — worse than the hard-linked objects `--no-hardlinks`
+already refuses. It would not even function there without mounting the
+parent's `.git` as well. And a worktree's `.git` is a `gitdir:` pointer
+file, which is the layout B24 now refuses on sight. Worktrees are also the
+wrong tool for part 3's dry run, for a quieter reason: sharing the user's
+real `.git` means an interrupt leaves rebase state and a moved `ORIG_HEAD`
+in their repository. `merge-tree` needs neither.
+
 **Still open:** keying clones by project *and* branch (deferred until a
 fresh clone's cost is measured on a large repository); separating the
 human and agent clone keys, which share a slug today.
