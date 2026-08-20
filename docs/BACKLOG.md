@@ -391,6 +391,132 @@ worked around.
 
 ## P2 — later, and only if wanted
 
+### B25. A clone hands over more history than the run needs — `todo`
+
+*Pre-release. Numbered late, placed here because it is a confidentiality
+property that does not hold today.*
+
+`git clone --no-hardlinks <path>` is still git's *local* clone: it copies
+the whole object database. `--no-hardlinks` protects the source from
+modification and does nothing about what is readable. Measured on a
+controlled repository:
+
+```
+--no-hardlinks --single-branch:  branch -a hides secret-branch
+                                 cat-file -e <sha> -> readable
+                                 `git show` prints the secret
+                                 objects: source 6, clone 6
+file:// --single-branch --no-tags: objects 3, secret absent
+```
+
+So `--single-branch` on a local clone is cosmetic: it hides refs while
+copying every object, and `cat-file --batch-all-objects` enumerates the
+lot — other branches, deleted blobs, everything. Only the smart transport
+narrows the data. The reasoning here had been about integrity ("the agent
+cannot corrupt the parent") and never about confidentiality.
+
+**Measured cost, which changes the remedy.** On a 22,655-commit repository
+with 435M of history:
+
+| mode | time | .git | objects |
+|---|---|---|---|
+| `--no-hardlinks` (today) | 1.13s | 435M | 207,152 |
+| `file:// --single-branch --no-tags` | 4.21s | 263M | 183,344 |
+| the same, `--depth 50` | 1.63s | 118M | 11,709 |
+
+The smart transport costs about 3.7x the time and removes only 12% of the
+objects, because branches in a long-lived repository share almost all of
+their ancestry — the unique objects of *other* branches are what it
+removes, which is exactly the confidentiality win and barely any of the
+volume. Depth is what removes volume, and pairs naturally: single-branch
+plus a modest depth is faster than single-branch alone and carries 6% of
+the objects.
+
+That reopens the depth-default question shelved earlier, on different
+grounds: not "clones are large" but "a clone should carry the history the
+run needs". Note from that earlier measurement that depth 20 and depth 1
+are within 1MB of each other, so a default of 20 costs nothing over 1 and
+keeps `git log` and `blame` useful.
+
+**Two things to decide deliberately, not silently:** `--single-branch`
+means an agent genuinely cannot see `main` to rebase onto, and a shallow
+clone cannot either. And a run that needs another branch has no way to
+fetch one — the container cannot reach the project path, which is a
+property this design relies on elsewhere.
+
+### B26. Composition failures around clones and captures — `todo`
+
+*Pre-release. Three defects that each arise from two individually-safe
+mechanisms meeting.*
+
+- **Detached HEAD deletes every branch's captures.** `CurrentBranch`
+  returns `""` for a detached HEAD and `CapturedRefs(…, "")` means *all
+  branches*, so one sentinel means both "this branch" and "everything".
+  `apply` on a detached HEAD sweeps and drops captures belonging to every
+  branch. Live data loss, one line, and it needs no coincidence — do this
+  first. Fix: a separate `AllCapturedRefs` so detached cannot mean
+  wildcard, and one invariant for deletion — never drop a capture unless
+  its tip is reachable from a local branch.
+- **Reuse overwrites provenance.** `Prepare` records the host's *current*
+  branch and base when it reuses a clone, which reintroduces one level up
+  the bug the capture path was just fixed for: the clone may still be on
+  the previous branch. Keep what was recorded at creation, and fail closed
+  on a branch mismatch rather than warning and continuing.
+- **Concurrent runs share one working tree.** `clone.Dir` is one mutable
+  directory per project with no cross-process serialization, so two runs
+  write the same index and refs. Related: `captureID` is
+  second-resolution while its comment promises uniqueness, and capture
+  fetches with `--force`, so two runs in the same second address and
+  overwrite one ref. Random ids and append-only capture refs; a lock held
+  for the life of a run.
+
+### B27. Smaller findings from the same review — `todo`
+
+- The agent's home volume is per-agent, not per-project, and all of
+  `/home/dev` persists — so project A can write agent configuration,
+  instructions or MCP settings that project B later consumes. Mounting only
+  `ConfigDir`, and separating authentication state from mutable state,
+  would narrow it.
+- `build_source` consent hashes the Dockerfile, but `COPY . .` plus
+  `RUN ./build.sh` means the trusted program is the Dockerfile *and the
+  build context*. Hashing the context is unbearable during development;
+  the honest fix is to describe acceptance as trusting this repository to
+  supply build instructions, and the real fix is egress-filtered builds
+  (ROADMAP 4.3.1).
+- Agents have no default memory or CPU ceiling, so an agent takes whatever
+  the daemon permits; the bind-mounted clone is an easy disk DoS too.
+- `RuntimeImage` is described as pinned while `debian:bookworm-slim` and
+  `node:22-bookworm-slim` are mutable tags. The same argument `dev pin`
+  makes applies to the tool's own images.
+- Path as the identity of trust (B2) is worth reopening on a variant B2 did
+  not consider: an id this tool generates and stores in local git metadata,
+  never committed. It is not self-asserted by the repository — a hostile
+  clone into the same path simply lacks it and inherits nothing — which is
+  the objection that killed B2.
+
+### B28. Test the invariants, not the features — `todo`  *(shelved)*
+
+The dangerous bugs in this codebase are increasingly composition failures
+rather than missing mitigations: reuse meeting branch changes, captures
+meeting wildcard semantics, a lossless fetch meeting non-unique names, a
+sandboxed clone meeting host-side git. The individual pieces are
+defensive; the pairs are not.
+
+So write the invariants down — eight to twelve of them — and test those
+adversarially rather than testing features:
+
+- an agent can never modify the source repository
+- an agent never receives git objects unrelated to its starting history
+- no successful run can make previously captured work unreachable
+- two simultaneous runs can never write the same git working tree
+- host git never executes configuration an agent controls
+- a project request can never widen access without a user decision
+
+Every finding of the last two reviews violates one of those and none
+violated a feature test. Shelved rather than dropped: it is worth doing
+once the pre-release items above are closed, and it is the thing most
+likely to find the next one before someone else does.
+
 ### B14. Learning mode — `todo`
 
 The honest replacement for B3: traffic still goes through the proxy and is
