@@ -117,3 +117,62 @@ func TestApplyStatesThatUncommittedWorkStaysPut(t *testing.T) {
 		t.Errorf("the note still reads as a shortfall:\n%s", got)
 	}
 }
+
+// The review's first finding: `dev clone diff` and `dev clone apply` ran
+// git against the clone without the hardening internal/clone had gained,
+// so a clone's own config still named programs that ran on the host —
+// `apply` especially, because fetching from a clone starts upload-pack
+// inside it.
+func TestCloneCommandsRunNoProgramTheCloneNamed(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"}, {"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "work.txt", "work\n", "work in the clone")
+
+	marker := "CLI-PAYLOAD-RAN"
+	script := filepath.Join(clonePath, "pwn.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+marker+"\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{
+		{"core.fsmonitor", "./pwn.sh"},
+		{"core.pager", "./pwn.sh"},
+		{"uploadpack.packObjectsHook", "./pwn.sh"},
+		{"filter.whatever.clean", "./pwn.sh"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Dir: clonePath,
+			Args: []string{"config", kv[0], kv[1]}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(clonePath, ".gitattributes"),
+		[]byte("* filter=whatever\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = h.run(t, "clone", "diff")
+	_ = applyClone(ctx, h.env, "clone-work")
+
+	all := h.stdout.String() + h.stderr.String()
+	if strings.Contains(all, marker) {
+		t.Fatalf("a program named by the clone ran on the host:\n%s", all)
+	}
+	// The commands still have to work, or the hardening has bought safety
+	// by breaking what it protects.
+	if !strings.Contains(all, "work in the clone") && !strings.Contains(all, "Fast-forwarded") {
+		t.Errorf("neither command reported the clone's commit:\n%s", all)
+	}
+}

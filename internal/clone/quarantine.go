@@ -1,10 +1,13 @@
 package clone
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mwing/isolated-dev/internal/runner"
 )
 
 // Config quarantine: the part of B24 that flags cannot do.
@@ -144,4 +147,30 @@ func checkCloneLayout(dir string) error {
 			"repository somewhere this tool did not put it", gitDir)
 	}
 	return nil
+}
+
+// Read runs git inside a clone with the package's hardening and the
+// clone's own config set aside, and returns its output.
+//
+// Exported because `internal/cli` had grown its own `cloneGit` that
+// forwarded straight to git: `dev clone diff` ran unhardened against a
+// repository an agent had been writing to. Two ways to read a clone is one
+// way too many, which is the argument this package already makes about
+// everything else.
+func Read(ctx context.Context, run runner.Runner, clonePath string,
+	args ...string) (string, error) {
+	return cloneGitOutput(ctx, run, clonePath, args...)
+}
+
+// WhileQuarantined runs fn with the clone's config set aside, for
+// operations that read the clone from outside it.
+//
+// `git fetch <clone>` is the case: it runs in the project, so none of the
+// flags this package adds apply to it, and it starts `upload-pack` inside
+// the clone — which reads the clone's config, where
+// `uploadpack.packObjectsHook` names a program to run on the host. The
+// hardening has to follow the repository being read, not the directory the
+// command runs in.
+func WhileQuarantined(clonePath string, fn func() error) error {
+	return withQuarantinedConfig(clonePath, fn)
 }

@@ -120,10 +120,18 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 		fmt.Fprintf(env.Stderr, "        git -C %s status\n\n", path)
 	}
 
-	out, err := projectGit(ctx, env, project, "fetch", path,
-		fmt.Sprintf("HEAD:%s", branch), "--force")
-	if err != nil {
-		return fmt.Errorf("fetching from the clone: %w", err)
+	// The fetch runs in the project and reads the clone, so it starts
+	// upload-pack inside a repository an agent controls. Quarantined for
+	// the duration: uploadpack.packObjectsHook there names a program that
+	// would otherwise run on the host.
+	var out string
+	if qerr := clone.WhileQuarantined(path, func() error {
+		var ferr error
+		out, ferr = projectGit(ctx, env, project, "fetch", path,
+			fmt.Sprintf("HEAD:%s", branch), "--force")
+		return ferr
+	}); qerr != nil {
+		return fmt.Errorf("fetching from the clone: %w", qerr)
 	}
 	if strings.TrimSpace(out) != "" {
 		fmt.Fprintln(env.Stdout, strings.TrimSpace(out))
@@ -174,8 +182,15 @@ func requireClone(env *Env) (string, error) {
 	return path, nil
 }
 
+// cloneGit reads a clone through the one hardened, config-quarantined path.
+//
+// It used to forward straight to git, so `dev clone diff` ran against a
+// repository an agent had been writing to with that repository's own
+// config in force — the hardening in internal/clone stopped at the package
+// boundary, which is exactly where a second way of doing the same thing
+// gets written.
 func cloneGit(ctx context.Context, env *Env, dir string, args ...string) (string, error) {
-	return gitIn(ctx, env, dir, args...)
+	return clone.Read(ctx, env.Runner, dir, args...)
 }
 
 func projectGit(ctx context.Context, env *Env, dir string, args ...string) (string, error) {

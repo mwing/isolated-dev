@@ -338,6 +338,25 @@ config it did not write, rather than choosing between two.
   suite failed for anyone whose signing key was unavailable — a public repo
   whose tests only pass on one machine. Disabled per test repository.
 
+**Done, fourth pass — the review's two criticals.**
+
+*#3, the forged origin.* The project path is recorded beside the clone
+(`<clone>.project`, a sibling, never a file within it — inside would be
+inside the bind mount and so inside the agent's reach). `State` reads that
+instead of asking the clone. No signature change: `clone list` and `prune`
+enumerate clones whose projects the caller does not know, so passing it in
+was never going to work for them, and recording it at `Prepare` answers for
+every caller at once. Unprovable fails closed — a clone with no recorded
+project counts everything as unmerged and is refused rather than deleted.
+
+*#1, the unhardened cli path.* `internal/cli` had grown its own `cloneGit`
+forwarding straight to git. There is now one exported way to read a clone
+(`clone.Read`) and one for operations that read it from outside
+(`clone.WhileQuarantined`, used by the fetch, which starts `upload-pack`
+inside the clone where `uploadpack.packObjectsHook` names a host program).
+A test plants four payloads plus a `.gitattributes` filter and drives
+`dev clone diff` and `dev clone apply` through them.
+
 **Still to do, and sharper than this entry had it.** The review turned the
 `origin` trust from a principle into an exploit: setting `origin = .` in a
 clone makes `State` check the clone's commits against *itself*, so they all
@@ -355,13 +374,6 @@ from an unborn repository (`git diff HEAD` fails with no commits —
 verified), and untracked filenames with leading or trailing whitespace are
 mishandled because the file list is newline-split and trimmed rather than
 read with `-z`.
-
-And the largest: `dev clone diff` and `dev clone apply` in `internal/cli`
-still run git against the clone unhardened, including a fetch *from* it,
-where `uploadpack.packObjectsHook` from the clone's config runs on the
-host. The fix is one exported, quarantined API that every clone read goes
-through, with payload tests for both commands — which is also what stops
-this being rediscovered a third time.
 
 Also still to do: refusing
 clone-derived strings as git arguments, sanitizing control characters out
