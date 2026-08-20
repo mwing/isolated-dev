@@ -265,7 +265,7 @@ already broke this way once.
 
 ---
 
-### B24. Host-side git against a clone is unsandboxed — `todo`
+### B24. Host-side git against a clone is unsandboxed — `doing`
 
 *Numbered after B23 and placed here because it is a live exposure in
 shipped code, not forward-looking work.*
@@ -292,6 +292,32 @@ review show benign content while a fetch delivers the real commit, so
 review has to report from the project after the fetch rather than from the
 clone before it; and a ref name may begin with `-`, so no string read out
 of a clone may ever be passed to git as an argument.
+
+**Done, first pass:** every git invocation the `clone` package makes now
+carries `core.fsmonitor=`, `core.hooksPath=/dev/null`, `core.pager=cat`,
+`core.editor=true`, `core.sshCommand=true` and
+`uploadpack.packObjectsHook=`, with `GIT_NO_REPLACE_OBJECTS=1`,
+`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=` and `GIT_ATTR_NOSYSTEM=1`, built
+with `append(os.Environ(), …)` because `runner.Command.Env` replaces the
+environment. A test plants five executable payloads in a clone's config and
+asserts none runs through `State` or `driftNotes`, and that both still read
+correctly — hardening that breaks the feature it protects is not a fix.
+
+Two flags that look like they belong and do not, both caught by the tests
+rather than by reasoning: `protocol.file.allow=never` forbids the local
+clone this package exists to make, and `diff.external=` makes git try to
+execute the empty string. The first belongs on a specific fetch; the second
+is `--no-ext-diff`, now on the one diff this package runs.
+
+**Still to do:** config quarantine, which is the only thing that closes
+`filter.<driver>` named by an in-tree `.gitattributes` — the driver name is
+the attacker's to choose, so there is no finite set of keys to blank. It
+needs a restore that survives a crash and a signal, since a
+half-quarantined clone has lost its identity and its remote. Then: refusing
+clone-derived strings as git arguments, sanitizing control characters out
+of commit subjects and author names, and reporting anomalies
+(`refs/replace/*`, an unexpected `.git/shallow`) instead of working around
+them. `dev clone diff` in `internal/cli` still runs unhardened.
 
 **Done when:** one hardened helper is the only way host code runs git
 against a clone — repo-config quarantined (with a restore that survives a

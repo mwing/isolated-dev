@@ -200,7 +200,7 @@ func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) 
 	//
 	// The output is used verbatim: a patch is newline-terminated, and
 	// trimming the last one makes `git apply` reject it as corrupt.
-	diffRes, err := git(ctx, run, src, "diff", "HEAD", "--binary")
+	diffRes, err := git(ctx, run, src, "diff", "--no-ext-diff", "HEAD", "--binary")
 	if err != nil {
 		return notes, err
 	}
@@ -350,8 +350,69 @@ func nonEmptyLines(s string) []string {
 	return out
 }
 
+// hardenedGitArgs are prepended to every git invocation this package makes.
+//
+// A clone's `.git` is attacker-controlled: an agent has unsupervised write
+// access to it, and these commands run on the host, as the user, with
+// their SSH keys in reach — which is what --clone exists to protect.
+// Measured on git 2.47.3, in a clone's own config:
+//
+//	core.fsmonitor = ./pwn.sh  +  git status --porcelain  ->  PAYLOAD-RAN
+//	same, with -c core.fsmonitor=                         ->  (did not run)
+//
+// `status --porcelain` is what State and driftNotes run on every reuse, so
+// this was reachable by any agent that had run once. These are the config
+// keys whose values git executes as programs.
+//
+// Applied to the project's own repository as well as to clones. It is the
+// user's own config there and not a threat, but one path that is always
+// hardened cannot drift into two paths where one is not — the argument the
+// runner package already makes about itself.
+//
+// Two more that look like they belong here and do not. `diff.external=`
+// makes git try to execute the empty string ("cannot run : No such file
+// or directory"); that class is disabled per-command with --no-ext-diff,
+// which is why carryUncommitted's diff carries it. And
+// protocol.file.allow=never. It is the
+// right guard against a hostile repository fetching a submodule over
+// file://, and it also forbids the local clone this package exists to
+// make — the tests caught that immediately. It belongs on the specific
+// fetch, not on every invocation.
+//
+// This is mitigation, not the whole fix (BACKLOG B24). A `filter.<driver>`
+// named by an in-tree .gitattributes cannot be blanked by flag, because the
+// driver name is the attacker's to choose; only quarantining the repo
+// config closes that, and doing it safely means surviving a crash without
+// leaving a clone stripped of its identity and its remote.
+var hardenedGitArgs = []string{
+	"-c", "core.fsmonitor=",
+	"-c", "core.hooksPath=/dev/null",
+	"-c", "core.pager=cat",
+	"-c", "core.editor=true",
+	"-c", "core.sshCommand=true",
+	"-c", "uploadpack.packObjectsHook=",
+}
+
+// hardenedGitEnv is the environment those commands run with.
+//
+// append(os.Environ(), …), never a bare slice: runner.Command.Env replaces
+// the environment rather than adding to it, so a literal would drop PATH
+// and HOME and break git in a way that reads as a git bug.
+func hardenedGitEnv() []string {
+	return append(os.Environ(),
+		// A `git replace` in the clone makes a host-side read show benign
+		// content while a fetch delivers the real commit.
+		"GIT_NO_REPLACE_OBJECTS=1",
+		// Nothing here should ever be able to ask the user for anything.
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_ASKPASS=",
+		"GIT_ATTR_NOSYSTEM=1",
+	)
+}
+
 func git(ctx context.Context, run runner.Runner, dir string, args ...string) (runner.Result, error) {
-	cmd := runner.Command{Path: "git", Args: args, Dir: dir}
+	full := append(append([]string(nil), hardenedGitArgs...), args...)
+	cmd := runner.Command{Path: "git", Args: full, Dir: dir, Env: hardenedGitEnv()}
 	res, err := run.Run(ctx, cmd)
 	if err != nil {
 		return res, err

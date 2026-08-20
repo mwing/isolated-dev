@@ -459,3 +459,57 @@ func TestReusingACloneFromAnotherBranchSaysSo(t *testing.T) {
 		t.Errorf("the notes do not say the project has moved:\n%s", all)
 	}
 }
+
+// A clone's .git is attacker-controlled: an agent writes to it freely, and
+// these commands run on the host, as the user, with their SSH keys in
+// reach — which is what --clone exists to protect. Measured on git 2.47.3:
+// core.fsmonitor pointing at a script executes it during the
+// `status --porcelain` that State and driftNotes run on every reuse.
+func TestHostSideGitDoesNotRunProgramsFromTheClone(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The payload announces itself on stdout, so anything that executed it
+	// shows up in what the tool read back.
+	marker := "PAYLOAD-RAN-" + filepath.Base(dest)
+	script := filepath.Join(dest, "pwn.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho "+marker+"\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range [][2]string{
+		{"core.fsmonitor", "./pwn.sh"},
+		{"core.hooksPath", dest},
+		{"core.pager", "./pwn.sh"},
+		{"core.sshCommand", "./pwn.sh"},
+		{"uploadpack.packObjectsHook", "./pwn.sh"},
+	} {
+		if _, err := git(ctx, run, dest, "config", kv[0], kv[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Everything this package does to a clone, through its own helpers.
+	dirty, _, branch, _ := State(ctx, run, dest)
+	notes, _ := driftNotes(ctx, run, src, dest)
+	got := strings.Join(append(notes, branch), "\n")
+
+	if strings.Contains(got, marker) {
+		t.Fatalf("a program from the clone ran on the host:\n%s", got)
+	}
+	// And the reads still work, or the hardening has bought safety by
+	// breaking the feature.
+	// The payload script itself is the untracked file, so a working read
+	// sees exactly one.
+	if dirty != 1 || branch == "" {
+		t.Errorf("hardening broke the reads it was protecting: dirty=%d branch=%q", dirty, branch)
+	}
+	if len(notes) == 0 {
+		t.Error("driftNotes reported nothing about a reused clone")
+	}
+}
