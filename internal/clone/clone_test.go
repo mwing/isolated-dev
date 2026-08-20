@@ -20,6 +20,8 @@ func gitRepo(t *testing.T) string {
 		{"init", "-q"},
 		{"config", "user.email", "t@example.com"},
 		{"config", "user.name", "t"},
+		// Signing is the runner's preference, not this test's.
+		{"config", "commit.gpgsign", "false"},
 	} {
 		if _, err := git(ctx, run, dir, args...); err != nil {
 			t.Fatal(err)
@@ -591,5 +593,34 @@ func TestAnInterruptedQuarantineIsRepairedOnNextUse(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dest, ".git", quarantinedName)); err == nil {
 		t.Error("the set-aside copy is still there after recovery")
+	}
+}
+
+// Measured: with .git replaced by a `gitdir:` pointer, <clone>/.git/config
+// does not stat while git works perfectly through the pointer. A quarantine
+// that read "no config here" as "nothing to set aside" therefore ran host
+// git against a config of the agent's choosing — failing open in the one
+// function whose whole job is to fail closed.
+func TestAGitdirPointerIsRefusedNotWorkedAround(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.git")
+	if err := os.Rename(filepath.Join(dest, ".git"), elsewhere); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dest, ".git"), "gitdir: "+elsewhere+"\n")
+
+	if err := withQuarantinedConfig(dest, func() error { return nil }); err == nil {
+		t.Fatal("a gitdir pointer was accepted, so host git would run unprotected")
+	}
+	// And the refusal reaches the callers rather than being swallowed.
+	if _, err := cloneGitOutput(ctx, run, dest, "status", "--porcelain"); err == nil {
+		t.Error("a clone read succeeded against an unexpected layout")
 	}
 }

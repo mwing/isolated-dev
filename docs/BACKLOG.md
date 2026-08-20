@@ -323,12 +323,45 @@ recovery is an ordinary path exercised constantly rather than one that runs
 only after the crash nobody planned for. Restore refuses if it finds a
 config it did not write, rather than choosing between two.
 
-**Still to do:** `State` asks the clone where the project is
+**Done, third pass**, from an external review that found six things:
+
+- The quarantine failed open on an unexpected layout. Measured: with `.git`
+  replaced by a `gitdir:` pointer, `<clone>/.git/config` does not stat while
+  git works perfectly through the pointer — so "no config here" was read as
+  "nothing to set aside" and host git ran against a config of the agent's
+  choosing. `Lstat` now requires a plain `.git` directory and a regular
+  config file, and refuses anything else. Failing open in the one function
+  whose job is to fail closed.
+- Restore errors were discarded, so a command could succeed while leaving
+  the clone quarantined. They are returned now.
+- The test helpers inherited the runner's global `commit.gpgSign`, so the
+  suite failed for anyone whose signing key was unavailable — a public repo
+  whose tests only pass on one machine. Disabled per test repository.
+
+**Still to do, and sharper than this entry had it.** The review turned the
+`origin` trust from a principle into an exploit: setting `origin = .` in a
+clone makes `State` check the clone's commits against *itself*, so they all
+look contained and `dev clone rm` / `dev clone prune` delete them without
+`--force`. That is data loss, not just misplaced trust. `State` asks the
+clone where the project is
 (`remote get-url origin`), which is the shape B2 named — reading an
 identity out of the repository whose identity is in question. It is
 deliberately outside the quarantine, because the quarantine removes it, and
 the fix is for the caller to pass the project in. That is a signature change
 through every caller of `State`, so it is the next increment.
+
+Two more from the review, both real and unfixed: `--clone` cannot start
+from an unborn repository (`git diff HEAD` fails with no commits —
+verified), and untracked filenames with leading or trailing whitespace are
+mishandled because the file list is newline-split and trimmed rather than
+read with `-z`.
+
+And the largest: `dev clone diff` and `dev clone apply` in `internal/cli`
+still run git against the clone unhardened, including a fetch *from* it,
+where `uploadpack.packObjectsHook` from the clone's config runs on the
+host. The fix is one exported, quarantined API that every clone read goes
+through, with payload tests for both commands — which is also what stops
+this being rediscovered a third time.
 
 Also still to do: refusing
 clone-derived strings as git arguments, sanitizing control characters out

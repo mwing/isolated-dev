@@ -49,7 +49,18 @@ const minimalConfig = `# Written by dev while reading this clone from the host.
 //
 // Nested calls are safe: if the config is already quarantined, this is a
 // no-op that leaves the outer call to restore.
-func withQuarantinedConfig(dir string, fn func() error) error {
+func withQuarantinedConfig(dir string, fn func() error) (err error) {
+	// The layout is checked before anything else, and an unexpected one is
+	// refused rather than worked around. Measured: with `.git` replaced by
+	// a `gitdir:` pointer, `<clone>/.git/config` does not stat while git
+	// itself works perfectly through the pointer — so a version of this
+	// that treated "no config here" as "nothing to quarantine" ran host
+	// git against a config of the agent's choosing. Failing open in the
+	// one function whose whole job is to fail closed.
+	if err := checkCloneLayout(dir); err != nil {
+		return err
+	}
+
 	// Recover from a previous crash before anything else. Doing this on
 	// every call, rather than at startup, means the repair happens whoever
 	// gets here first and however the tool was entered.
@@ -60,18 +71,28 @@ func withQuarantinedConfig(dir string, fn func() error) error {
 	cfg := filepath.Join(dir, ".git", "config")
 	saved := filepath.Join(dir, ".git", quarantinedName)
 
-	if _, err := os.Stat(cfg); err != nil {
-		// No config to quarantine — including the case where .git is a
-		// file rather than a directory, which is an anomaly the caller
-		// reports rather than something to work around here.
-		return fn()
+	if fi, serr := os.Lstat(cfg); serr != nil {
+		// Genuinely no config file, in a .git that is otherwise a plain
+		// directory: there is nothing attacker-controlled to set aside.
+		if os.IsNotExist(serr) {
+			return fn()
+		}
+		return fmt.Errorf("reading the clone's config at %s: %w", cfg, serr)
+	} else if !fi.Mode().IsRegular() {
+		return fmt.Errorf("the clone's config at %s is not a regular file", cfg)
 	}
 	if err := os.Rename(cfg, saved); err != nil {
 		return fmt.Errorf("quarantining the clone's config: %w", err)
 	}
 	// Restore on the way out however fn returns, including a panic: the
 	// alternative is leaving a clone that looks like it lost its remote.
-	defer func() { _ = restoreQuarantine(dir) }()
+	// The error is reported rather than dropped — a command that succeeded
+	// while leaving the clone quarantined has not succeeded.
+	defer func() {
+		if rerr := restoreQuarantine(dir); rerr != nil && err == nil {
+			err = rerr
+		}
+	}()
 
 	if err := os.WriteFile(cfg, []byte(minimalConfig), 0o600); err != nil {
 		return fmt.Errorf("writing a safe config for the clone: %w", err)
@@ -101,4 +122,26 @@ func restoreQuarantine(dir string) error {
 
 func isToolWritten(body []byte) bool {
 	return strings.HasPrefix(string(body), "# Written by dev while reading this clone")
+}
+
+// checkCloneLayout refuses anything but a plain .git directory.
+//
+// A symlink or a `gitdir:` pointer file means the repository this command
+// is about to read is somewhere the tool did not put it, chosen by whoever
+// wrote to the clone. That is a finding to report, not a shape to
+// accommodate.
+func checkCloneLayout(dir string) error {
+	gitDir := filepath.Join(dir, ".git")
+	fi, err := os.Lstat(gitDir)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", gitDir, err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symlink, not a repository directory", gitDir)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%s is not a directory — a `gitdir:` pointer names a "+
+			"repository somewhere this tool did not put it", gitDir)
+	}
+	return nil
 }

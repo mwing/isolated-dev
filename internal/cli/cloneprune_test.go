@@ -31,6 +31,8 @@ func makeClone(t *testing.T, home, name string) string {
 	ctx := context.Background()
 	for _, args := range [][]string{
 		{"init", "-q"}, {"config", "user.email", "t@example.com"}, {"config", "user.name", "t"},
+		// Signing is the runner's preference, not this test's.
+		{"config", "commit.gpgsign", "false"},
 	} {
 		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: src}); err != nil {
 			t.Fatal(err)
