@@ -147,8 +147,18 @@ but which of the two something is was never the reader's problem.
 | `dev clone path` | this project's, for scripting |
 | `dev clone diff` | what the clone has that the project does not |
 | `dev clone apply` | bring those commits back, fast-forwarding when that needs no decision |
+| `git for-each-ref refs/dev/clone/` | every run's work already fetched into this project |
 | `dev clone prune` | remove clones holding nothing (`--older-than`, `--force`, `--dry-run`) |
 | `dev clone rm` | delete one — refuses while it holds work the project does not have |
+
+A run fetches the clone's commits into the project by itself, at the end
+and again at the start of the next one — so work survives a container that
+crashed before anyone applied anything. They land under
+`refs/dev/clone/<branch>/<run>`: reachable and safe from `git gc`, but not
+branches, so nothing you own moves and nothing is checked out. `dev clone
+apply` brings them onto your branch and drops the refs; until then a run
+says how many are waiting. Because they are ordinary refs, `git log`,
+`git branch` and `git cherry-pick` all work on them directly.
 
 ---
 

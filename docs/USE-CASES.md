@@ -164,28 +164,31 @@ gone. Nothing you are about to merge has run on your machine.
 dev clone apply
 ```
 
-That fetches the clone's commits onto a local branch and fast-forwards
-onto them, which is the whole job when you have not touched the tree
-meanwhile — the common case, since the agent was working while you were
-not.
+Most of that has already happened. The run fetched the clone's commits into
+your project when it ended — and the next run does it again at the start,
+so a container that crashed before you applied anything has not cost you
+the work. `apply` brings them onto your branch and releases the refs that
+were holding them.
 
 Where your branch has moved too, it stops and hands you the decision:
 
 ```
-2 commit(s) fetched onto clone-work.
+Your branch is unchanged. The clone's 2 commit(s) are here, on clone-work.
 
-The current branch has moved too, so this is a decision:
-  git merge clone-work      # keep both histories
-  git rebase clone-work     # replay yours on top
-  git diff HEAD..clone-work # look first
+Both histories have moved, so combining them is a judgement about code
+this command has not read. Yours to make:
+  git log --oneline HEAD..clone-work   # what it did
+  git cherry-pick clone-work           # take it, if it is one commit
+  git merge clone-work                 # keeps both histories
+  git rebase clone-work                # replay yours on top
 ```
 
 It will not merge for you. An automatic merge is a judgement about code
 this tool has not read.
 
-Uncommitted changes in the clone are not fetched — git moves commits, not
-working trees — and `apply` says so rather than quietly bringing back less
-than you asked for.
+Uncommitted changes stay in the clone: `apply` moves commits, and
+committing is the act that says "this is work". It says so rather than
+quietly bringing back less than you asked for.
 
 **This works from a shallow clone too.** The new commits sit on top of a
 commit your repository already has, so fetching them needs nothing that

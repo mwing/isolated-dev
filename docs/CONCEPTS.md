@@ -202,6 +202,36 @@ dev clone diff     # what it did, read with your own tools
 dev clone apply    # bring it back
 ```
 
+**The work comes back on its own.** When a run ends — and again when the
+next one starts, in case the last was killed — the clone's commits are
+fetched into your project:
+
+```
+The clone has 2 commit(s) the project did not, now fetched into it.
+  git log --oneline refs/dev/clone/feat-parser/20260820-141233
+  dev clone apply    bring them onto your branch
+```
+
+Nothing you own moves. No branch changes, nothing is checked out, your
+working tree is untouched. The commits are simply *in your repository*
+rather than only in the clone — so a crashed session, a killed container or
+a clone you forgot about stops being a way to lose work.
+
+They are refs rather than branches, filed under the branch the work came
+from. That means they are invisible to `git branch`, impossible to check
+out by accident, never pushed to anyone, and safe from `git gc`. It also
+means recovery is ordinary git, with nothing held in a format only this
+tool understands:
+
+```sh
+git for-each-ref refs/dev/clone/            # every run captured
+git log --oneline refs/dev/clone/<branch>/<run>
+git branch recovered refs/dev/clone/<branch>/<run>
+```
+
+A run tells you when captures are waiting on your branch, and `dev clone
+apply` brings them in and releases the refs.
+
 `apply` fast-forwards when that needs no decision. Where your branch has
 moved too, it fetches to a branch and shows you the merge, rebase and diff
 options rather than choosing — an automatic merge is a judgement about code
