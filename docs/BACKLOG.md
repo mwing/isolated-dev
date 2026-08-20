@@ -391,6 +391,31 @@ worked around.
 
 ## P2 — later, and only if wanted
 
+### B28. Test the invariants, not the features — `todo`  *(do first)*
+
+The dangerous bugs in this codebase are increasingly composition failures
+rather than missing mitigations: reuse meeting branch changes, captures
+meeting wildcard semantics, a lossless fetch meeting non-unique names, a
+sandboxed clone meeting host-side git. The individual pieces are
+defensive; the pairs are not.
+
+So write the invariants down — eight to twelve of them — and test those
+adversarially rather than testing features:
+
+- an agent can never modify the source repository
+- an agent never receives git objects unrelated to its starting history
+- no successful run can make previously captured work unreachable
+- two simultaneous runs can never write the same git working tree
+- host git never executes configuration an agent controls
+- a project request can never widen access without a user decision
+
+Every finding of the last two reviews violates one of those and none
+violated a feature test — including the ones introduced while fixing
+something else. First rather than last: written before B25 and B26, these
+invariants are the tests those fixes should be verified against, and the
+thing most likely to catch the next composition failure before a reviewer
+does.
+
 ### B25. A clone hands over more history than the run needs — `todo`
 
 *Pre-release. Numbered late, placed here because it is a confidentiality
@@ -424,13 +449,19 @@ with 435M of history:
 | `file:// --single-branch --no-tags` | 4.21s | 263M | 183,344 |
 | the same, `--depth 50` | 1.63s | 118M | 11,709 |
 
-The smart transport costs about 3.7x the time and removes only 12% of the
-objects, because branches in a long-lived repository share almost all of
-their ancestry — the unique objects of *other* branches are what it
-removes, which is exactly the confidentiality win and barely any of the
-volume. Depth is what removes volume, and pairs naturally: single-branch
-plus a modest depth is faster than single-branch alone and carries 6% of
-the objects.
+The smart transport removes 12% of the objects, and that 12% is the whole
+point: it is precisely what is *not* reachable from the cloned branch —
+other branches' unique commits, deleted blobs, abandoned work. The figure
+is small because branches in a long-lived repository share nearly all
+their ancestry, not because the protection is partial. It removes exactly
+the data that should not be there.
+
+The 3.7x on time is 1.13s to 4.21s, which is not a number anyone waits
+for. There is no cost argument against this change.
+
+Depth is a separate axis and removes volume rather than exposure:
+single-branch plus a modest depth is faster than single-branch alone and
+carries 6% of the objects.
 
 That reopens the depth-default question shelved earlier, on different
 grounds: not "clones are large" but "a clone should carry the history the
@@ -493,29 +524,6 @@ mechanisms meeting.*
   never committed. It is not self-asserted by the repository — a hostile
   clone into the same path simply lacks it and inherits nothing — which is
   the objection that killed B2.
-
-### B28. Test the invariants, not the features — `todo`  *(shelved)*
-
-The dangerous bugs in this codebase are increasingly composition failures
-rather than missing mitigations: reuse meeting branch changes, captures
-meeting wildcard semantics, a lossless fetch meeting non-unique names, a
-sandboxed clone meeting host-side git. The individual pieces are
-defensive; the pairs are not.
-
-So write the invariants down — eight to twelve of them — and test those
-adversarially rather than testing features:
-
-- an agent can never modify the source repository
-- an agent never receives git objects unrelated to its starting history
-- no successful run can make previously captured work unreachable
-- two simultaneous runs can never write the same git working tree
-- host git never executes configuration an agent controls
-- a project request can never widen access without a user decision
-
-Every finding of the last two reviews violates one of those and none
-violated a feature test. Shelved rather than dropped: it is worth doing
-once the pre-release items above are closed, and it is the thing most
-likely to find the next one before someone else does.
 
 ### B14. Learning mode — `todo`
 
