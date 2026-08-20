@@ -89,6 +89,7 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 		// Also on the reuse path, so clones made before this existed are
 		// repaired rather than left as the one that still cannot commit.
 		res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
+		_ = recordProject(dest, projectDir)
 		return res, err
 	}
 
@@ -106,10 +107,47 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 	}
 
 	res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
+	_ = recordProject(dest, projectDir)
 
 	notes, err := carryUncommitted(ctx, run, projectDir, dest)
 	res.Notes = append(res.Notes, notes...)
 	return res, err
+}
+
+// ProjectFile is where a clone's project path is recorded: a sibling of the
+// clone directory, not a file inside it.
+//
+// Inside would be inside the bind mount, which is to say inside the
+// agent's reach — and the value's whole job is to be the one thing about
+// the clone that the clone did not choose. The container mounts the clone
+// directory alone, so a sibling is unreachable from it.
+func ProjectFile(clonePath string) string { return clonePath + ".project" }
+
+// recordProject notes which project a clone was made from.
+func recordProject(clonePath, projectDir string) error {
+	return os.WriteFile(ProjectFile(clonePath), []byte(projectDir+"\n"), 0o600)
+}
+
+// projectOf returns the recorded project directory, or "" when there is
+// none to trust.
+//
+// Absent is not an error to route around: it means containment cannot be
+// proved, and every caller of this treats unprovable as "holds work".
+// Clones made before this was recorded land there, which costs a refused
+// deletion and never a lost commit.
+func projectOf(clonePath string) string {
+	body, err := os.ReadFile(ProjectFile(clonePath))
+	if err != nil {
+		return ""
+	}
+	dir := strings.TrimSpace(string(body))
+	if dir == "" {
+		return ""
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 // ensureIdentity writes a committer identity into the clone's own config.
@@ -515,7 +553,16 @@ func Remove(path string) error {
 	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
 		return fmt.Errorf("clone: %s does not look like a clone; not removing it", path)
 	}
-	return os.RemoveAll(path)
+	if err := os.RemoveAll(path); err != nil {
+		return err
+	}
+	// The recorded project goes with it. Left behind, it would be adopted
+	// by whatever clone is made at this path next — which is fine while the
+	// path means the same project and wrong the moment it does not.
+	if err := os.Remove(ProjectFile(path)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 // State reports what a clone is holding: uncommitted changes, commits the
@@ -549,19 +596,23 @@ func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged
 		return dirty, unmerged, branch, shallow
 	}
 
-	// Read outside the quarantine, because the quarantine removes it: the
-	// stand-in config has no remote. Which is the uncomfortable part —
-	// this asks the clone where the project is, and the clone is what an
-	// agent has been writing to. B24 records the fix (the caller passes the
-	// project in) and it is a signature change through every caller of
-	// State, so it is the next increment rather than this one. Until then
-	// the code-execution class is closed and this trust is not.
-	origin, err := gitOutput(ctx, run, path, "remote", "get-url", "origin")
-	if err != nil {
-		// No origin to check against, so every candidate has to count.
+	// Where the project is comes from a file beside the clone, never from
+	// the clone's own config.
+	//
+	// Asking the clone was a data-loss path, not merely untidy: `git config
+	// remote.origin.url .` makes the containment check below compare the
+	// clone's commits against the clone itself, so every one of them reads
+	// as already safe and `dev clone rm` and `dev clone prune` delete them
+	// without --force. That is the shape B2 named — reading an identity out
+	// of the repository whose identity is in question — arriving as
+	// deletion rather than as confusion.
+	origin := projectOf(path)
+	if origin == "" {
+		// Nothing trustworthy to check against, so every candidate counts.
+		// Fail-closed: the cost is a refused deletion, and the alternative
+		// cost is a deleted commit.
 		return dirty, len(candidates), branch, shallow
 	}
-	origin = strings.TrimPrefix(strings.TrimSpace(origin), "file://")
 
 	for _, sha := range candidates {
 		sha = strings.TrimSpace(sha)

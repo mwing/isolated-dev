@@ -624,3 +624,64 @@ func TestAGitdirPointerIsRefusedNotWorkedAround(t *testing.T) {
 		t.Error("a clone read succeeded against an unexpected layout")
 	}
 }
+
+// `git config remote.origin.url .` made State compare the clone's commits
+// against the clone itself, so all of them read as already contained and
+// `dev clone rm` / `dev clone prune` deleted them without --force. Not
+// misplaced trust: deletion of the only copy of an agent's work.
+func TestAForgedOriginCannotMakeWorkLookSafeToDelete(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Work that exists only in the clone.
+	write(t, filepath.Join(dest, "agent.txt"), "work\n")
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "agent work"}} {
+		if _, err := git(ctx, run, dest, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, _, _ = State(ctx, run, dest); true {
+		if _, unmerged, _, _ := State(ctx, run, dest); unmerged != 1 {
+			t.Fatalf("unmerged = %d before forging, want 1", unmerged)
+		}
+	}
+
+	// The forgery.
+	if _, err := git(ctx, run, dest, "config", "remote.origin.url", "."); err != nil {
+		t.Fatal(err)
+	}
+	if _, unmerged, _, _ := State(ctx, run, dest); unmerged != 1 {
+		t.Fatalf("a forged origin hid %d unmerged commit(s) — they would be deleted", 1-unmerged+1)
+	}
+}
+
+// Clones made before the project was recorded cannot prove containment.
+// Unprovable has to mean "holds work": a refused deletion costs a command,
+// a wrong deletion costs the work.
+func TestAnUnrecordedProjectCountsAsHoldingWork(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dest, "agent.txt"), "work\n")
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "agent work"}} {
+		if _, err := git(ctx, run, dest, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Remove(ProjectFile(dest)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, unmerged, _, _ := State(ctx, run, dest); unmerged == 0 {
+		t.Fatal("a clone whose project is unknown reported nothing to lose")
+	}
+}
