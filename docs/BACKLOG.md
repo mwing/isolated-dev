@@ -710,6 +710,17 @@ wrong tool for part 3's dry run, for a quieter reason: sharing the user's
 real `.git` means an interrupt leaves rebase state and a moved `ORIG_HEAD`
 in their repository. `merge-tree` needs neither.
 
+**A workflow that argues for branch keying**, recorded because it changes
+the cost side of that deferral rather than restating it: incremental work
+on a long-lived feature, interleaved with other features. One slug-keyed
+clone means that feature's accumulated work shares a directory with
+everything else done in that project, and captures from several branches
+pile up in one namespace — so "what have I not finished on this branch?"
+has no clean answer. Keying the clone by branch, and the capture refs with
+it (`refs/dev/clone/<branch>/<timestamp>`), makes that question answerable
+by construction. The cost is still a fresh clone per branch, still
+unmeasured on a large repository.
+
 **Still open:** keying clones by project *and* branch (deferred until a
 fresh clone's cost is measured on a large repository); separating the
 human and agent clone keys, which share a slug today.

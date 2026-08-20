@@ -176,3 +176,40 @@ func TestCloneCommandsRunNoProgramTheCloneNamed(t *testing.T) {
 		t.Errorf("neither command reported the clone's commit:\n%s", all)
 	}
 }
+
+// Captures accumulate silently by design — nothing the user owns moves
+// when one is made, which is what makes them safe and also what makes them
+// easy to forget. A run says what is waiting, at the point it can still be
+// dealt with cheaply.
+func TestARunSaysWhenEarlierWorkIsUnapplied(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"}, {"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "work.txt", "work\n", "work from an earlier run")
+
+	if _, err := clone.Capture(ctx, h.env.Runner, project, clonePath, "earlier"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Starting another run is where it has to be said.
+	if _, err := prepareCloneDir(ctx, h.env, project, 0, h.stderr); err != nil {
+		t.Fatalf("prepare: %v\n%s", err, h.stderr.String())
+	}
+	got := h.stderr.String()
+	if !strings.Contains(got, "not on") || !strings.Contains(got, "dev clone apply") {
+		t.Errorf("a run did not mention unapplied work:\n%s", got)
+	}
+}

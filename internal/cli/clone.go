@@ -14,6 +14,21 @@ import (
 	"github.com/mwing/isolated-dev/internal/trust"
 )
 
+// warnUnappliedCaptures says what earlier runs left that is not on a branch.
+func warnUnappliedCaptures(ctx context.Context, env *Env, projectDir string) {
+	refs, err := clone.CapturedRefs(ctx, env.Runner, projectDir)
+	if err != nil || len(refs) == 0 {
+		return
+	}
+	newest := refs[len(refs)-1]
+	fmt.Fprintf(env.Stderr, "\n⚠  %d capture(s) from earlier runs are in this project but not on\n",
+		len(refs))
+	fmt.Fprintf(env.Stderr, "   any branch. They are safe — nothing removes them — but they are\n")
+	fmt.Fprintf(env.Stderr, "   also not in your working tree.\n")
+	fmt.Fprintf(env.Stderr, "     git log --oneline %s\n", newest)
+	fmt.Fprintf(env.Stderr, "     dev clone apply    bring them onto your branch\n\n")
+}
+
 // captureCloneWork brings whatever the clone holds into the project, under
 // a ref the tool owns, and says what arrived.
 //
@@ -104,6 +119,21 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 	if res.Path != "" {
 		captureCloneWork(ctx, env, projectDir, res.Path, captureID(time.Now())+"-recovered")
 	}
+
+	// Work from earlier runs that has not reached a branch. Said at the
+	// start of a run, because that is when it can still be dealt with
+	// cheaply — and because captures accumulate silently by design: nothing
+	// the user owns moves when one is made, which is the property that
+	// makes them safe and also the property that makes them easy to forget.
+	//
+	// A warning rather than a question. A prompt here would hang a scripted
+	// run with nobody present, which is the lesson B9 paid for, and B12's
+	// rule is that a stop names the flag that resolves it. There is nothing
+	// dangerous to stop for yet: consecutive runs in one clone build on
+	// each other, so the newest capture contains the older ones. That stops
+	// being true when a clone is replaced under unapplied work — which is
+	// part 2's problem, and part 2's condition list already has it.
+	warnUnappliedCaptures(ctx, env, projectDir)
 
 	// Now that every agent run makes one of these, the disk they take is
 	// the tool's doing and its business to report — before it is a surprise
