@@ -427,3 +427,66 @@ run `--offline`.
 **Dropped:** removing `dev new`. The conceptual-surface argument is fair,
 but scaffolding is in use and its removal is a product decision, not a
 security one.
+
+### B23. Clone lifecycle: make a run feel like a fresh clone — `todo`
+
+**The goal, stated as a feeling rather than a mechanism:** every run should
+behave as though a clone were made for it and the work merged back
+afterwards. No stale clone to discover, no branch to reconcile, nothing to
+reason about between runs. Today a clone is keyed by project path and lives
+until pruned, so all of that is the user's problem.
+
+**Why it is not simply "clone per run, merge, delete".** Combining two
+moved histories is a judgement about code this tool has not read — the same
+rule that makes `.devenv.yaml` a request and refuses an automatic merge in
+`dev clone apply`. And a clone removed after a merge that conflicted is
+work destroyed, which is the one irreversible thing here. So the merge
+cannot be automatic, and the delete cannot follow it unconditionally. The
+feeling has to be produced some other way.
+
+**Three sources of drift, and the goal has to survive all three:**
+
+1. *Reuse across branches.* Starting work on a new branch reuses the clone
+   made from the old one. Cost one real afternoon: an agent worked 64
+   commits behind on a branch nobody asked for, and the merge conflicted on
+   a 22,000-line lockfile already applied under a different hash. Currently
+   only reported — see the drift notes in `internal/clone` — which is a
+   stopgap, not the answer.
+
+2. *The project branch moving while the agent works.* This is the one that
+   makes "a fresh clone per run" insufficient on its own: the clone is
+   accurate when created and diverged by the time `apply` runs, because the
+   human committed in the meantime. Keying clones by branch does nothing
+   for it.
+
+3. *Uncommitted work in the clone*, which `apply` deliberately does not
+   move: `apply` moves commits, and committing is the act that says "this
+   is work".
+
+**Directions considered, none chosen:**
+
+- Key the clone by project *and branch*. Removes (1) by construction and
+  makes the drift note dead code; does nothing for (2). Costs a fresh clone
+  per branch, which on a large repository is not free — measure before
+  believing it is cheap. Makes `--clone-depth` more attractive, since a
+  short-lived clone needs less history.
+- Ephemeral per-run clone with an automatic merge. Delivers the feeling
+  exactly and collides head-on with the review rule above.
+- Automatic rebase of the clone's commits onto the moved branch when the
+  clone is clean and strictly behind. Tempting because it looks like it
+  cannot lose anything — until it conflicts, at which point it has stopped
+  half-done in a state nobody asked for.
+- Record the commit the clone was made from, so `apply` can say precisely
+  what moved on each side and offer the narrowest operation that fits. Does
+  not automate anything, but replaces "this is a decision" with "here is
+  the decision".
+
+**What would make this decidable:** the cost of a fresh clone of a large
+repository, measured rather than assumed; and an honest answer to whether
+any automatic history operation can be safe enough to perform unasked. If
+the answer to the second is no, then the goal has to be met by making the
+review fast and obvious rather than by removing it — which is a different
+piece of work, and a legitimate one.
+
+**Left open deliberately.** The desired outcome is agreed; the mechanism is
+not.
