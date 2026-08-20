@@ -262,6 +262,23 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 		notes = append(notes, "the clone is shallow")
 	}
 
+	// A clone is keyed by project path, not by branch, so starting work on
+	// a new branch reuses the clone made from the old one. That produced a
+	// real afternoon of confusion: an agent worked in a clone 64 commits
+	// behind, on a branch nobody had asked for, and the merge back
+	// conflicted on a 22,000-line lockfile that was already applied. The
+	// old note for this was "the clone is on a different commit than the
+	// project", which is true of almost every useful clone and so says
+	// nothing.
+	srcBranch := strings.TrimSpace(branchOf(ctx, run, src))
+	destBranch := strings.TrimSpace(branchOf(ctx, run, dest))
+	if srcBranch != "" && destBranch != "" && srcBranch != destBranch {
+		notes = append(notes, fmt.Sprintf(
+			"⚠  it is on %q and this project is on %q: work done here starts from "+
+				"the wrong branch", destBranch, srcBranch))
+		notes = append(notes, "   `dev clone rm --force` discards it so the next run clones afresh")
+	}
+
 	srcHead, err := gitOutput(ctx, run, src, "rev-parse", "HEAD")
 	if err != nil {
 		return notes, nil
@@ -270,15 +287,44 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 	if err != nil {
 		return notes, nil
 	}
-	if srcHead != destHead {
-		notes = append(notes, "the clone is on a different commit than the project")
+
+	// Whether the clone has ever seen where the project is now. Asked by
+	// object presence because the project's newer commits are not in the
+	// clone to compute a merge-base against.
+	if strings.TrimSpace(srcHead) != strings.TrimSpace(destHead) {
+		if _, err := git(ctx, run, dest, "cat-file", "-e",
+			strings.TrimSpace(srcHead)+"^{commit}"); err != nil {
+			behind := ""
+			if base, berr := gitOutput(ctx, run, dest, "rev-parse",
+				"origin/"+destBranch); berr == nil {
+				if n, nerr := gitOutput(ctx, run, src, "rev-list", "--count",
+					strings.TrimSpace(base)+"..HEAD"); nerr == nil {
+					behind = " (" + strings.TrimSpace(n) + " commit(s))"
+				}
+			}
+			notes = append(notes, fmt.Sprintf(
+				"⚠  the project has moved on since the clone was made%s, so what "+
+					"comes back will not fast-forward", behind))
+		} else {
+			notes = append(notes, "the clone is on a different commit than the project")
+		}
 	}
+
 	if status, err := gitOutput(ctx, run, dest, "status", "--porcelain"); err == nil {
 		if n := len(nonEmptyLines(status)); n > 0 {
 			notes = append(notes, fmt.Sprintf("%d uncommitted change(s) already in the clone", n))
 		}
 	}
 	return notes, nil
+}
+
+// branchOf is the checked-out branch name, empty on a detached HEAD.
+func branchOf(ctx context.Context, run runner.Runner, dir string) string {
+	out, err := gitOutput(ctx, run, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || strings.TrimSpace(out) == "HEAD" {
+		return ""
+	}
+	return out
 }
 
 // sameDir compares two paths after resolving symlinks.

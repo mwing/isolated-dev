@@ -407,3 +407,55 @@ func TestReusingAnOldCloneGivesItAnIdentity(t *testing.T) {
 		t.Fatalf("reusing the clone did not repair its identity: %q %v", got, err)
 	}
 }
+
+// A clone is keyed by project path, not by branch, so starting work on a
+// new branch reuses the clone made from the old one. That cost a real
+// afternoon: an agent worked in a clone 64 commits behind, on a branch
+// nobody had asked for, and the merge back conflicted on a 22,000-line
+// lockfile whose change was already applied. The note for it was "the
+// clone is on a different commit than the project", which is true of
+// almost every useful clone and so says nothing.
+func TestReusingACloneFromAnotherBranchSaysSo(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The project moves to another branch and gains commits, which is the
+	// ordinary shape of coming back to a project a week later.
+	for _, args := range [][]string{{"checkout", "-q", "-b", "other-branch"}} {
+		if _, err := git(ctx, run, src, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(src, "moved.txt"), "moved\n")
+	if _, err := git(ctx, run, src, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, run, src, "commit", "-qm", "work on the other branch"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Prepare(ctx, run, Options{Project: src, Dest: dest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(res.Notes, "\n")
+
+	if !strings.Contains(all, "other-branch") {
+		t.Errorf("the notes do not name the branch the project is on:\n%s", all)
+	}
+	if !strings.Contains(all, "wrong branch") {
+		t.Errorf("the notes do not say the clone starts from the wrong place:\n%s", all)
+	}
+	if !strings.Contains(all, "dev clone rm --force") {
+		t.Errorf("the notes do not say how to start afresh:\n%s", all)
+	}
+	if !strings.Contains(all, "moved on since the clone was made") {
+		t.Errorf("the notes do not say the project has moved:\n%s", all)
+	}
+}
