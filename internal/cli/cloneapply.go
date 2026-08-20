@@ -137,6 +137,18 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 		fmt.Fprintln(env.Stdout, strings.TrimSpace(out))
 	}
 
+	// Captures from runs that ended without anyone applying them. They are
+	// the same work, already in the project, so `apply` has to sweep them
+	// or it reports "nothing new" while they sit in a namespace the user
+	// has no reason to know about.
+	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project); rerr == nil && len(refs) > 0 {
+		fmt.Fprintf(env.Stdout, "%d capture(s) from earlier runs are already here:\n", len(refs))
+		for _, r := range refs {
+			fmt.Fprintf(env.Stdout, "  %s\n", r)
+		}
+		fmt.Fprintf(env.Stdout, "They are included below; `git log --oneline <ref>` reads one.\n\n")
+	}
+
 	ahead, err := projectGit(ctx, env, project, "rev-list", "--count", "HEAD.."+branch)
 	if err != nil {
 		return err
@@ -167,6 +179,14 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	}
 	fmt.Fprintf(env.Stdout, "Fast-forwarded onto %s commit(s) from the clone.\n",
 		strings.TrimSpace(ahead))
+	// The captures have landed on a branch now, so the refs are only
+	// pinning objects against gc. Dropped quietly: their whole purpose was
+	// to hold the work until this moment.
+	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project); rerr == nil {
+		for _, r := range refs {
+			_ = clone.DropCapture(ctx, env.Runner, project, r)
+		}
+	}
 	fmt.Fprintf(env.Stdout, "The clone still has them; `dev clone prune` removes it "+
 		"once the project has everything.\n")
 	return nil

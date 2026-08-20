@@ -319,6 +319,12 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		return err
 	}
 
+	// The console's own ending, reached whether the workload succeeded,
+	// failed or was interrupted.
+	if workspaceDir != "" {
+		captureCloneWork(ctx, env, p.Dir, workspaceDir, captureID(time.Now()))
+	}
+
 	summary, stopErr := finishRun(ctx, env, side, rec)
 	for _, line := range summary {
 		fmt.Fprintf(env.Stderr, "  %s\n", line)

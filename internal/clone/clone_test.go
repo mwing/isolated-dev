@@ -685,3 +685,107 @@ func TestAnUnrecordedProjectCountsAsHoldingWork(t *testing.T) {
 		t.Fatal("a clone whose project is unknown reported nothing to lose")
 	}
 }
+
+// Capture puts the clone's commits in the project without moving anything
+// the user owns, and says how many were new.
+func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := gitOutput(ctx, run, src, "rev-parse", "HEAD")
+
+	write(t, filepath.Join(dest, "agent.txt"), "work\n")
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "agent work"}} {
+		if _, err := git(ctx, run, dest, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A tag in the clone must not follow the fetch: tags feed `git
+	// describe` and release tooling in the user's own repository.
+	if _, err := git(ctx, run, dest, "tag", "-m", "release", "v9.9.9"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Capture(ctx, run, src, dest, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Commits != 1 || got.Ref != RefNamespace+"/run-1" {
+		t.Fatalf("capture = %+v, want 1 commit on %s/run-1", got, RefNamespace)
+	}
+
+	// The project has the commit...
+	if _, err := git(ctx, run, src, "cat-file", "-e", got.Ref+"^{commit}"); err != nil {
+		t.Errorf("the captured commit is not in the project: %v", err)
+	}
+	// ...and nothing the user owns has moved.
+	after, _ := gitOutput(ctx, run, src, "rev-parse", "HEAD")
+	if after != before {
+		t.Errorf("HEAD moved during a capture: %s -> %s", before, after)
+	}
+	branches, _ := gitOutput(ctx, run, src, "for-each-ref", "--format=%(refname)", "refs/heads")
+	if strings.Contains(branches, "clone") {
+		t.Errorf("a capture created a branch: %s", branches)
+	}
+	if tags, _ := gitOutput(ctx, run, src, "tag"); strings.Contains(tags, "v9.9.9") {
+		t.Error("a tag from the clone followed the fetch")
+	}
+
+	// Idempotent: capturing again with nothing new keeps one ref.
+	if _, err := Capture(ctx, run, src, dest, "run-2"); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := CapturedRefs(ctx, run, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 2 {
+		t.Logf("refs = %v", refs)
+	}
+
+	if err := DropCapture(ctx, run, src, got.Ref); err != nil {
+		t.Fatal(err)
+	}
+	refs, _ = CapturedRefs(ctx, run, src)
+	for _, r := range refs {
+		if r == got.Ref {
+			t.Error("a dropped capture is still there")
+		}
+	}
+}
+
+// A capture with nothing the project lacks leaves no ref: refs pin their
+// objects against gc forever, so an empty one is a leak with a name.
+func TestCaptureKeepsNoRefWhenThereIsNothingNew(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Capture(ctx, run, src, dest, "empty-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Ref != "" || got.Commits != 0 {
+		t.Fatalf("capture of an untouched clone = %+v, want nothing", got)
+	}
+	refs, _ := CapturedRefs(ctx, run, src)
+	if len(refs) != 0 {
+		t.Errorf("an empty capture left refs behind: %v", refs)
+	}
+}
+
+// The refuse-to-drop guard: only refs this tool owns.
+func TestDropRefusesRefsItDoesNotOwn(t *testing.T) {
+	src := gitRepo(t)
+	if err := DropCapture(context.Background(), runner.New(false), src, "refs/heads/main"); err == nil {
+		t.Fatal("dropped a ref outside the tool's namespace")
+	}
+}

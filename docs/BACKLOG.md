@@ -619,11 +619,16 @@ not.
 both ends, verified facts in the middle, and no automatic history combine
 ever:
 
-- *Close the loop at run end.* When a run leaves new commits, fetch them
-  into the project automatically — the lossless half of today's `apply` —
-  and report what came out. This is `applyClone`'s first half relocated,
-  and it delivers most of the felt benefit for a fraction of the risk.
-  **Do this one first, and live with it before building the rest.**
+- *Close the loop at run end.* — **done.** A run's commits are fetched into
+  the project under `refs/dev/clone/<timestamp>`: reachable and safe from
+  `gc`, but not a branch, so nothing the user owns moves and nothing is
+  checked out. It happens at both ends, because a session killed by a crash
+  or an OOM never reaches its own ending — the start-of-run capture is the
+  recovery path, and is free because the operation is idempotent. Empty
+  captures leave no ref (a ref pins its objects forever), `apply` sweeps the
+  namespace and drops the refs once the work is on a branch, and a failed
+  capture warns rather than failing a run that worked. `--no-tags`, so a
+  tag in a clone cannot reach the user's release tooling.
 - *Refresh a provably-empty clone at run start*, so a completed round trip
   leaves nothing to discover. This is where all the data-loss risk is; see
   the conditions below.

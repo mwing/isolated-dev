@@ -302,6 +302,12 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				opts.AuthEnv = resolved
 			}
 
+			// Close the loop however the run ends, including badly: the
+			// commits are worth just as much after a crash, and more.
+			if opts.Workspace != "" && !dryRun {
+				defer captureCloneWork(cmd.Context(), env, opts.Project,
+					opts.Workspace, captureID(time.Now()))
+			}
 			return runAgent(cmd.Context(), env, cfg, opts, rebuild, dryRun, notifyMode)
 		},
 	}

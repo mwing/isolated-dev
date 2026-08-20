@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/mwing/isolated-dev/internal/clone"
 	"github.com/mwing/isolated-dev/internal/config"
@@ -12,6 +13,46 @@ import (
 	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
+
+// captureCloneWork brings whatever the clone holds into the project, under
+// a ref the tool owns, and says what arrived.
+//
+// Called at both ends of a run. At the end it closes the loop: the commits
+// are in the project without anything the user owns having moved. At the
+// start it is the recovery path — a session killed by a crash, an OOM or a
+// closed laptop never reached its own ending, and its work would otherwise
+// sit in the clone until somebody noticed. The operation is idempotent and
+// lossless, so doing it twice costs nothing and doing it early costs
+// nothing either.
+//
+// Never fatal. This is bookkeeping around someone else's run, and a run
+// that worked must not be reported as failed because the capture did not.
+func captureCloneWork(ctx context.Context, env *Env, projectDir, clonePath, id string) {
+	if clonePath == "" {
+		return
+	}
+	got, err := clone.Capture(ctx, env.Runner, projectDir, clonePath, id)
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "⚠  could not capture the clone's work: %v\n", err)
+		fmt.Fprintf(env.Stderr, "   It is still in %s.\n", clonePath)
+		return
+	}
+	if got.Commits == 0 {
+		return
+	}
+	fmt.Fprintf(env.Stderr, "\nThe clone has %d commit(s) the project did not, now fetched into it.\n",
+		got.Commits)
+	fmt.Fprintf(env.Stderr, "  git log --oneline %s\n", got.Ref)
+	fmt.Fprintf(env.Stderr, "  dev clone apply    bring them onto your branch\n")
+}
+
+// captureID names a capture. Time-based so the refs sort in the order the
+// runs happened, and unique per run so two runs before one apply cannot
+// overwrite each other — which is the bug that made a pair of lossless
+// operations compose into a lossy loop.
+func captureID(t time.Time) string {
+	return t.UTC().Format("20060102-150405")
+}
 
 // prepareCloneDir makes the private clone for a run and returns the
 // directory to mount, or "" to stay in the working tree.
@@ -58,6 +99,12 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 		fmt.Fprintf(out, "Review:    dev clone diff\n")
 		fmt.Fprintf(out, "Bring back: dev clone apply\n")
 	}
+	// Whatever an earlier run left behind, before this one starts writing
+	// over the top of it.
+	if res.Path != "" {
+		captureCloneWork(ctx, env, projectDir, res.Path, captureID(time.Now())+"-recovered")
+	}
+
 	// Now that every agent run makes one of these, the disk they take is
 	// the tool's doing and its business to report — before it is a surprise
 	// rather than after.
