@@ -490,3 +490,24 @@ piece of work, and a legitimate one.
 
 **Left open deliberately.** The desired outcome is agreed; the mechanism is
 not.
+
+**Proposed mechanism:** `docs/CLONE-LIFECYCLE.md` — lossless automation at
+both ends (refresh provably-empty clones at run start, fetch into a
+tool-owned ref namespace and summarize at run end), `git merge-tree` to
+report whether the combine would conflict without performing it, and no
+automatic history combine ever. Branch keying deferred until clone cost is
+measured.
+
+Review of that proposal found a second condition the goal has to meet, and
+it is worth stating here rather than only there: lossless is necessary and
+not sufficient. **The clone's `.git` is untrusted input** — an agent writes
+to it freely, and the host runs git against it. Verified during review: a
+`core.fsmonitor` in the clone's config executes on the host during the
+`status` that `State()` already runs; `refs/replace` makes a host-side
+review show benign content while the fetch delivers the real commit; and
+`State()` reads as "empty" — the condition for deleting a clone — after a
+`git stash`, a forged `refs/remotes/*`, or a corrupt config. Those are live
+exposures in shipped code, not objections to the plan; automating the
+lifecycle is what turns them from user-initiated into unattended. The
+hardened-git prerequisite in that document is the first piece of work
+regardless of whether the rest is built.
