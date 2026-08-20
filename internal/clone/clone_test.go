@@ -710,7 +710,7 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Capture(ctx, run, src, dest, "main", "run-1")
+	got, err := Capture(ctx, run, src, dest, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 	}
 
 	// Idempotent: capturing again with nothing new keeps one ref.
-	if _, err := Capture(ctx, run, src, dest, "main", "run-2"); err != nil {
+	if _, err := Capture(ctx, run, src, dest, "run-2"); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := CapturedRefs(ctx, run, src, "main")
@@ -769,7 +769,7 @@ func TestCaptureKeepsNoRefWhenThereIsNothingNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Capture(ctx, run, src, dest, "main", "empty-run")
+	got, err := Capture(ctx, run, src, dest, "empty-run")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -790,55 +790,74 @@ func TestDropRefusesRefsItDoesNotOwn(t *testing.T) {
 	}
 }
 
-// "What have I not finished on this branch?" has to be answerable without
-// reading timestamps and guessing, which is what one flat namespace forces
-// when a long-lived feature is interleaved with other work.
-func TestCapturesAreKeptPerBranch(t *testing.T) {
+// A run lasts minutes and people switch branches during them. Asking the
+// host which branch it is on when the agent finishes answers a question
+// about the human, not about the run — and files the work under a branch it
+// never came from. The provenance is recorded when the clone is made.
+func TestCaptureUsesTheBranchTheRunStartedFrom(t *testing.T) {
 	src := gitRepo(t)
-	dest := filepath.Join(t.TempDir(), "clone")
 	run := runner.New(false)
 	ctx := context.Background()
+	if _, err := git(ctx, run, src, "checkout", "-q", "-b", "feature/long-lived"); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "clone")
 	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
 		t.Fatal(err)
 	}
-	commit := func(f, m string) {
-		write(t, filepath.Join(dest, f), m+"\n")
-		if _, err := git(ctx, run, dest, "add", "-A"); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := git(ctx, run, dest, "commit", "-qm", m); err != nil {
+	if got := ProvenanceOf(dest); got.Branch != "feature/long-lived" || got.Base == "" {
+		t.Fatalf("provenance = %+v, want the branch and commit the clone was made from", got)
+	}
+
+	write(t, filepath.Join(dest, "a.txt"), "agent work\n")
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "agent work"}} {
+		if _, err := git(ctx, run, dest, args...); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	commit("a.txt", "feature work")
-	if _, err := Capture(ctx, run, src, dest, "feat/long-lived", "run-1"); err != nil {
-		t.Fatal(err)
-	}
-	commit("b.txt", "other work")
-	if _, err := Capture(ctx, run, src, dest, "hotfix", "run-2"); err != nil {
+	// The human moves on while the agent is still working.
+	if _, err := git(ctx, run, src, "checkout", "-q", "-b", "something-else"); err != nil {
 		t.Fatal(err)
 	}
 
-	feat, err := CapturedRefs(ctx, run, src, "feat/long-lived")
+	got, err := Capture(ctx, run, src, dest, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(feat) != 1 {
-		t.Errorf("the feature branch has %d capture(s), want its own 1: %v", len(feat), feat)
+	if want := CaptureRef("feature/long-lived", "run-1"); got.Ref != want {
+		t.Fatalf("capture filed at %s, want %s — the branch the run came from",
+			got.Ref, want)
 	}
-	all, _ := CapturedRefs(ctx, run, src, "")
-	if len(all) != 2 {
-		t.Errorf("across branches = %v, want both", all)
+	if strings.Contains(got.Ref, "something-else") {
+		t.Error("the capture was filed under the branch the human switched to")
 	}
 
-	// A slash in a branch name cannot become a ref directory, or a branch
-	// called `feat` and one called `feat/x` could not both have captures:
-	// git refuses a ref that is both a file and a directory.
-	if strings.Contains(strings.TrimPrefix(feat[0], RefNamespace+"/"), "/run-1") == false {
-		t.Errorf("unexpected ref shape: %s", feat[0])
+	// And it is findable by that branch.
+	refs, err := CapturedRefs(ctx, run, src, "feature/long-lived")
+	if err != nil || len(refs) != 1 {
+		t.Errorf("the feature branch's captures = %v (%v)", refs, err)
 	}
-	if strings.Count(feat[0], "/") != strings.Count(RefNamespace+"/x/y", "/") {
-		t.Errorf("branch was not flattened into one segment: %s", feat[0])
+}
+
+// Flattening a branch to readable characters is lossy: feature/foo,
+// feature-foo and feature@foo all reduce to the same thing, and two of the
+// user's branches sharing a namespace would file one's unapplied work under
+// the other's name.
+func TestBranchSegmentsDoNotCollide(t *testing.T) {
+	seen := map[string]string{}
+	for _, b := range []string{
+		"feature/foo", "feature-foo", "feature@foo", "feature.foo",
+		"feature/foo/bar", "Feature/Foo",
+	} {
+		got := flattenBranch(b)
+		if prev, dup := seen[got]; dup {
+			t.Errorf("%q and %q both produce %q", prev, b, got)
+		}
+		seen[got] = b
+		if !strings.HasPrefix(got, "feature") && !strings.HasPrefix(got, "Feature") {
+			t.Errorf("%q lost its readable prefix: %q", b, got)
+		}
 	}
 }

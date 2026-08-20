@@ -16,6 +16,8 @@ import (
 
 // warnUnappliedCaptures says what earlier runs left that is not on a branch.
 func warnUnappliedCaptures(ctx context.Context, env *Env, projectDir string) {
+	// What is unapplied for the branch this project is on now, which is
+	// the question someone standing on it is asking.
 	branch := clone.CurrentBranch(ctx, env.Runner, projectDir)
 	refs, err := clone.CapturedRefs(ctx, env.Runner, projectDir, branch)
 	if err != nil || len(refs) == 0 {
@@ -47,8 +49,9 @@ func captureCloneWork(ctx context.Context, env *Env, projectDir, clonePath, id s
 	if clonePath == "" {
 		return
 	}
-	branch := clone.CurrentBranch(ctx, env.Runner, projectDir)
-	got, err := clone.Capture(ctx, env.Runner, projectDir, clonePath, branch, id)
+	// The branch comes from what was recorded when the clone was made, not
+	// from wherever the host has moved to since — Capture reads it.
+	got, err := clone.Capture(ctx, env.Runner, projectDir, clonePath, id)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "⚠  could not capture the clone's work: %v\n", err)
 		fmt.Fprintf(env.Stderr, "   It is still in %s.\n", clonePath)

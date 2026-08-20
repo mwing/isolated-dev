@@ -2,6 +2,8 @@ package clone
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -42,12 +44,14 @@ type Captured struct {
 //
 // Nothing is checked out and no branch moves: the commits are simply in the
 // project rather than only in the clone.
-func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, branch, id string) (Captured, error) {
+func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, id string) (Captured, error) {
 	var out Captured
 	if id == "" {
 		return out, fmt.Errorf("clone: a capture needs an id")
 	}
-	ref := CaptureRef(branch, id)
+	// The branch the run started from, not whatever the host is on now.
+	// A run lasts minutes and people switch branches during them.
+	ref := CaptureRef(ProvenanceOf(clonePath).Branch, id)
 
 	// The fetch runs in the project but reads the clone, starting
 	// upload-pack inside it — so the clone's config is set aside for the
@@ -117,11 +121,17 @@ func flattenBranch(branch string) string {
 			b.WriteRune('-')
 		}
 	}
-	out := strings.Trim(b.String(), "-.")
-	if out == "" {
-		return "detached"
+	readable := strings.Trim(b.String(), "-.")
+	if readable == "" {
+		readable = "branch"
 	}
-	return out
+	// A short digest of the original, because the readable part is lossy:
+	// feature/foo, feature-foo and feature@foo all flatten to the same
+	// thing, and two of the user's branches sharing a namespace would file
+	// one branch's unapplied work under another's name. The digest makes
+	// the segment unique while the prefix keeps it greppable.
+	sum := sha256.Sum256([]byte(branch))
+	return readable + "-" + hex.EncodeToString(sum[:3])
 }
 
 // CapturedRefs lists the captures the project holds for one branch, oldest

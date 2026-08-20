@@ -89,7 +89,11 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 		// Also on the reuse path, so clones made before this existed are
 		// repaired rather than left as the one that still cannot commit.
 		res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
-		_ = recordProject(dest, projectDir)
+		_ = recordProvenance(dest, Provenance{
+			Project: projectDir,
+			Branch:  CurrentBranch(ctx, run, projectDir),
+			Base:    headOf(ctx, run, projectDir),
+		})
 		return res, err
 	}
 
@@ -107,7 +111,11 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 	}
 
 	res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
-	_ = recordProject(dest, projectDir)
+	_ = recordProvenance(dest, Provenance{
+		Project: projectDir,
+		Branch:  CurrentBranch(ctx, run, projectDir),
+		Base:    headOf(ctx, run, projectDir),
+	})
 
 	notes, err := carryUncommitted(ctx, run, projectDir, dest)
 	res.Notes = append(res.Notes, notes...)
@@ -123,9 +131,56 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 // directory alone, so a sibling is unreachable from it.
 func ProjectFile(clonePath string) string { return clonePath + ".project" }
 
-// recordProject notes which project a clone was made from.
-func recordProject(clonePath, projectDir string) error {
-	return os.WriteFile(ProjectFile(clonePath), []byte(projectDir+"\n"), 0o600)
+// Provenance is what a clone was made from, recorded when it was made.
+//
+// The branch matters as much as the path, and it has to be read here
+// rather than from the host at capture time. A run lasts minutes and a
+// person switches branches during them: asking "what branch is the project
+// on?" when the agent finishes answers a question about the human, not
+// about the run, and files the work under a branch it never came from.
+type Provenance struct {
+	Project string
+	Branch  string
+	Base    string
+}
+
+// recordProvenance notes what a clone was made from, beside the clone.
+//
+// Beside, never inside: inside is inside the bind mount, and the whole
+// value of this record is that it is the one thing about a clone the clone
+// did not choose.
+func recordProvenance(clonePath string, p Provenance) error {
+	body := fmt.Sprintf("project=%s\nbranch=%s\nbase=%s\n", p.Project, p.Branch, p.Base)
+	return os.WriteFile(ProjectFile(clonePath), []byte(body), 0o600)
+}
+
+// ProvenanceOf reads what was recorded, tolerating the single-line form
+// earlier versions wrote.
+func ProvenanceOf(clonePath string) Provenance {
+	body, err := os.ReadFile(ProjectFile(clonePath))
+	if err != nil {
+		return Provenance{}
+	}
+	text := strings.TrimSpace(string(body))
+	if !strings.Contains(text, "=") {
+		return Provenance{Project: text}
+	}
+	var out Provenance
+	for _, line := range strings.Split(text, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "project":
+			out.Project = value
+		case "branch":
+			out.Branch = value
+		case "base":
+			out.Base = value
+		}
+	}
+	return out
 }
 
 // projectOf returns the recorded project directory, or "" when there is
@@ -136,11 +191,7 @@ func recordProject(clonePath, projectDir string) error {
 // Clones made before this was recorded land there, which costs a refused
 // deletion and never a lost commit.
 func projectOf(clonePath string) string {
-	body, err := os.ReadFile(ProjectFile(clonePath))
-	if err != nil {
-		return ""
-	}
-	dir := strings.TrimSpace(string(body))
+	dir := ProvenanceOf(clonePath).Project
 	if dir == "" {
 		return ""
 	}
@@ -628,4 +679,14 @@ func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged
 		}
 	}
 	return dirty, unmerged, branch, shallow
+}
+
+// headOf is the project's commit when a clone was made, recorded so a
+// later capture can say what it was based on without asking the clone.
+func headOf(ctx context.Context, run runner.Runner, dir string) string {
+	out, err := gitOutput(ctx, run, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
