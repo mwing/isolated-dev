@@ -18,6 +18,12 @@ func gitRepo(t *testing.T) string {
 	ctx := context.Background()
 	for _, args := range [][]string{
 		{"init", "-q"},
+		// Named explicitly: git's default branch is a host setting, and a
+		// test that assumes "main" passes where it was written and fails
+		// wherever the default is "master". symbolic-ref rather than
+		// `init -b`, which needs a newer git than this has any reason to
+		// require.
+		{"symbolic-ref", "HEAD", "refs/heads/main"},
 		{"config", "user.email", "t@example.com"},
 		{"config", "user.name", "t"},
 		// Signing is the runner's preference, not this test's.
