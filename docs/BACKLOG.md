@@ -710,6 +710,24 @@ wrong tool for part 3's dry run, for a quieter reason: sharing the user's
 real `.git` means an interrupt leaves rebase state and a moved `ORIG_HEAD`
 in their repository. `merge-tree` needs neither.
 
+**Capture refs are keyed by branch — done.** `refs/dev/clone/<branch>/<id>`,
+so "what have I not finished on this branch?" is answerable by construction
+rather than by reading timestamps. Done now precisely because the feature
+is unused: changing the ref layout later would mean migrating refs holding
+work, and the argument for doing it at all only appears once someone has
+long-lived work to lose track of.
+
+The branch is flattened into one path segment. Git refuses a ref that is
+both a file and a directory, so `refs/dev/clone/feat/<id>` and
+`refs/dev/clone/feat/foo/<id>` could not coexist — a collision between two
+of the user's own branches, and the least acceptable kind.
+
+**Not done: keying the clone directory by branch.** Same idea, different
+cost. Existing clones sit at slug-keyed paths, so changing that orphans
+them — which is a migration, not a rename — and the fresh-clone cost that
+deferred it is still unmeasured. The refs were free to fix; the directories
+are not.
+
 **A workflow that argues for branch keying**, recorded because it changes
 the cost side of that deferral rather than restating it: incremental work
 on a long-lived feature, interleaved with other features. One slug-keyed

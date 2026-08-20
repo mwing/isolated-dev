@@ -42,12 +42,12 @@ type Captured struct {
 //
 // Nothing is checked out and no branch moves: the commits are simply in the
 // project rather than only in the clone.
-func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, id string) (Captured, error) {
+func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, branch, id string) (Captured, error) {
 	var out Captured
 	if id == "" {
 		return out, fmt.Errorf("clone: a capture needs an id")
 	}
-	ref := RefNamespace + "/" + id
+	ref := CaptureRef(branch, id)
 
 	// The fetch runs in the project but reads the clone, starting
 	// upload-pack inside it — so the clone's config is set aside for the
@@ -83,13 +83,68 @@ func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, id s
 	return Captured{Ref: ref, Commits: n}, nil
 }
 
-// CapturedRefs lists the captures the project is holding, oldest first.
-func CapturedRefs(ctx context.Context, run runner.Runner, projectDir string) ([]string, error) {
-	out, err := gitOutput(ctx, run, projectDir, "for-each-ref", "--format=%(refname)", RefNamespace)
+// CaptureRef is where a run's work lands: under the branch it was made
+// from, then the run.
+//
+// Keyed by branch because the question people actually ask is "what have I
+// not finished on this branch?", and one flat namespace answers it only by
+// reading timestamps and guessing. Long-lived feature work interleaved with
+// other features is the case that makes a flat namespace useless — the
+// captures pile up together and nothing distinguishes them.
+//
+// The branch is flattened into one path segment. Git refuses a ref that is
+// both a file and a directory, so `refs/dev/clone/feat/<id>` and
+// `refs/dev/clone/feat/foo/<id>` could not coexist — which is a collision
+// between two of the user's own branches, and the least acceptable kind.
+func CaptureRef(branch, id string) string {
+	return RefNamespace + "/" + flattenBranch(branch) + "/" + id
+}
+
+// flattenBranch reduces a branch name to one ref-safe path segment.
+func flattenBranch(branch string) string {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || branch == "HEAD" {
+		return "detached"
+	}
+	var b strings.Builder
+	for _, r := range branch {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '.' || r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-.")
+	if out == "" {
+		return "detached"
+	}
+	return out
+}
+
+// CapturedRefs lists the captures the project holds for one branch, oldest
+// first. An empty branch lists every branch's.
+func CapturedRefs(ctx context.Context, run runner.Runner, projectDir, branch string) ([]string, error) {
+	scope := RefNamespace
+	if branch != "" {
+		scope += "/" + flattenBranch(branch)
+	}
+	out, err := gitOutput(ctx, run, projectDir, "for-each-ref", "--format=%(refname)", scope)
 	if err != nil {
 		return nil, err
 	}
 	return nonEmptyLines(out), nil
+}
+
+// CurrentBranch is the branch a project is on, empty when detached.
+func CurrentBranch(ctx context.Context, run runner.Runner, projectDir string) string {
+	out, err := gitOutput(ctx, run, projectDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || strings.TrimSpace(out) == "HEAD" {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // DropCapture removes a ref once its work has landed, releasing the objects

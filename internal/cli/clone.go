@@ -16,14 +16,15 @@ import (
 
 // warnUnappliedCaptures says what earlier runs left that is not on a branch.
 func warnUnappliedCaptures(ctx context.Context, env *Env, projectDir string) {
-	refs, err := clone.CapturedRefs(ctx, env.Runner, projectDir)
+	branch := clone.CurrentBranch(ctx, env.Runner, projectDir)
+	refs, err := clone.CapturedRefs(ctx, env.Runner, projectDir, branch)
 	if err != nil || len(refs) == 0 {
 		return
 	}
 	newest := refs[len(refs)-1]
-	fmt.Fprintf(env.Stderr, "\n⚠  %d capture(s) from earlier runs are in this project but not on\n",
+	fmt.Fprintf(env.Stderr, "\n⚠  %d capture(s) from earlier runs on this branch are in the project\n",
 		len(refs))
-	fmt.Fprintf(env.Stderr, "   any branch. They are safe — nothing removes them — but they are\n")
+	fmt.Fprintf(env.Stderr, "   but not on it. They are safe — nothing removes them — but they are\n")
 	fmt.Fprintf(env.Stderr, "   also not in your working tree.\n")
 	fmt.Fprintf(env.Stderr, "     git log --oneline %s\n", newest)
 	fmt.Fprintf(env.Stderr, "     dev clone apply    bring them onto your branch\n\n")
@@ -46,7 +47,8 @@ func captureCloneWork(ctx context.Context, env *Env, projectDir, clonePath, id s
 	if clonePath == "" {
 		return
 	}
-	got, err := clone.Capture(ctx, env.Runner, projectDir, clonePath, id)
+	branch := clone.CurrentBranch(ctx, env.Runner, projectDir)
+	got, err := clone.Capture(ctx, env.Runner, projectDir, clonePath, branch, id)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "⚠  could not capture the clone's work: %v\n", err)
 		fmt.Fprintf(env.Stderr, "   It is still in %s.\n", clonePath)

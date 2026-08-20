@@ -141,7 +141,7 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	// the same work, already in the project, so `apply` has to sweep them
 	// or it reports "nothing new" while they sit in a namespace the user
 	// has no reason to know about.
-	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project); rerr == nil && len(refs) > 0 {
+	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project, clone.CurrentBranch(ctx, env.Runner, project)); rerr == nil && len(refs) > 0 {
 		fmt.Fprintf(env.Stdout, "%d capture(s) from earlier runs are already here:\n", len(refs))
 		for _, r := range refs {
 			fmt.Fprintf(env.Stdout, "  %s\n", r)
@@ -182,7 +182,7 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	// The captures have landed on a branch now, so the refs are only
 	// pinning objects against gc. Dropped quietly: their whole purpose was
 	// to hold the work until this moment.
-	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project); rerr == nil {
+	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project, clone.CurrentBranch(ctx, env.Runner, project)); rerr == nil {
 		for _, r := range refs {
 			_ = clone.DropCapture(ctx, env.Runner, project, r)
 		}

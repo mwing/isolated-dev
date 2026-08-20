@@ -200,7 +200,7 @@ func TestARunSaysWhenEarlierWorkIsUnapplied(t *testing.T) {
 	clonePath := cloneAt(t, h, project)
 	commitIn(t, clonePath, "work.txt", "work\n", "work from an earlier run")
 
-	if _, err := clone.Capture(ctx, h.env.Runner, project, clonePath, "earlier"); err != nil {
+	if _, err := clone.Capture(ctx, h.env.Runner, project, clonePath, "main", "earlier"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -710,12 +710,12 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Capture(ctx, run, src, dest, "run-1")
+	got, err := Capture(ctx, run, src, dest, "main", "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Commits != 1 || got.Ref != RefNamespace+"/run-1" {
-		t.Fatalf("capture = %+v, want 1 commit on %s/run-1", got, RefNamespace)
+	if got.Commits != 1 || got.Ref != CaptureRef("main", "run-1") {
+		t.Fatalf("capture = %+v, want 1 commit on %s", got, CaptureRef("main", "run-1"))
 	}
 
 	// The project has the commit...
@@ -736,10 +736,10 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 	}
 
 	// Idempotent: capturing again with nothing new keeps one ref.
-	if _, err := Capture(ctx, run, src, dest, "run-2"); err != nil {
+	if _, err := Capture(ctx, run, src, dest, "main", "run-2"); err != nil {
 		t.Fatal(err)
 	}
-	refs, err := CapturedRefs(ctx, run, src)
+	refs, err := CapturedRefs(ctx, run, src, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +750,7 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 	if err := DropCapture(ctx, run, src, got.Ref); err != nil {
 		t.Fatal(err)
 	}
-	refs, _ = CapturedRefs(ctx, run, src)
+	refs, _ = CapturedRefs(ctx, run, src, "main")
 	for _, r := range refs {
 		if r == got.Ref {
 			t.Error("a dropped capture is still there")
@@ -769,14 +769,14 @@ func TestCaptureKeepsNoRefWhenThereIsNothingNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Capture(ctx, run, src, dest, "empty-run")
+	got, err := Capture(ctx, run, src, dest, "main", "empty-run")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Ref != "" || got.Commits != 0 {
 		t.Fatalf("capture of an untouched clone = %+v, want nothing", got)
 	}
-	refs, _ := CapturedRefs(ctx, run, src)
+	refs, _ := CapturedRefs(ctx, run, src, "main")
 	if len(refs) != 0 {
 		t.Errorf("an empty capture left refs behind: %v", refs)
 	}
@@ -787,5 +787,58 @@ func TestDropRefusesRefsItDoesNotOwn(t *testing.T) {
 	src := gitRepo(t)
 	if err := DropCapture(context.Background(), runner.New(false), src, "refs/heads/main"); err == nil {
 		t.Fatal("dropped a ref outside the tool's namespace")
+	}
+}
+
+// "What have I not finished on this branch?" has to be answerable without
+// reading timestamps and guessing, which is what one flat namespace forces
+// when a long-lived feature is interleaved with other work.
+func TestCapturesAreKeptPerBranch(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	commit := func(f, m string) {
+		write(t, filepath.Join(dest, f), m+"\n")
+		if _, err := git(ctx, run, dest, "add", "-A"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := git(ctx, run, dest, "commit", "-qm", m); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	commit("a.txt", "feature work")
+	if _, err := Capture(ctx, run, src, dest, "feat/long-lived", "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	commit("b.txt", "other work")
+	if _, err := Capture(ctx, run, src, dest, "hotfix", "run-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	feat, err := CapturedRefs(ctx, run, src, "feat/long-lived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feat) != 1 {
+		t.Errorf("the feature branch has %d capture(s), want its own 1: %v", len(feat), feat)
+	}
+	all, _ := CapturedRefs(ctx, run, src, "")
+	if len(all) != 2 {
+		t.Errorf("across branches = %v, want both", all)
+	}
+
+	// A slash in a branch name cannot become a ref directory, or a branch
+	// called `feat` and one called `feat/x` could not both have captures:
+	// git refuses a ref that is both a file and a directory.
+	if strings.Contains(strings.TrimPrefix(feat[0], RefNamespace+"/"), "/run-1") == false {
+		t.Errorf("unexpected ref shape: %s", feat[0])
+	}
+	if strings.Count(feat[0], "/") != strings.Count(RefNamespace+"/x/y", "/") {
+		t.Errorf("branch was not flattened into one segment: %s", feat[0])
 	}
 }
