@@ -265,6 +265,42 @@ already broke this way once.
 
 ---
 
+### B24. Host-side git against a clone is unsandboxed — `todo`
+
+*Numbered after B23 and placed here because it is a live exposure in
+shipped code, not forward-looking work.*
+
+The clone's `.git` is attacker-controlled: an agent has unsupervised write
+access to it, and the host then runs git against it, as the user, with
+their SSH keys in reach — which is what `--clone` exists to protect.
+Verified on git 2.47.3, in a clone's own config:
+
+```
+core.fsmonitor = ./pwn.sh  +  git status --porcelain  ->  PAYLOAD-RAN
+same, with -c core.fsmonitor=                         ->  (did not run)
+```
+
+`status --porcelain` is what `State()` and `driftNotes` already run, and
+`dev clone diff` runs `diff HEAD`. `filter.*.clean`, `diff.*.textconv`,
+`core.hooksPath`, `core.pager` and `alias.*` are the same class, and
+`[include] path = ~/.gitconfig` pulls back exactly the settings
+`gitConfigCarried` filters on the way *into* the container. That filter
+reads as though the problem were solved; it is solved in one direction.
+
+Two more findings of the same shape: `git replace` makes a host-side
+review show benign content while a fetch delivers the real commit, so
+review has to report from the project after the fetch rather than from the
+clone before it; and a ref name may begin with `-`, so no string read out
+of a clone may ever be passed to git as an argument.
+
+**Done when:** one hardened helper is the only way host code runs git
+against a clone — repo-config quarantined (with a restore that survives a
+crash and a signal, since a half-quarantined clone has lost its identity
+and its remote), hardened flags set anyway, clone-derived strings never
+used as arguments, output sanitized for control characters, and anomalies
+like `refs/replace/*` or an unexpected `.git/shallow` reported rather than
+worked around.
+
 ## P2 — later, and only if wanted
 
 ### B14. Learning mode — `todo`
@@ -491,23 +527,50 @@ piece of work, and a legitimate one.
 **Left open deliberately.** The desired outcome is agreed; the mechanism is
 not.
 
-**Proposed mechanism:** `docs/CLONE-LIFECYCLE.md` — lossless automation at
-both ends (refresh provably-empty clones at run start, fetch into a
-tool-owned ref namespace and summarize at run end), `git merge-tree` to
-report whether the combine would conflict without performing it, and no
-automatic history combine ever. Branch keying deferred until clone cost is
-measured.
+**Proposed mechanism, reordered after review.** Lossless automation at
+both ends, verified facts in the middle, and no automatic history combine
+ever:
 
-Review of that proposal found a second condition the goal has to meet, and
-it is worth stating here rather than only there: lossless is necessary and
-not sufficient. **The clone's `.git` is untrusted input** — an agent writes
-to it freely, and the host runs git against it. Verified during review: a
-`core.fsmonitor` in the clone's config executes on the host during the
-`status` that `State()` already runs; `refs/replace` makes a host-side
-review show benign content while the fetch delivers the real commit; and
-`State()` reads as "empty" — the condition for deleting a clone — after a
-`git stash`, a forged `refs/remotes/*`, or a corrupt config. Those are live
-exposures in shipped code, not objections to the plan; automating the
-lifecycle is what turns them from user-initiated into unattended. The
-hardened-git prerequisite in that document is the first piece of work
-regardless of whether the rest is built.
+- *Close the loop at run end.* When a run leaves new commits, fetch them
+  into the project automatically — the lossless half of today's `apply` —
+  and report what came out. This is `applyClone`'s first half relocated,
+  and it delivers most of the felt benefit for a fraction of the risk.
+  **Do this one first, and live with it before building the rest.**
+- *Refresh a provably-empty clone at run start*, so a completed round trip
+  leaves nothing to discover. This is where all the data-loss risk is; see
+  the conditions below.
+- *Report whether the combine would conflict* using `git merge-tree
+  --write-tree`, which merges in memory with no checkout and no cleanup.
+  Report the operation actually tested, never recommend an untested one,
+  and say that git checked for overlap and not for meaning.
+
+**Conditions the middle part has to meet before it is worth building**, all
+of them found by reviewing the proposal against the code rather than
+against itself:
+
+- The two lossless halves compose into a lossy loop. Run 1's commits land
+  on `clone-work`; nobody applies; run 2 sees a clone whose commits are all
+  on that ref, calls it empty, refreshes, and force-moves the ref past run
+  1's work. Two runs before one apply is an ordinary sequence, so automatic
+  fetches need a tool-owned ref namespace the user cannot own — with a
+  retention rule, since refs pin objects against `gc` and would relocate
+  the disk problem clones already had.
+- Emptiness must be proved from the project side. `State()` reads as empty
+  after a `git stash`, an `--assume-unchanged`, a forged `refs/remotes/*`,
+  or a corrupt config, and empty is the condition for deletion.
+- `carryUncommitted` makes every fresh clone dirty from its first second,
+  so a naive guard fires on the tool's own artifact for anyone with a
+  work-in-progress tree — and the only exit it can offer is `--force`,
+  which is the failure B11 names.
+- Nothing in the tool knows a clone is mounted. A second run of the same
+  project would refresh a clone a running container is writing into, and
+  the container keeps writing to an orphaned inode. That needs an
+  active-run check and a per-clone lock before any refresh ships.
+
+**Depends on B24**, which is not optional and not sequenced behind this:
+automating the lifecycle turns user-initiated host-side git against an
+untrusted clone into unattended host-side git against one.
+
+**Still open:** keying clones by project *and* branch (deferred until a
+fresh clone's cost is measured on a large repository); separating the
+human and agent clone keys, which share a slug today.
