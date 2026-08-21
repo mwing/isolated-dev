@@ -154,8 +154,78 @@ func TestVolumeIsPerAgentNotPerProject(t *testing.T) {
 	// One login should serve every project; scoping per project would ask
 	// the user to authenticate again in each repo.
 	a := &Agent{Name: "claude"}
-	if got := a.VolumeName(); got != "dev-agent-claude" {
+	if got := a.VolumeName(); got != "dev-agent-claude-config" {
 		t.Errorf("VolumeName = %q", got)
+	}
+	// And it is not the old whole-home volume under a new name: that one is
+	// read once to carry a login forward and then left alone.
+	if a.VolumeName() == homeVolumeName(a) {
+		t.Error("the config volume reuses the home volume's name")
+	}
+}
+
+// The review's finding: the volume was the whole home directory and scoped
+// per agent, so an agent working in project A could leave a shell profile,
+// a git config or an MCP setting behind for an agent in project B to read —
+// two projects with no route to each other on the network and none intended
+// here either. Only the config directory persists now, because only the
+// credential has to.
+func TestOnlyTheConfigDirectoryPersistsBetweenRuns(t *testing.T) {
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude",
+		Base: "node:22", AllowHosts: []string{"api.anthropic.com"},
+	}
+	spec := Spec(Options{Agent: a, Project: "/host/proj"}, netpolicy.Topology{SidecarIP: "10.0.0.2"})
+
+	for _, m := range spec.Mounts {
+		if m.Volume && m.Target == HomePath {
+			t.Errorf("the whole home directory still persists: %+v", m)
+		}
+	}
+	var found bool
+	for _, m := range spec.Mounts {
+		if m.Volume && m.Target == a.ConfigDir {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the config directory does not persist, so a login will not: %+v", spec.Mounts)
+	}
+}
+
+// An agent that writes state beside its config directory rather than inside
+// it would ask to log in again every run, now that the home is not kept. So
+// it is told where the directory it keeps is.
+func TestTheAgentIsToldWhereItsConfigDirectoryIs(t *testing.T) {
+	a := &Agent{
+		Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude",
+		ConfigEnv: "CLAUDE_CONFIG_DIR", Base: "node:22",
+		AllowHosts: []string{"api.anthropic.com"},
+	}
+	spec := Spec(Options{Agent: a, Project: "/host/proj"}, netpolicy.Topology{SidecarIP: "10.0.0.2"})
+	var found bool
+	for _, e := range spec.Env {
+		if e == "CLAUDE_CONFIG_DIR=/home/dev/.claude" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("config_env was not passed: %v", spec.Env)
+	}
+}
+
+// The mount point has to exist in the image, owned by the account the run
+// uses. A path docker creates for a mount is created owned by root, and an
+// agent that cannot write its config directory completes the OAuth exchange,
+// says it logged in, and has nowhere to put the credential.
+func TestTheOverlayCreatesTheConfigDirectory(t *testing.T) {
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude"}
+	df := Dockerfile(a, "debian:bookworm-slim")
+	if !strings.Contains(df, `mkdir -p "/home/dev/.claude"`) {
+		t.Errorf("the overlay does not create the config directory:\n%s", df)
+	}
+	if !strings.Contains(df, `chown "$DEV_UID":"$DEV_GID" "/home/dev/.claude"`) {
+		t.Errorf("the config directory is not owned by the run's account:\n%s", df)
 	}
 }
 
@@ -280,8 +350,8 @@ func TestSpecMountsWorkspaceAndAgentVolumeOnly(t *testing.T) {
 	if spec.Mounts[0].Source != "/host/proj" || spec.Mounts[0].Target != WorkspacePath {
 		t.Errorf("workspace mount = %+v", spec.Mounts[0])
 	}
-	if !spec.Mounts[1].Volume || spec.Mounts[1].Source != "dev-agent-claude" {
-		t.Errorf("home volume = %+v", spec.Mounts[1])
+	if !spec.Mounts[1].Volume || spec.Mounts[1].Source != "dev-agent-claude-config" {
+		t.Errorf("config volume = %+v", spec.Mounts[1])
 	}
 	// No ~/.ssh, no ~/.gitconfig, no docker socket.
 	for _, m := range spec.Mounts {
@@ -650,7 +720,8 @@ func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
 	// Keys are a prefix of the whole rendered command, which the backend
 	// wraps in its own invocation.
 	const orb = "orb -m vm sudo docker "
-	// The new volume does not exist; the one from before the rename does.
+	// Nothing exists but the one from before the rename.
+	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 1}
 	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 1}
 	fake.Response[orb+"volume inspect dev2-agent-claude"] = runner.Result{ExitCode: 0}
 
@@ -658,7 +729,7 @@ func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
 		Engine: container.New(orbstack.New("vm", fake)),
 		Out:    io.Discard,
 	}
-	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b"}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
 	if err := r.EnsureVolume(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
@@ -666,12 +737,12 @@ func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
 	var created, copied bool
 	for _, c := range fake.Calls {
 		line := c.String()
-		if strings.Contains(line, "volume create dev-agent-claude") {
+		if strings.Contains(line, "volume create dev-agent-claude-config") {
 			created = true
 		}
 		// The copy runs in a container because the volumes live in the VM.
 		if strings.Contains(line, "source=dev2-agent-claude") &&
-			strings.Contains(line, "source=dev-agent-claude") {
+			strings.Contains(line, "source=dev-agent-claude-config") {
 			copied = true
 		}
 	}
@@ -680,6 +751,41 @@ func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
 	}
 	if !copied {
 		t.Fatalf("did not copy the old volume in; calls:\n%s", callLines(fake))
+	}
+}
+
+// Narrowing the volume from the home directory to the config directory
+// renamed it, and the old one holds a login. A fresh empty volume would
+// read as the tool having logged the user out for no reason, so the config
+// directory inside the old home is carried across — and only that, or the
+// narrowing would undo itself on every machine that had run an agent
+// before.
+func TestEnsureVolumeCarriesTheConfigDirOutOfTheOldHomeVolume(t *testing.T) {
+	fake := runner.NewFake()
+	const orb = "orb -m vm sudo docker "
+	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 1}
+	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 0}
+
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+	if err := r.EnsureVolume(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+
+	var copied bool
+	for _, c := range fake.Calls {
+		line := c.String()
+		if !strings.Contains(line, "source=dev-agent-claude,") &&
+			!strings.Contains(line, "source=dev-agent-claude ") {
+			continue
+		}
+		if !strings.Contains(line, "/from/.claude/.") {
+			t.Errorf("the whole old home was copied, not just the config dir:\n%s", line)
+		}
+		copied = true
+	}
+	if !copied {
+		t.Fatalf("the old home volume was not read at all; calls:\n%s", callLines(fake))
 	}
 }
 

@@ -130,6 +130,16 @@ func Dockerfile(a *Agent, base string) string {
 	b.WriteString("RUN (getent passwd \"$DEV_UID\" >/dev/null 2>&1) || " +
 		"useradd -u \"$DEV_UID\" -g \"$DEV_GID\" -m -d " + HomePath + " -s /bin/bash dev\n")
 	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R \"$DEV_UID\":\"$DEV_GID\" " + HomePath + "\n")
+	// The config volume mounts here, and a mount point docker has to create
+	// itself is created owned by root. An agent that cannot write its own
+	// config directory completes the OAuth exchange, prints "logged in",
+	// and has nowhere to put the credential — so the image makes the
+	// directory, owned by the account the run uses, and a fresh volume is
+	// seeded from that.
+	if a.ConfigDir != "" {
+		fmt.Fprintf(&b, "RUN mkdir -p %q && chown \"$DEV_UID\":\"$DEV_GID\" %q\n",
+			a.ConfigDir, a.ConfigDir)
+	}
 	if a.Runtime == "node" {
 		// Copied into its own prefix rather than /usr/local, so a base
 		// image that keeps a toolchain there (golang) survives intact.
@@ -182,9 +192,11 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 
 	spec.Mounts = []container.Mount{
 		{Source: o.workspaceSource(), Target: WorkspacePath},
-		// The agent's home is a named volume, so an OAuth login survives
-		// across runs without any credential touching the project tree.
-		{Source: a.VolumeName(), Target: HomePath, Volume: true},
+		// The agent's config directory is a named volume, so an OAuth login
+		// survives across runs without any credential touching the project
+		// tree. The rest of the home is not: it would be a channel between
+		// projects that have no other route to each other.
+		{Source: a.VolumeName(), Target: a.ConfigDir, Volume: true},
 	}
 
 	// Agent defaults first, sandbox variables second: docker takes the
@@ -196,6 +208,13 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 		"HOME="+HomePath,
 		"DEV2_SANDBOX=1",
 	)
+	// Told where its config directory is, an agent keeps the state it means
+	// to keep — the credential, the onboarding marker — in the one place
+	// that persists. Without this an agent that writes beside its config
+	// directory rather than inside it would ask to log in again every run.
+	if a.ConfigEnv != "" {
+		spec.Env = append(spec.Env, a.ConfigEnv+"="+a.ConfigDir)
+	}
 
 	// Commits are always possible; pushing is not. The identity is
 	// generated rather than copied from the host gitconfig, which carries
@@ -327,14 +346,16 @@ func (r *Runner) SocketGID(ctx context.Context, image, hostSock string) (string,
 	return r.Engine.StatGroup(ctx, image, hostSock, SSHSockPath)
 }
 
-// EnsureVolume creates the agent's home volume if absent, adopting the one
-// the tool used under its old name.
+// EnsureVolume creates the agent's config volume if absent, adopting the
+// ones the tool used before.
 //
-// The rename from dev2 to dev moved this volume, and the volume holds an
-// OAuth login. Creating a fresh empty one would look like a bug — the
-// agent simply asks you to log in again, with nothing to explain why — so
-// the contents are carried over once and the old volume is left in place
-// for anyone who wants to be sure before deleting it.
+// Two moves have happened here: the rename from dev2 to dev, and the
+// narrowing from the whole home directory to the config directory. Both
+// changed the name of a volume holding an OAuth login. Creating a fresh
+// empty one would look like a bug — the agent simply asks you to log in
+// again, with nothing to explain why — so the contents are carried over
+// once and the old volume is left in place for anyone who wants to be sure
+// before deleting it.
 func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
 	exists, err := r.Engine.VolumeExists(ctx, a.VolumeName())
 	if err != nil {
@@ -353,32 +374,44 @@ func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
 	return r.adoptLegacyVolume(ctx, a)
 }
 
-// repairVolumeOwner makes an existing home volume belong to the uid the
+// legacyHomeVolumes are the volumes this one replaced, newest first. Each
+// held a whole home directory, so what is wanted out of it is the config
+// directory inside it rather than the lot.
+func legacyHomeVolumes(a *Agent) []string {
+	return []string{homeVolumeName(a), legacyVolumeName(a)}
+}
+
+// repairVolumeOwner makes an existing config volume belong to the uid the
 // agent now runs as.
 //
 // The volume outlives the image, and docker only seeds one when it is
 // created — an existing volume keeps whatever ownership it was populated
 // with. So when runs stopped being a fixed uid 1000 and became the host's,
-// every already-logged-in agent found a home directory it could not write:
+// every already-logged-in agent found a config directory it could not write:
 // the OAuth exchange succeeded, "Logged in as ..." was printed, and the
 // credential could not be saved, so the next command was logged out again.
 // A failure that reports success is the worst shape available, and this is
 // the migration that stops it.
 //
-// Checked before changing anything, because -R over a home directory that
-// has accumulated caches is not free, and because doing it every run would
-// be a chown nobody asked for.
+// Checked before changing anything, because doing it every run would be a
+// chown nobody asked for.
 func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
 	want := fmt.Sprintf("%d:%d", container.HostUID(), container.HostGID())
+
+	// The volume mounts where the agent expects its config, so that is
+	// where the ownership has to be right — a chown of the home directory
+	// would now be a chown of the container's own filesystem, which is
+	// discarded when the run ends.
+	target := a.ConfigDir
 
 	var out bytes.Buffer
 	probe := container.RunSpec{
 		Image:   "alpine",
 		Remove:  true,
 		User:    "0:0",
-		Command: []string{"stat", "-c", "%u:%g", HomePath},
+		Command: []string{"stat", "-c", "%u:%g", target},
 		Mounts: []container.Mount{
-			{Source: a.VolumeName(), Target: HomePath, Volume: true},
+			{Source: a.VolumeName(), Target: target, Volume: true},
 		},
 	}
 	if _, err := r.Engine.Run(ctx, probe, nil, &out, io.Discard); err != nil {
@@ -391,13 +424,13 @@ func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
 	}
 
 	fix := probe
-	fix.Command = []string{"chown", "-R", want, HomePath}
+	fix.Command = []string{"chown", "-R", want, target}
 	if _, err := r.Engine.Run(ctx, fix, nil, io.Discard, io.Discard); err != nil {
 		fmt.Fprintf(r.Out, "⚠  %s belongs to %s and this run is %s, so the agent may not be\n"+
 			"   able to save its login. Repair it with:\n"+
 			"     docker run --rm -u 0 -v %s:%s alpine chown -R %s %s\n",
 			a.VolumeName(), strings.TrimSpace(out.String()), want,
-			a.VolumeName(), HomePath, want, HomePath)
+			a.VolumeName(), target, want, target)
 		return nil
 	}
 	fmt.Fprintf(r.Out, "Adjusted %s to uid %s, which this run uses.\n", a.VolumeName(), want)
@@ -409,31 +442,50 @@ func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
 func legacyVolumeName(a *Agent) string { return "dev2-agent-" + a.Name }
 
 func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
-	old := legacyVolumeName(a)
-	exists, err := r.Engine.VolumeExists(ctx, old)
-	if err != nil || !exists {
-		return nil
-	}
+	for _, old := range legacyHomeVolumes(a) {
+		exists, err := r.Engine.VolumeExists(ctx, old)
+		if err != nil || !exists {
+			continue
+		}
+		// The source held a home directory, so the config directory is a
+		// subdirectory of it. Only that is carried over: the rest is what
+		// this change stopped persisting, and copying it forward would
+		// undo the change on every machine that had already run an agent.
+		rel := strings.TrimPrefix(a.ConfigDir, HomePath+"/")
+		if rel == a.ConfigDir {
+			// A config directory outside the home was never in that volume,
+			// so there is nothing of this agent's in it to carry.
+			continue
+		}
+		from := "/from/" + rel
 
-	// Copied inside a container because the volumes live in the VM, not on
-	// the host. Failure is reported and not fatal: the worst case is one
-	// login, and refusing to run the agent over it would be worse.
-	spec := container.RunSpec{
-		Image:   "alpine",
-		Remove:  true,
-		Command: []string{"sh", "-c", "cp -a /from/. /to/ 2>/dev/null || true"},
-		Mounts: []container.Mount{
-			{Source: old, Target: "/from", Volume: true, ReadOnly: true},
-			{Source: a.VolumeName(), Target: "/to", Volume: true},
-		},
-	}
-	if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
-		fmt.Fprintf(r.Out, "⚠  could not carry %s over to %s: %v\n", old, a.VolumeName(), err)
+		// Copied inside a container because the volumes live in the VM, not
+		// on the host. Failure is reported and not fatal: the worst case is
+		// one login, and refusing to run the agent over it would be worse.
+		spec := container.RunSpec{
+			Image:  "alpine",
+			Remove: true,
+			User:   "0:0",
+			Command: []string{"sh", "-c", fmt.Sprintf(
+				"cp -a %s/. /to/ 2>/dev/null && chown -R %d:%d /to || true",
+				from, container.HostUID(), container.HostGID())},
+			Mounts: []container.Mount{
+				{Source: old, Target: "/from", Volume: true, ReadOnly: true},
+				{Source: a.VolumeName(), Target: "/to", Volume: true},
+			},
+		}
+		if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
+			fmt.Fprintf(r.Out, "⚠  could not carry %s over to %s: %v\n", old, a.VolumeName(), err)
+			return nil
+		}
+		fmt.Fprintf(r.Out, "Carried the stored login from %s into %s.\n", old, a.VolumeName())
+		fmt.Fprintf(r.Out, "  %s now holds the agent's configuration only, so nothing else\n",
+			a.VolumeName())
+		fmt.Fprintf(r.Out, "  in its home carries between projects. The old volume is left\n")
+		fmt.Fprintf(r.Out, "  alone; remove it with:\n")
+		fmt.Fprintf(r.Out, "    docker volume rm %s\n", old)
 		return nil
 	}
-	fmt.Fprintf(r.Out, "Carried the stored login from %s into %s.\n", old, a.VolumeName())
-	fmt.Fprintf(r.Out, "  The old volume is left alone; remove it with:\n")
-	fmt.Fprintf(r.Out, "    docker volume rm %s\n", old)
 	return nil
 }
 

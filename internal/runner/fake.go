@@ -31,17 +31,30 @@ func (f *Fake) Run(_ context.Context, cmd Command) (Result, error) {
 	f.Calls = append(f.Calls, cmd)
 
 	line := cmd.String()
-	for k, err := range f.Err {
-		if matches(line, k) {
-			return Result{}, err
-		}
+	if k, ok := bestKey(line, f.Err); ok {
+		return Result{}, f.Err[k]
 	}
-	for k, res := range f.Response {
-		if matches(line, k) {
-			return deliver(cmd, res), nil
-		}
+	if k, ok := bestKey(line, f.Response); ok {
+		return deliver(cmd, f.Response[k]), nil
 	}
 	return deliver(cmd, f.Default), nil
+}
+
+// bestKey returns the longest key that prefixes line.
+//
+// Longest rather than any: one name is often a prefix of another —
+// `dev-agent-claude` of `dev-agent-claude-config` — so a map iterated in
+// random order answered a question about the second with the response
+// registered for the first, roughly half the time. A test that passes on
+// alternate runs is worse than one that fails.
+func bestKey[T any](line string, table map[string]T) (string, bool) {
+	best, found := "", false
+	for k := range table {
+		if matches(line, k) && (!found || len(k) > len(best)) {
+			best, found = k, true
+		}
+	}
+	return best, found
 }
 
 // deliver routes a canned response the way Exec routes a real one: output

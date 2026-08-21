@@ -39,8 +39,16 @@ type Agent struct {
 	AllowHosts []string `yaml:"allow_hosts"`
 	// ConfigDir is the path inside the container holding credentials and
 	// settings. It is backed by a named volume so an OAuth login survives
-	// across runs.
+	// across runs — and it is the only part of the home directory that
+	// does, so it is also the whole of what one project can leave behind
+	// for another.
 	ConfigDir string `yaml:"config_dir"`
+	// ConfigEnv is the variable this agent reads to find ConfigDir, when it
+	// has one. Setting it keeps state the agent would otherwise scatter
+	// beside its config directory — a `~/.claude.json`, an onboarding
+	// marker — inside the one directory that persists, rather than in a
+	// home that does not.
+	ConfigEnv string `yaml:"config_env"`
 	// Env are non-secret environment defaults for the agent, e.g. turning
 	// off telemetry. They are applied before the sandbox's own variables,
 	// so an agent definition cannot override the proxy settings that make
@@ -149,9 +157,26 @@ func (a *Agent) Source() string {
 	return a.source
 }
 
-// VolumeName is the named volume holding the agent's home directory. It is
-// scoped per agent, not per project, so one login serves every project.
-func (a *Agent) VolumeName() string { return "dev-agent-" + a.Name }
+// VolumeName is the named volume holding the agent's configuration and
+// credentials. It is scoped per agent, not per project, so one login serves
+// every project.
+//
+// It covers the config directory and nothing else. It used to be the whole
+// home directory, which made it a channel between projects: an agent
+// working in project A could write a shell profile, a git config or an MCP
+// setting that an agent in project B then read, with no route between them
+// on the network and none intended here either. Everything outside the
+// config directory now lives and dies with the container, as it already
+// does for `dev run` and `dev shell`.
+//
+// What remains shared is the config directory itself, and that is inherent:
+// one login means one place the credential lives, and the agents that keep
+// a credential keep their settings beside it. See ConfigEnv.
+func (a *Agent) VolumeName() string { return "dev-agent-" + a.Name + "-config" }
+
+// homeVolumeName is what the volume was called while it held the whole home
+// directory. Its config directory is carried into the new volume once.
+func homeVolumeName(a *Agent) string { return "dev-agent-" + a.Name }
 
 // Images are the upstream images this agent's overlay builds FROM, so the
 // same pinning the tool asks of a project can be applied to its own

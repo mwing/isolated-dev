@@ -411,10 +411,15 @@ dev agent policy claude       # exactly what a run would permit
 dev agent run claude          # go
 ```
 
-What the agent gets: the project directory, its own tools, its own home
-(a named volume, so a login survives across runs), and its API endpoint.
-What it does not get: your keys, your environment, any host path but the
-project.
+What the agent gets: the project directory, its own tools, its own
+configuration directory (a named volume, so a login survives across runs),
+and its API endpoint. What it does not get: your keys, your environment,
+any host path but the project.
+
+The rest of its home is not kept. Only the configuration directory
+persists, and it persists per agent rather than per project — so one login
+serves every repository, and nothing else an agent writes in one project is
+there to be read in the next.
 
 **Committing and pushing.** The agent can commit — its identity comes from
 your `user.name` and `user.email`, nothing else from your gitconfig — but

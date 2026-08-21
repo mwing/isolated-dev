@@ -23,6 +23,7 @@ func builtins() []Agent {
 			// the per-action prompts reasonable here and nowhere else.
 			Args:         []string{"--dangerously-skip-permissions"},
 			ConfigDir:    "/home/dev/.claude",
+			ConfigEnv:    "CLAUDE_CONFIG_DIR",
 			AuthEnv:      []string{"ANTHROPIC_API_KEY"},
 			Base:         "debian:bookworm-slim",
 			Runtime:      "node",
@@ -68,6 +69,7 @@ func builtins() []Agent {
 			Binary:       "codex",
 			Args:         []string{"--dangerously-bypass-approvals-and-sandbox"},
 			ConfigDir:    "/home/dev/.codex",
+			ConfigEnv:    "CODEX_HOME",
 			AuthEnv:      []string{"OPENAI_API_KEY"},
 			Base:         "debian:bookworm-slim",
 			Runtime:      "node",

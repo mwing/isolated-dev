@@ -546,11 +546,24 @@ mechanisms meeting.*
 
 ### B27. Smaller findings from the same review — `todo`
 
-- The agent's home volume is per-agent, not per-project, and all of
+- ~~The agent's home volume is per-agent, not per-project, and all of
   `/home/dev` persists — so project A can write agent configuration,
-  instructions or MCP settings that project B later consumes. Mounting only
-  `ConfigDir`, and separating authentication state from mutable state,
-  would narrow it.
+  instructions or MCP settings that project B later consumes.~~ **Done.**
+  The volume is `dev-agent-<name>-config` and mounts at `ConfigDir`; the
+  rest of the home lives and dies with the container, as it already did for
+  `dev run` and `dev shell`. An existing login is carried out of the old
+  home volume once — the config directory only, or the narrowing would undo
+  itself on every machine that had run an agent before.
+
+  Agents are told where that directory is (`config_env`:
+  `CLAUDE_CONFIG_DIR`, `CODEX_HOME`), so state they would otherwise write
+  beside it lands inside the one place that persists.
+
+  **Residual, and inherent:** the config directory itself is still shared
+  between projects, because one login means one place the credential lives
+  and these agents keep their settings beside it. A per-project config
+  directory would close it at the cost of a login per project; worth
+  offering as a choice if anyone wants it, not worth imposing.
 - ~~`build_source` consent hashes the Dockerfile, but `COPY . .` plus
   `RUN ./build.sh` means the trusted program is the Dockerfile *and the
   build context*.~~ **Done.** Hashing the context would re-ask on every
