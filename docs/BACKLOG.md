@@ -421,7 +421,7 @@ agent's, which is what the review step is for.
 
 ## P2 — later, and only if wanted
 
-### B28. Test the invariants, not the features — `todo`  *(do first)*
+### B28. Test the invariants, not the features — `done`
 
 The dangerous bugs in this codebase are increasingly composition failures
 rather than missing mitigations: reuse meeting branch changes, captures
@@ -446,11 +446,23 @@ invariants are the tests those fixes should be verified against, and the
 thing most likely to catch the next composition failure before a reviewer
 does.
 
-**Done so far:** five in `internal/clone/invariants_test.go` (unrelated
-objects, captured work staying reachable, the source repository being
-unmodifiable, two runs never sharing a working tree, provenance describing
-the run it was made for) and one in `internal/cli` (captures surviving an
-apply from a detached HEAD). Two of the six caught real bugs on the way in.
+**Done.** Nine, and all six of the list above are among them.
+`internal/clone/invariants_test.go` holds unrelated objects, captured work
+staying reachable, the source repository being unmodifiable, two runs never
+sharing a working tree, provenance describing the run it was made for, and
+host git executing nothing a clone names — that last one stated over a
+table of sixteen config keys plus the `.gitattributes` that reaches the
+filter, textconv and merge drivers, driven through every way host code
+reads a clone, and asserted on a file the payload writes rather than on
+output nobody may have captured. `internal/cli/invariants_test.go` holds
+the consent invariant in three parts, and `cloneapply_test.go` holds
+captures surviving an apply from a detached HEAD.
+
+Two of them caught real bugs on the way in, and each of the two written
+last was checked against a deliberately broken build — with the quarantine
+stubbed out, `Read/status` fires a payload through
+`filter.hostile.clean`. An invariant test that has never failed is a
+sentence, not a test.
 
 **Remaining, and one thing already found by writing it down.** The
 invariant "a project request can never widen access without a user
