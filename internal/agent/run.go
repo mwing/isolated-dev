@@ -130,16 +130,6 @@ func Dockerfile(a *Agent, base string) string {
 	b.WriteString("RUN (getent passwd \"$DEV_UID\" >/dev/null 2>&1) || " +
 		"useradd -u \"$DEV_UID\" -g \"$DEV_GID\" -m -d " + HomePath + " -s /bin/bash dev\n")
 	b.WriteString("RUN mkdir -p " + HomePath + " && chown -R \"$DEV_UID\":\"$DEV_GID\" " + HomePath + "\n")
-	// The config volume mounts here, and a mount point docker has to create
-	// itself is created owned by root. An agent that cannot write its own
-	// config directory completes the OAuth exchange, prints "logged in",
-	// and has nowhere to put the credential — so the image makes the
-	// directory, owned by the account the run uses, and a fresh volume is
-	// seeded from that.
-	if a.ConfigDir != "" {
-		fmt.Fprintf(&b, "RUN mkdir -p %q && chown \"$DEV_UID\":\"$DEV_GID\" %q\n",
-			a.ConfigDir, a.ConfigDir)
-	}
 	if a.Runtime == "node" {
 		// Copied into its own prefix rather than /usr/local, so a base
 		// image that keeps a toolchain there (golang) survives intact.
@@ -161,6 +151,12 @@ func Dockerfile(a *Agent, base string) string {
 		// does not reach the fetch is decoration.
 		fmt.Fprintf(&b, "RUN %s\n", a.InstallCommand())
 	}
+	// The config volume mounts here, so the directory has to exist and
+	// belong to the run's account: a mount point docker creates itself is
+	// created owned by root, and an agent that cannot write its own config
+	// directory completes the OAuth exchange, says it logged in, and has
+	// nowhere to put the credential. Last, after the install: the install
+	// may create it as root.
 	fmt.Fprintf(&b, "RUN mkdir -p %s && chown -R \"$DEV_UID\":\"$DEV_GID\" %s\n", a.ConfigDir, a.ConfigDir)
 	b.WriteString("USER $DEV_UID:$DEV_GID\n")
 	fmt.Fprintf(&b, "WORKDIR %s\n", WorkspacePath)

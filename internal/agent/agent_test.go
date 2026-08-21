@@ -221,10 +221,10 @@ func TestTheAgentIsToldWhereItsConfigDirectoryIs(t *testing.T) {
 func TestTheOverlayCreatesTheConfigDirectory(t *testing.T) {
 	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude"}
 	df := Dockerfile(a, "debian:bookworm-slim")
-	if !strings.Contains(df, `mkdir -p "/home/dev/.claude"`) {
+	if !strings.Contains(df, "mkdir -p /home/dev/.claude") {
 		t.Errorf("the overlay does not create the config directory:\n%s", df)
 	}
-	if !strings.Contains(df, `chown "$DEV_UID":"$DEV_GID" "/home/dev/.claude"`) {
+	if !strings.Contains(df, `chown -R "$DEV_UID":"$DEV_GID" /home/dev/.claude`) {
 		t.Errorf("the config directory is not owned by the run's account:\n%s", df)
 	}
 }
