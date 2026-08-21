@@ -617,6 +617,11 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if opts.CPUs == "" {
 		opts.CPUs = saved.CPUs
 	}
+	// The overlay builds FROM upstream images too, so the project's pins
+	// reach it. Without this, the one build the tool performs itself was
+	// the one exempt from the rule it asks of every project.
+	opts.Pins = cfg.Pins
+
 	// Saved args are the project's stored defaults; args typed on the
 	// command line replace them rather than being appended, since a
 	// stored default is what you get when you say nothing.

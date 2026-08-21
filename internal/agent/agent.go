@@ -60,8 +60,14 @@ type Agent struct {
 	//
 	// "node" is currently the only value; "" installs nothing.
 	Runtime string `yaml:"runtime"`
-	// RuntimeImage is where the runtime is copied from. Pinned rather than
-	// floating so the overlay is reproducible.
+	// RuntimeImage is where the runtime is copied from.
+	//
+	// It names a version, which is not the same as naming an image:
+	// `node:22-bookworm-slim` is a mutable tag, and the overlay is only as
+	// reproducible as what that tag points at today. The tool asks every
+	// project to pin its bases for exactly this reason, so its own images
+	// go through the same mechanism — `dev pin` resolves these too, and a
+	// recorded digest is what makes two builds the same build.
 	RuntimeImage string `yaml:"runtime_image"`
 
 	// source records where the definition came from, for `agent list`.
@@ -146,6 +152,21 @@ func (a *Agent) Source() string {
 // VolumeName is the named volume holding the agent's home directory. It is
 // scoped per agent, not per project, so one login serves every project.
 func (a *Agent) VolumeName() string { return "dev-agent-" + a.Name }
+
+// Images are the upstream images this agent's overlay builds FROM, so the
+// same pinning the tool asks of a project can be applied to its own
+// images. The project image, when there is one, is not among them: it is
+// built here and pinned by its own bases.
+func (a *Agent) Images() []string {
+	var out []string
+	if a.Base != "" {
+		out = append(out, a.Base)
+	}
+	if a.Runtime != "" {
+		out = append(out, a.runtimeImage())
+	}
+	return out
+}
 
 // ImageTag is the overlay image tag for this agent on top of base.
 func (a *Agent) ImageTag(projectImage string) string {

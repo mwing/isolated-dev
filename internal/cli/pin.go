@@ -18,8 +18,9 @@ func newPinCmd(env *Env) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pin",
 		Short: "Pin this project's base images to digests",
-		Long: "Resolves every image the Dockerfile builds FROM to the digest it\n" +
-			"resolves to today, and records it in the project file.\n\n" +
+		Long: "Resolves every image a build starts FROM — the Dockerfile's, and\n" +
+			"the ones an agent overlay uses — to the digest it resolves to\n" +
+			"today, and records it in the project file.\n\n" +
 			"A tag says which image you meant; a digest says which image you\n" +
 			"got. Builds run unfiltered and fetch whatever the tag points at\n" +
 			"now, so a tag is the one part of the sandbox that can change\n" +
@@ -63,7 +64,27 @@ func pinImages(ctx context.Context, env *Env, update bool) error {
 	fmt.Fprintf(env.Stdout, "\nRecorded in %s\n", env.Paths.Project)
 	fmt.Fprintln(env.Stdout, "Commit it: a teammate then builds the same image, "+
 		"not merely the same tag.")
+	// An agent overlay is only rebuilt when its tag is missing, and the tag
+	// does not carry the pins, so a recorded digest sits unused until one is
+	// asked for. Said here, at the moment it becomes true.
+	if intersects(changes, agentImages(env)) {
+		fmt.Fprintln(env.Stdout, "An agent image moved: dev agent run <name> --rebuild "+
+			"picks it up.")
+	}
 	return nil
+}
+
+func intersects(changes []PinChange, images []string) bool {
+	in := map[string]bool{}
+	for _, i := range images {
+		in[i] = true
+	}
+	for _, c := range changes {
+		if in[c.Image] {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePins resolves base images to digests and records them. It prints
@@ -80,7 +101,13 @@ func resolvePins(ctx context.Context, env *Env, update bool, progress io.Writer)
 		return nil, err
 	}
 
-	images := project.BaseImages(dockerfile)
+	// The tool's own images count. An agent overlay is built FROM
+	// `debian:bookworm-slim` and copies a runtime out of
+	// `node:22-bookworm-slim`, both mutable tags — so the argument this
+	// command makes about a project's bases applies to them unchanged, and
+	// exempting them would make the rule advice rather than practice.
+	images := append(project.BaseImages(dockerfile), agentImages(env)...)
+	images = dedupe(images)
 	if len(images) == 0 {
 		fmt.Fprintln(env.Stdout, "Nothing to pin: every FROM is already a digest, "+
 			"a stage name, or scratch.")
@@ -121,6 +148,22 @@ func resolvePins(ctx context.Context, env *Env, update bool, progress io.Writer)
 		return nil, err
 	}
 	return changes, nil
+}
+
+// agentImages are the upstream images every known agent's overlay builds
+// FROM. A registry that cannot be read is not fatal here: pinning the
+// project's own bases is still worth doing, and the alternative is a
+// command that fails over an unrelated agent file.
+func agentImages(env *Env) []string {
+	reg, err := registry(env)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range reg.List() {
+		out = append(out, a.Images()...)
+	}
+	return out
 }
 
 // writeProjectPins updates the pins block, leaving the rest of the project

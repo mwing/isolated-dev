@@ -551,17 +551,25 @@ mechanisms meeting.*
   instructions or MCP settings that project B later consumes. Mounting only
   `ConfigDir`, and separating authentication state from mutable state,
   would narrow it.
-- `build_source` consent hashes the Dockerfile, but `COPY . .` plus
+- ~~`build_source` consent hashes the Dockerfile, but `COPY . .` plus
   `RUN ./build.sh` means the trusted program is the Dockerfile *and the
-  build context*. Hashing the context is unbearable during development;
-  the honest fix is to describe acceptance as trusting this repository to
-  supply build instructions, and the real fix is egress-filtered builds
-  (ROADMAP 4.3.1).
-- Agents have no default memory or CPU ceiling, so an agent takes whatever
-  the daemon permits; the bind-mounted clone is an easy disk DoS too.
-- `RuntimeImage` is described as pinned while `debian:bookworm-slim` and
-  `node:22-bookworm-slim` are mutable tags. The same argument `dev pin`
-  makes applies to the tool's own images.
+  build context*.~~ **Done.** Hashing the context would re-ask on every
+  save, which is a prompt nobody reads, so the wording now says what is
+  actually accepted — this repository supplying build instructions, the
+  file and whatever it runs from the directory — and a test states the
+  limit so it cannot quietly become a claim: changing `build.sh` does not
+  ask again, changing the Dockerfile does. The real fix is still
+  egress-filtered builds (ROADMAP 4.3.1).
+- ~~Agents have no default memory or CPU ceiling.~~ **Done:** 8g and
+  NumCPU-1, printed when they came from the default. The bind-mounted
+  clone is still an easy disk DoS.
+- ~~`RuntimeImage` is described as pinned while `debian:bookworm-slim` and
+  `node:22-bookworm-slim` are mutable tags.~~ **Done.** The overlay is now
+  built through `project.ApplyPins` like any other Dockerfile, and
+  `dev pin` resolves every agent's images alongside the project's own — so
+  the one build the tool performs itself is no longer the one exempt from
+  the rule it asks of every project. The overlay tag does not carry the
+  pins, so `dev pin` says when a `--rebuild` is what picks a new digest up.
 - Path as the identity of trust (B2) is worth reopening on a variant B2 did
   not consider: an id this tool generates and stores in local git metadata,
   never committed. It is not self-asserted by the repository — a hostile

@@ -9,6 +9,7 @@ import (
 
 	"github.com/mwing/isolated-dev/internal/container"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/project"
 )
 
 // workspaceSource is the host directory to mount.
@@ -64,6 +65,11 @@ type Options struct {
 	SSHSockGID string
 	// Image is the project image to overlay. Empty uses the agent's base.
 	Image string
+	// Pins map an image reference to the digest it was pinned to. The
+	// overlay is built FROM upstream images like any other Dockerfile, so
+	// it honours the project's pins rather than being the one build the
+	// tool exempts from its own rule.
+	Pins map[string]string
 	// Memory and CPUs bound the container.
 	Memory string
 	CPUs   string
@@ -294,7 +300,12 @@ func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string
 	}
 
 	fmt.Fprintf(r.Out, "Building agent image %s...\n", tag)
-	df := Dockerfile(o.Agent, o.BaseImage())
+	// The overlay is a build like any other, so it gets the same treatment
+	// the tool asks of every project: a tag says which image you meant, a
+	// digest says which image you got. The tag is not derived from the
+	// pins, so a newly recorded pin takes effect on the next --rebuild —
+	// which `dev pin` says at the point it records one.
+	df := project.ApplyPins(Dockerfile(o.Agent, o.BaseImage()), o.Pins)
 	// Context "-" with the Dockerfile on stdin and no --file: the overlay
 	// adds only the agent, so it needs no build context at all. Passing
 	// --file - as well is what docker rejects.
