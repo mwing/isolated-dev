@@ -156,12 +156,29 @@ func flattenBranch(branch string) string {
 }
 
 // CapturedRefs lists the captures the project holds for one branch, oldest
-// first. An empty branch lists every branch's.
+// first. An empty branch matches nothing.
+//
+// Empty deliberately means nothing rather than everything. CurrentBranch
+// returns "" on a detached HEAD, and this used to read "" as "every
+// branch" — so one sentinel meant both "the branch I am on" and "all of
+// them", and an ordinary `apply` from a detached HEAD swept and dropped
+// captures belonging to branches it had never looked at. A wildcard has
+// to be asked for by name: see AllCapturedRefs.
 func CapturedRefs(ctx context.Context, run runner.Runner, projectDir, branch string) ([]string, error) {
-	scope := RefNamespace
-	if branch != "" {
-		scope += "/" + flattenBranch(branch)
+	if strings.TrimSpace(branch) == "" {
+		return nil, nil
 	}
+	return refsUnder(ctx, run, projectDir, RefNamespace+"/"+flattenBranch(branch))
+}
+
+// AllCapturedRefs lists every branch's captures. Separate from
+// CapturedRefs so that "I do not know which branch" can never be spelled
+// the same way as "all of them".
+func AllCapturedRefs(ctx context.Context, run runner.Runner, projectDir string) ([]string, error) {
+	return refsUnder(ctx, run, projectDir, RefNamespace)
+}
+
+func refsUnder(ctx context.Context, run runner.Runner, projectDir, scope string) ([]string, error) {
 	out, err := gitOutput(ctx, run, projectDir, "for-each-ref", "--format=%(refname)", scope)
 	if err != nil {
 		return nil, err
@@ -184,6 +201,18 @@ func DropCapture(ctx context.Context, run runner.Runner, projectDir, ref string)
 	if !strings.HasPrefix(ref, RefNamespace+"/") {
 		return fmt.Errorf("clone: %s is not a capture this tool owns", ref)
 	}
-	_, err := git(ctx, run, projectDir, "update-ref", "-d", ref)
+	// One invariant governs deletion: a capture is only ever dropped once
+	// its tip is reachable from a branch. The ref exists to hold work until
+	// it is somewhere a person would look, and "apply succeeded" is not the
+	// same statement as "this particular capture landed".
+	held, err := gitOutput(ctx, run, projectDir, "for-each-ref",
+		"--format=%(refname)", "--contains", ref, "refs/heads")
+	if err != nil {
+		return fmt.Errorf("clone: could not confirm %s has landed: %w", ref, err)
+	}
+	if len(nonEmptyLines(held)) == 0 {
+		return fmt.Errorf("clone: %s is on no branch, so it is still the only copy", ref)
+	}
+	_, err = git(ctx, run, projectDir, "update-ref", "-d", ref)
 	return err
 }

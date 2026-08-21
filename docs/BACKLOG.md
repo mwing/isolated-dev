@@ -487,7 +487,15 @@ feature and is not built.
 *Pre-release. Three defects that each arise from two individually-safe
 mechanisms meeting.*
 
-- **Detached HEAD deletes every branch's captures.** `CurrentBranch`
+- **Detached HEAD deletes every branch's captures — done.** `CapturedRefs`
+  now treats an empty branch as matching nothing, and a wildcard has to be
+  asked for by name (`AllCapturedRefs`), so "I do not know which branch"
+  can no longer be spelled the same way as "all of them". Deletion is
+  governed by one invariant: a capture is dropped only once its tip is
+  reachable from a branch, which also means an apply of one piece of work
+  cannot take an unrelated capture with it. The invariant test detaches
+  HEAD, applies, and asserts the other branch's capture survives.
+- ~~**Detached HEAD deletes every branch's captures.**~~ `CurrentBranch`
   returns `""` for a detached HEAD and `CapturedRefs(…, "")` means *all
   branches*, so one sentinel means both "this branch" and "everything".
   `apply` on a detached HEAD sweeps and drops captures belonging to every

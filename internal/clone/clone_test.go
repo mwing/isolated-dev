@@ -753,8 +753,17 @@ func TestCaptureBringsWorkIntoTheProjectWithoutMovingABranch(t *testing.T) {
 		t.Logf("refs = %v", refs)
 	}
 
-	if err := DropCapture(ctx, run, src, got.Ref); err != nil {
+	// A capture is only droppable once its tip is on a branch: until then
+	// it is the only copy, and "apply succeeded" is not the same statement
+	// as "this capture landed".
+	if err := DropCapture(ctx, run, src, got.Ref); err == nil {
+		t.Error("dropped a capture whose work is on no branch")
+	}
+	if _, err := git(ctx, run, src, "branch", "landed", got.Ref); err != nil {
 		t.Fatal(err)
+	}
+	if err := DropCapture(ctx, run, src, got.Ref); err != nil {
+		t.Fatalf("refused to drop a capture that has landed: %v", err)
 	}
 	refs, _ = CapturedRefs(ctx, run, src, "main")
 	for _, r := range refs {
