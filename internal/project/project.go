@@ -493,3 +493,49 @@ func imageUIDSuffix() string {
 	}
 	return fmt.Sprintf("-u%d", uid)
 }
+
+// WithDevUser appends an account for the uid a run will use, when the
+// image does not already have one.
+//
+// Only the language templates take DEV_UID, so a project supplying its own
+// Dockerfile — or a devcontainer naming an image — got `--user 501` against
+// an image that has no such account. Observed in real use as a shell
+// prompt reading "I have no name!", with `whoami` failing and `$HOME`
+// resolving to `/`, which is not writable. That is the failure mode this
+// design rejected when it chose to build images for the host uid rather
+// than merely pass it, and it arrived anyway through the one path the
+// templates do not cover.
+//
+// Appended rather than injected, and to the final stage, because that is
+// the image a run uses. This is the same class of change the build already
+// makes to a project's Dockerfile — ApplyPins rewrites its FROM lines and
+// WithPackageUpgrade adds a layer — so it is consistent rather than novel.
+//
+// Every step tolerates failure. An image with no useradd, or with the uid
+// already present, comes out unchanged rather than failing to build: the
+// account is worth having and is not worth refusing a build over.
+func WithDevUser(dockerfile string) string {
+	var b strings.Builder
+	b.WriteString(dockerfile)
+	if !strings.HasSuffix(dockerfile, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString(devUserStanza)
+	return b.String()
+}
+
+const devUserStanza = `
+# Added by dev: the run happens as the uid of whoever started it, and a uid
+# with no account has no name and no home it can write.
+ARG DEV_UID=1000
+ARG DEV_GID=1000
+USER root
+RUN if ! getent passwd "$DEV_UID" >/dev/null 2>&1; then \
+      (getent group "$DEV_GID" >/dev/null 2>&1 \
+        || groupadd -g "$DEV_GID" dev \
+        || addgroup -g "$DEV_GID" dev) >/dev/null 2>&1 || true; \
+      (useradd -u "$DEV_UID" -g "$DEV_GID" -m -d /home/dev -s /bin/sh dev \
+        || adduser -D -u "$DEV_UID" -G dev -h /home/dev dev) >/dev/null 2>&1 || true; \
+    fi; \
+    (mkdir -p /home/dev && chown "$DEV_UID":"$DEV_GID" /home/dev) >/dev/null 2>&1 || true
+`

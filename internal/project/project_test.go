@@ -477,3 +477,30 @@ func TestGrantedEnvComesBeforeAnythingTheCallerAppends(t *testing.T) {
 		t.Fatalf("effective HTTP_PROXY = %q", last)
 	}
 }
+
+// A project's own Dockerfile does not know about DEV_UID, so a run against
+// it used to have no account: observed in real use as a prompt reading "I
+// have no name!", with whoami failing and $HOME resolving to "/", which is
+// not writable. The templates were covered; the one path they do not touch
+// was not.
+func TestOwnDockerfileGainsAnAccountForTheRunUid(t *testing.T) {
+	got := WithDevUser("FROM node:22-slim\nWORKDIR /workspace\n")
+
+	for _, want := range []string{
+		"ARG DEV_UID", "getent passwd", "useradd", "adduser", "/home/dev",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the appended stanza does not mention %q:\n%s", want, got)
+		}
+	}
+	// The project's own instructions come first and unmodified: this adds a
+	// layer, it does not rewrite what the repository asked for.
+	if !strings.HasPrefix(got, "FROM node:22-slim\nWORKDIR /workspace\n") {
+		t.Errorf("the project's Dockerfile was altered:\n%s", got)
+	}
+	// Every step tolerates failure, or an image without useradd would stop
+	// being buildable at all.
+	if !strings.Contains(got, "|| true") {
+		t.Error("the stanza can fail a build it should only decline to change")
+	}
+}

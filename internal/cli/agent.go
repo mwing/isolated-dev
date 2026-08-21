@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -622,6 +624,26 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		opts.Args = append([]string(nil), saved.Args...)
 	}
 
+	// A ceiling when nothing else set one. An agent runs unattended for
+	// however long it takes, so "whatever the daemon permits" means a
+	// runaway build can take the machine down with it — and on Linux there
+	// is no VM in the way to absorb that, which is the platform this now
+	// supports. A human watching their own `dev run` is a different case
+	// and stays unlimited: they can see it and stop it.
+	//
+	// The numbers are chosen to be out of the way rather than tuned. They
+	// are printed below when they came from here, because a limit nobody
+	// was told about is a confusing kill later.
+	defaulted := false
+	if opts.Memory == "" {
+		opts.Memory = defaultAgentMemory
+		defaulted = true
+	}
+	if opts.CPUs == "" {
+		opts.CPUs = defaultAgentCPUs()
+		defaulted = true
+	}
+
 	// Limits the policy requires are applied last, so nothing lower — the
 	// project's request, this user's stored file, a flag — can relax them.
 	if pol.Require.Memory != "" {
@@ -657,6 +679,15 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			filepath.Base(env.Paths.Project), strings.Join(accepted, " "))
 	}
 	fmt.Fprintf(env.Stdout, "Auth:      %s\n", authDescription(opts))
+	if opts.Memory != "" || opts.CPUs != "" {
+		note := ""
+		if defaulted {
+			note = "  (default; --memory and --cpus override)"
+		}
+		fmt.Fprintf(env.Stdout, "Limits:    %s memory, %s cpu%s\n",
+			firstNonEmpty(opts.Memory, "unlimited"),
+			firstNonEmpty(opts.CPUs, "unlimited"), note)
+	}
 	fmt.Fprintln(env.Stdout)
 
 	slug := projectSlug(opts.Project)
@@ -873,4 +904,20 @@ func explainTTYFailure(output string) string {
 	}
 	return "the backend did not pass a terminal through; re-run with --tty off " +
 		"(non-interactive) or from a real terminal"
+}
+
+// defaultAgentMemory bounds an unattended run. Generous enough that an
+// ordinary build or test suite does not notice, small enough that a
+// runaway one does not take the machine with it.
+const defaultAgentMemory = "8g"
+
+// defaultAgentCPUs leaves the person a core. An agent saturating every
+// core makes the machine unusable while it works, which is its own kind of
+// failure even though nothing crashes.
+func defaultAgentCPUs() string {
+	n := runtime.NumCPU() - 1
+	if n < 1 {
+		n = 1
+	}
+	return strconv.Itoa(n)
 }

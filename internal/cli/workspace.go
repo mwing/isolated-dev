@@ -83,6 +83,10 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	if cfg.UpgradePackages {
 		pinned = project.WithPackageUpgrade(pinned)
 	}
+	// An account for the uid the run will use. The templates create one;
+	// a project's own Dockerfile does not know to, and without it the run
+	// has no name and no writable home.
+	pinned = project.WithDevUser(pinned)
 
 	pol, err := loadPolicy(env)
 	if err != nil {
