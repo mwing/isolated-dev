@@ -544,7 +544,7 @@ mechanisms meeting.*
   overwrite one ref. Random ids and append-only capture refs; a lock held
   for the life of a run.
 
-### B27. Smaller findings from the same review — `todo`
+### B27. Smaller findings from the same review — `done`
 
 - ~~The agent's home volume is per-agent, not per-project, and all of
   `/home/dev` persists — so project A can write agent configuration,
@@ -584,10 +584,56 @@ mechanisms meeting.*
   the rule it asks of every project. The overlay tag does not carry the
   pins, so `dev pin` says when a `--rebuild` is what picks a new digest up.
 - Path as the identity of trust (B2) is worth reopening on a variant B2 did
-  not consider: an id this tool generates and stores in local git metadata,
-  never committed. It is not self-asserted by the repository — a hostile
-  clone into the same path simply lacks it and inherits nothing — which is
-  the objection that killed B2.
+  not consider. Written up as **B29** rather than left as a bullet: it
+  reopens a dropped decision, which deserves the argument in full.
+
+### B29. A marker the tool minted, not one the repository asserts — `todo`
+
+B2 was dropped for a good reason and on an incomplete search. The reason:
+binding trust to the git origin reads an identity out of the repository
+whose identity is in question, and `git remote set-url` defeats it in one
+command. The gap: every candidate considered was a signal *found in* the
+repository. There is another kind — a value this tool generates itself.
+
+On acceptance, write a random id into the repository's local git metadata
+(`git config --local dev.id <nonce>`, under `--git-common-dir` so worktrees
+and submodules resolve to the same place) and record it beside the grants.
+Then on each run:
+
+| state | meaning | behaviour |
+|---|---|---|
+| present, matches | the tree that was accepted | trust applies |
+| absent | something else is at this path now | ask again, and say why |
+| present, differs | a different accepted tree moved here | ask again |
+
+This survives the objection that killed B2 because nothing is *believed*:
+the id is a nonce the tool minted, and the repository is only storing it.
+`git clone` does not copy local config, so `rm -rf foo && git clone evil
+foo` arrives with no id and inherits nothing — which is the exact payload
+B2 set out to stop. It is also quiet, unlike keying on HEAD: the id does
+not change when the code does, so it fires when the identity changes and
+at no other time.
+
+What it does not do, stated so it is not later mistaken for more:
+
+- It is not a defence against someone who can already write inside the
+  accepted tree's `.git`. They are inside the thing that was accepted; B2
+  was about a *new* project at an *old* path.
+- A whole-directory copy — `cp -a`, rsync, a restored backup, an unpacked
+  tarball — carries `.git/config` with it, so the copy inherits. Arguably
+  right (same tree, moved) and worth saying rather than discovering.
+- A non-git project has nowhere to put a marker that is not also a file in
+  the tree. Those keep path-only trust, and the honest thing is to say so
+  where trust is explained rather than imply a guarantee that only some
+  projects get.
+- Re-cloning your own repository at the same path asks again. Correct, and
+  cheap: it is one prompt at the moment the tree was replaced.
+
+Ordering: this is a real narrowing but not a hole — **B12** already
+removed the dangerous payload (a new project at an old path silently
+inheriting `mount_docker_socket: true`), which is why B2 could be dropped
+at all. So this is post-1.0 work, and the documentation duty from B2
+stands until it lands.
 
 ### B14. Learning mode — `todo`
 
