@@ -2,6 +2,7 @@ package clone
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -229,5 +230,116 @@ func TestInvariantReuseDoesNotRewriteProvenance(t *testing.T) {
 
 	if got := ProvenanceOf(dest); got.Branch != first.Branch || got.Base != first.Base {
 		t.Fatalf("reuse rewrote provenance: %+v -> %+v", first, got)
+	}
+}
+
+// INVARIANT: host git never executes configuration an agent controls.
+//
+// Stated over the set of keys rather than over the four or five a previous
+// test happened to name. Git executes what a dozen settings name, the list
+// grows with git itself, and the ones that were tested were the ones
+// someone had already thought of — which is the wrong way round for an
+// invariant. A key added to git after this was written will not be in the
+// table either, but a table is at least a place to add it.
+//
+// Asserted on a file the payload writes, not on captured output. A payload
+// whose stdout is discarded still ran, and "ran" is the thing that must not
+// happen.
+func TestInvariantHostGitRunsNothingTheCloneNames(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	// Something for the reads to find, so they do real work.
+	write(t, filepath.Join(dest, "kept.txt"), "changed by the agent\n")
+	if _, err := git(ctx, run, dest, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, run, dest, "commit", "-qm", "agent work"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The payload records that it ran, in a place no git command writes.
+	marker := filepath.Join(t.TempDir(), "ran")
+	script := filepath.Join(dest, "pwn.sh")
+	write(t, script, "#!/bin/sh\necho ran > "+marker+"\nexit 1\n")
+	if err := os.Chmod(script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Every setting whose value git runs as a program. Some need a
+	// companion in the tree — a filter is chosen by .gitattributes, an
+	// alias by being invoked — and those are set up alongside.
+	for _, key := range []string{
+		"core.fsmonitor",
+		"core.hooksPath",
+		"core.pager",
+		"core.editor",
+		"core.sshCommand",
+		"core.askPass",
+		"core.gitProxy",
+		"uploadpack.packObjectsHook",
+		"diff.external",
+		"gpg.program",
+		"credential.helper",
+		"sequence.editor",
+		"filter.hostile.clean",
+		"filter.hostile.smudge",
+		"diff.hostile.textconv",
+		"merge.hostile.driver",
+	} {
+		if _, err := git(ctx, run, dest, "config", key, "./pwn.sh"); err != nil {
+			t.Fatalf("planting %s: %v", key, err)
+		}
+	}
+	// The attributes file is what makes the filter and textconv drivers
+	// reachable: the driver name is the clone's to choose, so there is no
+	// key to blank and only quarantining the config closes it.
+	write(t, filepath.Join(dest, ".gitattributes"),
+		"* filter=hostile diff=hostile merge=hostile\n")
+
+	// Every way host code reads or fetches from a clone.
+	reads := map[string]func() error{
+		"Read/status": func() error {
+			_, err := Read(ctx, run, dest, "status", "--porcelain")
+			return err
+		},
+		"Read/diff": func() error {
+			_, err := Read(ctx, run, dest, "diff", "HEAD")
+			return err
+		},
+		"Read/log": func() error {
+			_, err := Read(ctx, run, dest, "log", "--oneline", "-1")
+			return err
+		},
+		"State": func() error {
+			_, _, _, _ = State(ctx, run, dest)
+			return nil
+		},
+		"driftNotes": func() error {
+			_, err := driftNotes(ctx, run, src, dest)
+			return err
+		},
+		"Anomalies": func() error {
+			_ = Anomalies(ctx, run, dest)
+			return nil
+		},
+		"Capture": func() error {
+			_, err := Capture(ctx, run, src, dest, "invariant")
+			return err
+		},
+		"Prepare/reuse": func() error {
+			_, err := Prepare(ctx, run, Options{Project: src, Dest: dest})
+			return err
+		},
+	}
+	for name, read := range reads {
+		_ = read()
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("%s ran a program the clone named", name)
+		}
 	}
 }
