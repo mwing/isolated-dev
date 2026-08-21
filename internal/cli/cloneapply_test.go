@@ -280,3 +280,92 @@ func TestInvariantApplyOnDetachedHeadKeepsOtherBranchesWork(t *testing.T) {
 	t.Fatalf("apply from a detached HEAD dropped another branch's capture %s; left: %v",
 		got.Ref, refs)
 }
+
+// A commit subject is a field the committer chose, and git stores whatever
+// it is given — unlike a branch name, which check-ref-format refuses. `dev
+// clone diff` is the review step, printed on a terminal that executes some
+// of what it is sent: an escape sequence here can erase the line above it,
+// so a reader scrolling a list of commits cannot trust that the list is
+// what it appears to be.
+func TestCloneDiffDoesNotPrintTerminalEscapesFromASubject(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"}, {"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "work.txt", "work\n", "tidy up\x1b[2K\x1b[1Aapproved by you")
+
+	if err := h.run(t, "clone", "diff"); err != nil {
+		t.Fatalf("clone diff: %v\n%s", err, h.stderr.String())
+	}
+	out := h.stdout.String()
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("an escape sequence from the clone reached the terminal:\n%q", out)
+	}
+	// And the subject is still there to read, or the sanitizing has hidden
+	// the thing the review exists to show.
+	if !strings.Contains(out, "tidy up") {
+		t.Errorf("the subject was lost, not sanitized:\n%s", out)
+	}
+}
+
+// `git fetch <path> HEAD:branch` follows tags pointing at the objects it
+// fetched, so an explicit refspec is not enough: a tag the agent made lands
+// in the user's own repository, where `git describe` and release tooling
+// read it. The capture path already carried --no-tags; apply did not.
+func TestApplyDoesNotBringTagsOutOfTheClone(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"}, {"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "work.txt", "work\n", "work in the clone")
+	// -c tag.gpgSign=false and an annotated tag: a bare `git tag <name>`
+	// exits non-zero for anyone whose global config signs tags, and a
+	// runner returns that as an exit code rather than an error — so the
+	// first version of this test silently created no tag and proved
+	// nothing. The tag is read back below for the same reason.
+	if res, err := run.Run(ctx, runner.Command{Path: "git", Dir: clonePath,
+		Args: []string{"-c", "tag.gpgSign=false", "tag", "-a", "v99.0.0", "-m", "t"}}); err != nil ||
+		res.ExitCode != 0 {
+		t.Fatalf("tagging the clone: %v %q", err, res.Stderr)
+	}
+	if res, err := run.Run(ctx, runner.Command{Path: "git", Dir: clonePath,
+		Args: []string{"tag"}}); err != nil || !strings.Contains(res.Stdout, "v99.0.0") {
+		t.Fatalf("the clone has no tag, so this test proves nothing: %v %q", err, res.Stdout)
+	}
+
+	if err := applyClone(ctx, h.env, "clone-work"); err != nil {
+		t.Fatalf("apply: %v\n%s", err, h.stderr.String())
+	}
+
+	tags, err := run.Run(ctx, runner.Command{Path: "git", Dir: project, Args: []string{"tag"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(tags.Stdout, "v99.0.0") {
+		t.Errorf("a tag from the clone landed in the project: %q", tags.Stdout)
+	}
+}

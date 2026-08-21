@@ -265,7 +265,7 @@ already broke this way once.
 
 ---
 
-### B24. Host-side git against a clone is unsandboxed — `doing`
+### B24. Host-side git against a clone is unsandboxed — `done`
 
 *Numbered after B23 and placed here because it is a live exposure in
 shipped code, not forward-looking work.*
@@ -357,37 +357,67 @@ inside the clone where `uploadpack.packObjectsHook` names a host program).
 A test plants four payloads plus a `.gitattributes` filter and drives
 `dev clone diff` and `dev clone apply` through them.
 
-**Still to do, and sharper than this entry had it.** The review turned the
-`origin` trust from a principle into an exploit: setting `origin = .` in a
-clone makes `State` check the clone's commits against *itself*, so they all
-look contained and `dev clone rm` / `dev clone prune` delete them without
-`--force`. That is data loss, not just misplaced trust. `State` asks the
-clone where the project is
-(`remote get-url origin`), which is the shape B2 named — reading an
-identity out of the repository whose identity is in question. It is
-deliberately outside the quarantine, because the quarantine removes it, and
-the fix is for the caller to pass the project in. That is a signature change
-through every caller of `State`, so it is the next increment.
+**Done, fifth pass — the remainder, and one new finding.**
 
-Two more from the review, both real and unfixed: `--clone` cannot start
-from an unborn repository (`git diff HEAD` fails with no commits —
-verified), and untracked filenames with leading or trailing whitespace are
-mishandled because the file list is newline-split and trimmed rather than
-read with `-z`.
+*The unborn repository.* `--clone` refused the state a project is in
+between `git init` and its first commit, because `git diff HEAD` has no
+HEAD to diff against. There is nothing to patch there and no history in
+the clone to patch onto, so every file is carried as a file — including
+staged ones, which are in the index rather than untracked and would
+otherwise have been left behind.
 
-Also still to do: refusing
-clone-derived strings as git arguments, sanitizing control characters out
-of commit subjects and author names, and reporting anomalies
-(`refs/replace/*`, an unexpected `.git/shallow`) instead of working around
-them. `dev clone diff` in `internal/cli` still runs unhardened.
+*Whitespace in filenames.* The file list was newline-split and each entry
+trimmed, so ` leading.txt` was looked for under a name it does not have
+and the copy failed — a legal filename breaking the mode outright. Read
+with `-z` now, and nothing trimmed.
 
-**Done when:** one hardened helper is the only way host code runs git
-against a clone — repo-config quarantined (with a restore that survives a
-crash and a signal, since a half-quarantined clone has lost its identity
-and its remote), hardened flags set anyway, clone-derived strings never
-used as arguments, output sanitized for control characters, and anomalies
-like `refs/replace/*` or an unexpected `.git/shallow` reported rather than
-worked around.
+*Clone-derived strings as git arguments.* A ref may begin with `-`, which
+git reads as an option, so `safeArg` and `safeSHA` refuse rather than
+escape: there is no quoting that makes `-P` not an option. Applied where a
+value read from a clone becomes an argument — `State`'s candidate shas,
+`driftNotes`' branch and merge base, the tip that names a second capture
+ref. An unaccountable value in `State` counts as unmerged, because "I
+cannot identify this commit" and "this commit is safe" are different
+statements.
+
+*Control characters.* Commit subjects and the paths in `--stat` are
+sanitized on the way to the terminal (`clone.Sanitize`: C0, C1, DEL,
+U+2028/9 and the bidi overrides, replaced rather than dropped so a subject
+that tried something looks odd instead of merely shorter). Patch bodies are
+deliberately not: a diff is the content, and rewriting it would show
+something other than what is there. Worth recording what is *not* the
+channel — git's own check-ref-format refuses a control character in a
+branch name, so the sanitizing in the drift notes is belt-and-braces, and
+there is a test asserting git still refuses it.
+
+*Anomalies.* `Anomalies` reports replace refs, a grafts file, and a
+`.git/shallow` git does not recognize. Each is already handled — replace
+objects by `GIT_NO_REPLACE_OBJECTS`, grafts by not being read — which is
+exactly why they are worth saying: a defence that works invisibly leaves
+the user believing they are reading a repository nobody arranged for them.
+
+*New, found while testing the above.* `dev clone apply` fetched without
+`--no-tags`. An explicit refspec does not stop tag following — measured: a
+tag in the clone lands in the project as `* [new tag] v99.0.0` — so an
+agent could write a tag into the user's own repository, where `git
+describe` and release tooling read it. The capture path already carried the
+flag and said why; apply did not. Both tests for this pass only with their
+fix, which is worth stating because the first version of the tag test
+created no tag at all: a bare `git tag <name>` exits non-zero for anyone
+whose config signs tags, and the runner reports that as an exit code rather
+than an error, so the test was green and vacuous.
+
+**Done when — and it is:** one hardened helper is the only way host code
+runs git against a clone — repo-config quarantined (with a restore that
+survives a crash and a signal, since a half-quarantined clone has lost its
+identity and its remote), hardened flags set anyway, clone-derived strings
+never used as arguments, output sanitized for control characters, and
+anomalies like `refs/replace/*` or an unexpected `.git/shallow` reported
+rather than worked around.
+
+What is deliberately *not* claimed: this makes host-side git against a
+clone safe to run, not the clone trustworthy. Its contents are still the
+agent's, which is what the review step is for.
 
 ## P2 — later, and only if wanted
 

@@ -53,7 +53,13 @@ func diffClone(ctx context.Context, env *Env, stat bool) error {
 		return err
 	}
 	if strings.TrimSpace(commits) != "" {
-		fmt.Fprintf(env.Stdout, "Commits the project does not have:\n\n%s\n", commits)
+		// Sanitized: these lines are commit subjects, and a subject is a
+		// field the committer chose. This is the review step, on a terminal
+		// that executes some of what it is sent — an escape sequence here
+		// could erase the line above it or redraw one commit as another,
+		// which is precisely the trust the review depends on.
+		fmt.Fprintf(env.Stdout, "Commits the project does not have:\n\n%s\n",
+			clone.SanitizeLines(commits))
 	}
 
 	args := []string{"diff", "HEAD"}
@@ -65,6 +71,12 @@ func diffClone(ctx context.Context, env *Env, stat bool) error {
 		return err
 	}
 	if strings.TrimSpace(uncommitted) != "" {
+		// Not sanitized, deliberately: a patch is the content, and rewriting
+		// it would mean showing something other than what is there. `--stat`
+		// names files, which is the same class as a subject.
+		if stat {
+			uncommitted = clone.SanitizeLines(uncommitted)
+		}
 		fmt.Fprintf(env.Stdout, "Uncommitted in the clone:\n\n%s\n", uncommitted)
 	}
 
@@ -127,14 +139,18 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	var out string
 	if qerr := clone.WhileQuarantined(path, func() error {
 		var ferr error
-		out, ferr = projectGit(ctx, env, project, "fetch", path,
+		// --no-tags for the reason the capture path already carries it: an
+		// explicit refspec does not stop tag following, so without it a tag
+		// the agent made lands in the user's own repository, where
+		// `git describe` and release tooling read it.
+		out, ferr = projectGit(ctx, env, project, "fetch", "--no-tags", path,
 			fmt.Sprintf("HEAD:%s", branch), "--force")
 		return ferr
 	}); qerr != nil {
 		return fmt.Errorf("fetching from the clone: %w", qerr)
 	}
 	if strings.TrimSpace(out) != "" {
-		fmt.Fprintln(env.Stdout, strings.TrimSpace(out))
+		fmt.Fprintln(env.Stdout, clone.SanitizeLines(strings.TrimSpace(out)))
 	}
 
 	// Captures from runs that ended without anyone applying them. They are

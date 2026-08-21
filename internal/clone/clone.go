@@ -303,39 +303,60 @@ func cloneArgs(o Options) []string {
 func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) ([]string, error) {
 	var notes []string
 
-	// --binary so the patch survives files git considers binary; without
-	// it, apply fails on exactly the files nobody remembers to check.
-	//
-	// The output is used verbatim: a patch is newline-terminated, and
-	// trimming the last one makes `git apply` reject it as corrupt.
-	diffRes, err := git(ctx, run, src, "diff", "--no-ext-diff", "HEAD", "--binary")
-	if err != nil {
-		return notes, err
+	// A repository with no commits has no HEAD to diff against, and `git
+	// diff HEAD` fails rather than reporting everything — so `--clone` used
+	// to refuse the case it should handle most easily. There is nothing to
+	// patch: every file, staged or not, is carried as a file, because the
+	// clone has no history to apply a patch onto either.
+	unborn := !hasCommits(ctx, run, src)
+	if unborn {
+		notes = append(notes, "the project has no commits yet, so the clone starts empty "+
+			"and the files are copied in")
 	}
-	diff := diffRes.Stdout
-	if strings.TrimSpace(diff) != "" {
-		res, err := run.Run(ctx, runner.Command{
-			Path:  "git",
-			Args:  []string{"-C", dest, "apply", "--whitespace=nowarn"},
-			Stdin: strings.NewReader(diff),
-		})
+
+	if !unborn {
+		// --binary so the patch survives files git considers binary; without
+		// it, apply fails on exactly the files nobody remembers to check.
+		//
+		// The output is used verbatim: a patch is newline-terminated, and
+		// trimming the last one makes `git apply` reject it as corrupt.
+		diffRes, err := git(ctx, run, src, "diff", "--no-ext-diff", "HEAD", "--binary")
 		if err != nil {
 			return notes, err
 		}
-		if res.ExitCode != 0 {
-			return notes, fmt.Errorf("carrying uncommitted changes into the clone: %s",
-				strings.TrimSpace(res.Stderr))
+		diff := diffRes.Stdout
+		if strings.TrimSpace(diff) != "" {
+			res, err := run.Run(ctx, runner.Command{
+				Path:  "git",
+				Args:  []string{"-C", dest, "apply", "--whitespace=nowarn"},
+				Stdin: strings.NewReader(diff),
+			})
+			if err != nil {
+				return notes, err
+			}
+			if res.ExitCode != 0 {
+				return notes, fmt.Errorf("carrying uncommitted changes into the clone: %s",
+					strings.TrimSpace(res.Stderr))
+			}
+			notes = append(notes, "uncommitted changes carried in")
 		}
-		notes = append(notes, "uncommitted changes carried in")
 	}
 
-	untracked, err := gitOutput(ctx, run, src, "ls-files", "--others", "--exclude-standard")
+	// -z, and no trimming. The list was newline-split and each entry
+	// trimmed, so a file named " notes.txt" or "draft " was looked for
+	// under a name it does not have and the copy failed — a legal filename
+	// breaking the mode outright. With no commits, staged files are in the
+	// index rather than untracked, so they are asked for too.
+	args := []string{"ls-files", "-z", "--others", "--exclude-standard"}
+	if unborn {
+		args = append(args, "--cached")
+	}
+	untracked, err := gitOutput(ctx, run, src, args...)
 	if err != nil {
 		return notes, err
 	}
 	var copied int
-	for _, rel := range strings.Split(untracked, "\n") {
-		rel = strings.TrimSpace(rel)
+	for _, rel := range strings.Split(untracked, "\x00") {
 		if rel == "" {
 			continue
 		}
@@ -381,9 +402,12 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 	srcBranch := strings.TrimSpace(branchOf(ctx, run, src))
 	destBranch := strings.TrimSpace(branchOf(ctx, run, dest))
 	if srcBranch != "" && destBranch != "" && srcBranch != destBranch {
+		// The clone's branch name is the agent's to choose, and this line is
+		// printed on a terminal. An escape sequence in it could erase the
+		// warning it is part of.
 		notes = append(notes, fmt.Sprintf(
 			"⚠  it is on %q and this project is on %q: work done here starts from "+
-				"the wrong branch", destBranch, srcBranch))
+				"the wrong branch", Sanitize(destBranch), srcBranch))
 		notes = append(notes, "   `dev clone rm --force` discards it so the next run clones afresh")
 	}
 
@@ -403,11 +427,19 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 		if _, err := cloneGit(ctx, run, dest, "cat-file", "-e",
 			strings.TrimSpace(srcHead)+"^{commit}"); err != nil {
 			behind := ""
-			if base, berr := cloneGitOutput(ctx, run, dest, "rev-parse",
-				"origin/"+destBranch); berr == nil {
-				if n, nerr := gitOutput(ctx, run, src, "rev-list", "--count",
-					strings.TrimSpace(base)+"..HEAD"); nerr == nil {
-					behind = " (" + strings.TrimSpace(n) + " commit(s))"
+			// The branch name came out of the clone and the base out of a
+			// rev-parse there, and both then become arguments to git in the
+			// user's own repository. Checked rather than trusted: a ref may
+			// begin with `-`, which git reads as an option.
+			if ref, rerr := safeArg("branch name", destBranch); rerr == nil {
+				if base, berr := cloneGitOutput(ctx, run, dest, "rev-parse",
+					"origin/"+ref); berr == nil {
+					if sha, serr := safeSHA(base); serr == nil {
+						if n, nerr := gitOutput(ctx, run, src, "rev-list", "--count",
+							sha+"..HEAD"); nerr == nil {
+							behind = " (" + strings.TrimSpace(n) + " commit(s))"
+						}
+					}
 				}
 			}
 			notes = append(notes, fmt.Sprintf(
@@ -423,7 +455,58 @@ func driftNotes(ctx context.Context, run runner.Runner, src, dest string) ([]str
 			notes = append(notes, fmt.Sprintf("%d uncommitted change(s) already in the clone", n))
 		}
 	}
+	// A reused clone is one an agent has already had write access to, which
+	// is the only case where these can be there at all.
+	notes = append(notes, Anomalies(ctx, run, dest)...)
 	return notes, nil
+}
+
+// hasCommits reports whether a repository has a commit at HEAD.
+//
+// The unborn case is not an error to route around: a fresh `git init` with
+// files in it is an ordinary state, and it is the one where an agent is
+// most useful.
+func hasCommits(ctx context.Context, run runner.Runner, dir string) bool {
+	_, err := gitOutput(ctx, run, dir, "rev-parse", "--verify", "--quiet", "HEAD")
+	return err == nil
+}
+
+// Anomalies reports things in a clone that change what git means, rather
+// than working around them silently.
+//
+// Each of these is handled elsewhere — replace objects by
+// GIT_NO_REPLACE_OBJECTS, grafts by not being read — and that is exactly
+// why they are worth saying: a defence that works invisibly leaves the user
+// believing they are reading a repository nobody arranged for them. The
+// point of the review step is that the reader can trust what they read.
+func Anomalies(ctx context.Context, run runner.Runner, clonePath string) []string {
+	var notes []string
+
+	if refs, err := cloneGitOutput(ctx, run, clonePath, "for-each-ref",
+		"--format=%(refname)", "refs/replace"); err == nil && len(nonEmptyLines(refs)) > 0 {
+		notes = append(notes, fmt.Sprintf(
+			"⚠  %d replace ref(s) in the clone: they substitute one commit for another, "+
+				"so a read there can show different content than a fetch delivers. Reads "+
+				"here ignore them", len(nonEmptyLines(refs))))
+	}
+
+	if _, err := os.Lstat(filepath.Join(clonePath, ".git", "info", "grafts")); err == nil {
+		notes = append(notes, "⚠  the clone has a grafts file, which rewrites what its "+
+			"history looks like. Reads here ignore it")
+	}
+
+	// A shallow file the tool did not ask for. `--depth` is reported as an
+	// ordinary note elsewhere; this is the case where git itself says the
+	// repository is not shallow while the file that makes it so is present,
+	// which means something has been arranged by hand.
+	if _, err := os.Lstat(filepath.Join(clonePath, ".git", "shallow")); err == nil {
+		if out, gerr := cloneGitOutput(ctx, run, clonePath, "rev-parse",
+			"--is-shallow-repository"); gerr == nil && strings.TrimSpace(out) != "true" {
+			notes = append(notes, "⚠  the clone has a .git/shallow that git does not "+
+				"recognize, so its history is not what it appears to be")
+		}
+	}
+	return notes
 }
 
 // branchOf is the checked-out branch name, empty on a detached HEAD.
@@ -690,7 +773,15 @@ func State(ctx context.Context, run runner.Runner, path string) (dirty, unmerged
 	}
 
 	for _, sha := range candidates {
-		sha = strings.TrimSpace(sha)
+		// Validated before it becomes an argument, even though it came from
+		// git's own %H. If it is not an object name then it did not come
+		// from where this code thinks it did, and the safe reading of that
+		// is "a commit I cannot account for", not "a commit that is safe".
+		sha, err := safeSHA(sha)
+		if err != nil {
+			unmerged++
+			continue
+		}
 		// A commit no branch in the project contains would be lost with
 		// the directory. One that is merged, or fetched onto a branch, is
 		// already safe.

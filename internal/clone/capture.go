@@ -80,7 +80,14 @@ func Capture(ctx context.Context, run runner.Runner, projectDir, clonePath, id s
 		if terr != nil {
 			return ferr
 		}
-		ref += "-" + strings.TrimSpace(tip)
+		// The tip becomes part of a ref name written into the user's own
+		// repository, so it has to be an object name and nothing else:
+		// read from a clone, checked before use.
+		short, serr := safeSHA(tip)
+		if serr != nil {
+			return ferr
+		}
+		ref += "-" + short
 		_, ferr = git(ctx, run, projectDir, "fetch", "--no-tags", clonePath, "HEAD:"+ref)
 		return ferr
 	})
