@@ -446,6 +446,33 @@ invariants are the tests those fixes should be verified against, and the
 thing most likely to catch the next composition failure before a reviewer
 does.
 
+**Done so far:** five in `internal/clone/invariants_test.go` (unrelated
+objects, captured work staying reachable, the source repository being
+unmodifiable, two runs never sharing a working tree, provenance describing
+the run it was made for) and one in `internal/cli` (captures surviving an
+apply from a detached HEAD). Two of the six caught real bugs on the way in.
+
+**Remaining, and one thing already found by writing it down.** The
+invariant "a project request can never widen access without a user
+decision" wants a test that walks the settings a project file can carry
+rather than naming them one at a time — precisely so a field added later
+without consent wiring fails a test rather than shipping. Reading the two
+ends against each other already disagrees:
+
+- `config.SecurityAsks` carries `ForwardPorts` and `Describe()` announces
+  it as "publish ports: …", so `dev doctor` reports a requested grant.
+  `projectAsks` has no key for it, so `dev accept` cannot accept it — and
+  nothing publishes it either: `forward_ports` reaches no run. A key that
+  is announced, unacceptable and inert is three kinds of wrong at once, and
+  the honest fix is the one the loader already has a mechanism for
+  (`deadKeys`) rather than a fourth.
+- Ports *are* published, from a devcontainer's `forwardPorts`
+  (`internal/cli/devcontainer.go`), bound to 127.0.0.1 and with no consent
+  key of their own. Defensible — the user chose a devcontainer, and
+  localhost is not the LAN — but it is a project-declared binding on the
+  host, and the invariant is what makes the question get asked rather than
+  assumed.
+
 ### B25. A clone hands over more history than the run needs — `done`
 
 *Pre-release. Numbered late, placed here because it is a confidentiality
