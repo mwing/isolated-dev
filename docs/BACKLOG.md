@@ -460,18 +460,24 @@ without consent wiring fails a test rather than shipping. Reading the two
 ends against each other already disagrees:
 
 - `config.SecurityAsks` carries `ForwardPorts` and `Describe()` announces
-  it as "publish ports: …", so `dev doctor` reports a requested grant.
-  `projectAsks` has no key for it, so `dev accept` cannot accept it — and
-  nothing publishes it either: `forward_ports` reaches no run. A key that
-  is announced, unacceptable and inert is three kinds of wrong at once, and
-  the honest fix is the one the loader already has a mechanism for
-  (`deadKeys`) rather than a fourth.
-- Ports *are* published, from a devcontainer's `forwardPorts`
-  (`internal/cli/devcontainer.go`), bound to 127.0.0.1 and with no consent
-  key of their own. Defensible — the user chose a devcontainer, and
-  localhost is not the LAN — but it is a project-declared binding on the
-  host, and the invariant is what makes the question get asked rather than
-  assumed.
+  it as "publish ports: …", so `dev doctor` reports it as a requested
+  grant — but `projectAsks` has no key for it, so `dev accept` cannot
+  accept it and no run is stopped by it. It is not inert, which was my
+  first reading and wrong: `forward_ports` reaches
+  `detect.Ports(cfg.ForwardPorts, …)` in `project.go`, becomes `p.Ports`,
+  and the sidecar publishes it (the workload is on an internal network and
+  cannot publish for itself). So a project file can bind a host port —
+  127.0.0.1 only, and printed in the run header as
+  `↦ http://127.0.0.1:3000 → container :3000`, which is the mitigation
+  that keeps this small.
+- The same list is also filled by language detection and by a
+  devcontainer's `forwardPorts`, neither of which anyone asked for. A
+  detected port is the tool's own doing and needs no consent from the
+  user; a port named by the repository is a request, and requests have
+  keys. Deciding which of those `forward_ports` is — and whether localhost
+  binding is a widening worth a prompt, given a browser on the same
+  machine can reach it — is the open question. Recorded rather than
+  answered in passing.
 
 ### B25. A clone hands over more history than the run needs — `done`
 
