@@ -89,11 +89,18 @@ func Prepare(ctx context.Context, run runner.Runner, o Options) (Result, error) 
 		// Also on the reuse path, so clones made before this existed are
 		// repaired rather than left as the one that still cannot commit.
 		res.Notes = append(res.Notes, ensureIdentity(ctx, run, projectDir, dest)...)
-		_ = recordProvenance(dest, Provenance{
-			Project: projectDir,
-			Branch:  CurrentBranch(ctx, run, projectDir),
-			Base:    headOf(ctx, run, projectDir),
-		})
+		// Recorded at creation and never rewritten. Re-recording here
+		// would say the clone came from wherever the host has moved to
+		// since, which is the bug the capture path was fixed for, one level
+		// up. Filled in only when missing, for clones made before any of
+		// this existed.
+		if have := ProvenanceOf(dest); have.Branch == "" {
+			_ = recordProvenance(dest, Provenance{
+				Project: firstNonEmptyString(have.Project, projectDir),
+				Branch:  branchOf(ctx, run, dest),
+				Base:    have.Base,
+			})
+		}
 		return res, err
 	}
 
@@ -625,6 +632,11 @@ func Remove(path string) error {
 	if err := os.Remove(ProjectFile(path)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	// And the lock, which is only meaningful while there is something to
+	// lock. Leaving it would accumulate a file per clone ever made.
+	if err := os.Remove(path + ".lock"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return nil
 }
 
@@ -701,4 +713,11 @@ func headOf(ctx context.Context, run runner.Runner, dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+func firstNonEmptyString(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

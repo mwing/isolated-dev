@@ -157,3 +157,77 @@ func TestInvariantTheSourceIsNeverModified(t *testing.T) {
 		t.Fatalf("a file in the source changed: %q", body)
 	}
 }
+
+// INVARIANT: two simultaneous runs can never write the same git working
+// tree.
+//
+// clone.Dir is one mutable directory per project and nothing serializes
+// access to it, so two `dev agent run`s against one repository mount the
+// same tree, index and refs at once. Neither is doing anything wrong; the
+// pair is the defect.
+func TestInvariantOnlyOneRunHoldsAClone(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := Lock(dest)
+	if err != nil {
+		t.Fatalf("first run could not take the clone: %v", err)
+	}
+	defer release()
+
+	if _, err := Lock(dest); err == nil {
+		t.Fatal("a second run took a clone the first is still holding")
+	} else if !strings.Contains(err.Error(), "in use") {
+		t.Errorf("the refusal does not say what is wrong: %v", err)
+	}
+
+	// And it has to be reusable afterwards, or the lock is a leak.
+	release()
+	again, err := Lock(dest)
+	if err != nil {
+		t.Fatalf("the clone stayed locked after the run finished: %v", err)
+	}
+	again()
+}
+
+// INVARIANT: a clone's provenance describes the run it was made for, and
+// nothing that happened to the host afterwards.
+//
+// Reuse re-recorded the host's current branch, which reintroduced one
+// level up exactly the bug the capture path was fixed for: the clone is
+// still on the branch it was made from, and saying otherwise files its
+// work under a branch it never came from.
+func TestInvariantReuseDoesNotRewriteProvenance(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	run := runner.New(false)
+	ctx := context.Background()
+
+	if _, err := git(ctx, run, src, "checkout", "-q", "-b", "feature-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	first := ProvenanceOf(dest)
+	if first.Branch != "feature-a" {
+		t.Fatalf("provenance at creation = %+v", first)
+	}
+
+	// The human moves on, then another run reuses the clone.
+	if _, err := git(ctx, run, src, "checkout", "-q", "-b", "feature-b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ProvenanceOf(dest); got.Branch != first.Branch || got.Base != first.Base {
+		t.Fatalf("reuse rewrote provenance: %+v -> %+v", first, got)
+	}
+}

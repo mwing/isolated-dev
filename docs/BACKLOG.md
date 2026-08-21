@@ -482,7 +482,7 @@ needs the base branch, the answer is to fetch that one ref deliberately
 rather than to widen the clone back to everything; that is a smaller
 feature and is not built.
 
-### B26. Composition failures around clones and captures — `todo`
+### B26. Composition failures around clones and captures — `done`
 
 *Pre-release. Three defects that each arise from two individually-safe
 mechanisms meeting.*
@@ -503,7 +503,18 @@ mechanisms meeting.*
   first. Fix: a separate `AllCapturedRefs` so detached cannot mean
   wildcard, and one invariant for deletion — never drop a capture unless
   its tip is reachable from a local branch.
-- **Reuse overwrites provenance.** `Prepare` records the host's *current*
+- **Reuse overwrites provenance — done.** `Prepare` records provenance when
+  the clone is made and never rewrites it, filling it in only when missing.
+  Re-recording on reuse said the clone came from wherever the host had moved
+  to since, which is the capture-path bug one level up. The invariant test
+  creates a clone on one branch, switches the host to another, reuses, and
+  asserts the record did not move.
+
+  The branch-mismatch *stop* the review asked for is not here: refusing
+  needs a per-run flag to resolve it (B12's rule), and that flag is part of
+  part 2's refresh design, which already lists it. The loud warning stays
+  until then.
+- ~~**Reuse overwrites provenance.**~~ `Prepare` records the host's *current*
   branch and base when it reuses a clone, which reintroduces one level up
   the bug the capture path was just fixed for: the clone may still be on
   the previous branch. Keep what was recorded at creation, and fail closed
@@ -514,7 +525,18 @@ mechanisms meeting.*
   named by its own tip, rather than one overwriting the other. The
   invariant that found it asserts earlier work stays reachable. Random ids
   are still worth doing; they are no longer load-bearing.
-- **Concurrent runs share one working tree.** `clone.Dir` is one mutable
+- **Concurrent runs share one working tree — done.** A run takes an flock
+  on a file beside the clone and holds it for its lifetime; a second run of
+  the same project is refused with what is wrong rather than quietly
+  writing the same index. flock rather than a file this tool creates and
+  removes, because the kernel releases it when a process dies and a crash
+  is the case nobody cleans up after. The invariant test asserts the second
+  attempt fails and that the clone is usable again afterwards.
+
+  Random capture ids are still worth doing but are no longer load-bearing:
+  captures became append-only, so a shared id now produces a second ref
+  rather than an overwrite.
+- ~~**Concurrent runs share one working tree.**~~ `clone.Dir` is one mutable
   directory per project with no cross-process serialization, so two runs
   write the same index and refs. Related: `captureID` is
   second-resolution while its comment promises uniqueness, and capture

@@ -205,8 +205,10 @@ func TestARunSaysWhenEarlierWorkIsUnapplied(t *testing.T) {
 	}
 
 	// Starting another run is where it has to be said.
-	if _, err := prepareCloneDir(ctx, h.env, project, 0, h.stderr); err != nil {
+	if _, release, err := prepareCloneDir(ctx, h.env, project, 0, h.stderr); err != nil {
 		t.Fatalf("prepare: %v\n%s", err, h.stderr.String())
+	} else {
+		release()
 	}
 	got := h.stderr.String()
 	if !strings.Contains(got, "not on") || !strings.Contains(got, "dev clone apply") {

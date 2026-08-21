@@ -86,8 +86,12 @@ func captureID(t time.Time) string {
 // out is where the clone's own account of itself goes. The console has to
 // send it somewhere that is not the screen the full-screen program is about
 // to take over.
+// The returned release must be held for the life of the run: it is what
+// stops a second run of the same project writing the same working tree.
+// It is never nil, so a caller can defer it without checking.
 func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int,
-	out io.Writer) (string, error) {
+	out io.Writer) (string, func(), error) {
+	noop := func() {}
 	dest := clone.Dir(env.Paths.Home, projectSlug(projectDir))
 	res, err := clone.Prepare(ctx, env.Runner, clone.Options{
 		Project: projectDir, Dest: dest, Depth: depth,
@@ -103,10 +107,10 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 				"   The agent edits these files directly, and nothing here\n"+
 				"   can undo that. `git init` first, or --in-place to silence this.\n\n",
 			projectDir)
-		return "", nil
+		return "", noop, nil
 	}
 	if err != nil {
-		return "", err
+		return "", noop, err
 	}
 	if res.Path != "" {
 		fmt.Fprintf(out, "Clone:     %s\n", res.Path)
@@ -144,7 +148,15 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 	// the tool's doing and its business to report — before it is a surprise
 	// rather than after.
 	warnCloneSpace(ctx, env)
-	return res.Path, nil
+
+	// Taken after the clone exists and before the run uses it. A refusal
+	// here is the right outcome: the alternative is two containers writing
+	// one index, and the loser is whichever was mid-write.
+	release, lerr := clone.Lock(res.Path)
+	if lerr != nil {
+		return "", noop, lerr
+	}
+	return res.Path, release, nil
 }
 
 // cloneOpts is what a command was told about the workspace, before the

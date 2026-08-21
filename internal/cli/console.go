@@ -163,10 +163,12 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		// To stderr, and before the program takes the screen: the clone's
 		// account of itself is several lines, and the full-screen view owns
 		// stdout from here on.
-		workspaceDir, err = prepareCloneDir(ctx, env, p.Dir, cl.depth, env.Stderr)
+		var release func()
+		workspaceDir, release, err = prepareCloneDir(ctx, env, p.Dir, cl.depth, env.Stderr)
 		if err != nil {
 			return err
 		}
+		defer release()
 	}
 
 	eng := container.New(env.driver(cfg.VMName))

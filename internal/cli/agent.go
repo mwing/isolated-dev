@@ -277,11 +277,12 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 					opts.Workspace = dest
 					fmt.Fprintf(env.Stdout, "Clone:     would prepare %s\n", dest)
 				} else {
-					dir, err := prepareCloneDir(cmd.Context(), env, opts.Project,
+					dir, release, err := prepareCloneDir(cmd.Context(), env, opts.Project,
 						cloneDepth, env.Stdout)
 					if err != nil {
 						return err
 					}
+					defer release()
 					if dir != "" {
 						opts.Workspace = dir
 					}
