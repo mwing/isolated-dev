@@ -607,3 +607,26 @@ func TestTheEgressStripIsLabelled(t *testing.T) {
 		t.Fatalf("divider does not say a question is waiting:\n%s", m.View())
 	}
 }
+
+// A denial at DNS and a denial at the proxy look identical to a reader and
+// are not the same event: only a request that reaches the proxy can be
+// held for a decision. Reported the same way, the first reads as the
+// prompt being broken — which is how it was reported from real use, where
+// `curl` was asked and an npm preinstall script was not.
+func TestADNSDenialSaysWhyItCouldNotBeAsked(t *testing.T) {
+	m := newTestModel(nil)
+	send(m, EventMsg(netpolicy.Event{Action: "deny", Host: "lith.fi", Method: "DNS",
+		Reason: "not in allowlist"}))
+	send(m, EventMsg(netpolicy.Event{Action: "deny", Host: "evil.example", Port: 443,
+		Method: "CONNECT", Reason: "not in allowlist"}))
+
+	view := m.View()
+	if !strings.Contains(view, "not askable") {
+		t.Errorf("a DNS denial does not say why no question was asked:\n%s", view)
+	}
+	// The proxy's denial keeps its plain form: it could have been asked, and
+	// saying otherwise would be false.
+	if strings.Contains(view, "evil.example:443 (asked DNS") {
+		t.Errorf("a proxy denial was labelled as a DNS one:\n%s", view)
+	}
+}

@@ -342,6 +342,25 @@ func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
 		}
 	case "deny":
 		m.blocked++
+		// A denial at DNS and a denial at the proxy are not the same event,
+		// and reported identically the difference is invisible. Only a
+		// request that reaches the proxy can be held for an answer, so a
+		// client that resolves names itself — node's https.request ignores
+		// HTTP_PROXY, where curl honours it — is refused with no question
+		// asked. Two failures that look alike but only one of which offered
+		// a choice reads as the prompt being broken.
+		//
+		// The prompt stays at the proxy. Answering "allow" for a name
+		// grants no route: the workload has no gateway of its own, so a
+		// client that did its own lookup would then fail to connect
+		// instead. Asking would be asking a question whose answer changed
+		// nothing — B10's point that a grant is not a road — so what is
+		// owed the user here is the reason and the way to act on it.
+		if e.Method == "DNS" {
+			m.addEvent(kindDeny, "✗ blocked "+dest+
+				" (not via the proxy, so not askable — dev allow "+e.Host+")")
+			break
+		}
 		m.addEvent(kindDeny, "✗ blocked "+dest)
 	case "timeout":
 		m.blocked++

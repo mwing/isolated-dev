@@ -26,7 +26,13 @@ type Notice struct {
 func (n Notice) String() string {
 	switch {
 	case n.Method == "DNS":
-		return fmt.Sprintf("blocked DNS lookup: %s", n.Destination)
+		// A lookup is refused before any request exists, so there is nothing
+		// to hold and nobody can be asked — unlike a denial at the proxy,
+		// which an interactive run offers as a choice. Saying so, and saying
+		// what to do instead, is the difference between a dead end and a
+		// decision the user can still make.
+		return fmt.Sprintf("blocked DNS lookup: %s (not via the proxy, "+
+			"so not askable — dev allow %s)", n.Destination, n.Destination)
 	case n.Count > 1:
 		return fmt.Sprintf("blocked: %s (x%d)", n.Destination, n.Count)
 	default:

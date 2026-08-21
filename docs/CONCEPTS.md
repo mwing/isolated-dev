@@ -93,6 +93,16 @@ in `dev console`, the request is *held* while you decide: allow once, allow
 for this project from now on, or refuse. That is a firewall prompt, not a
 report of something that already failed.
 
+**Only a request that reaches the proxy can be one.** A client that does
+its own DNS instead of using the proxy is refused at the resolver, before
+any request exists — so `curl example.com` is held for an answer while an
+npm `preinstall` script calling node's `https.request`, which ignores
+`HTTP_PROXY`, fails outright with `EAI_AGAIN`. That is not the prompt
+misbehaving, and moving the prompt to the resolver would not help: saying
+"allow" to a name grants no route, so the same client would then fail to
+connect instead. The refusal says which case it is, and `dev allow <host>`
+is how you answer a question that could not be asked.
+
 ---
 
 ## 3. What a project asks for is not what it gets
