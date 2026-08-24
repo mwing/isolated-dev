@@ -1011,7 +1011,12 @@ test_ubuntu_template_builds() {
     
     if [[ -f "Dockerfile" ]]; then
         assert_file_exists "Dockerfile" "Ubuntu Dockerfile created"
-        assert_contains "$(cat Dockerfile)" "USER 1000:1000" "Uses numeric UID instead of username"
+        # The templates take the uid as a build argument now: the image is
+        # built for whoever runs it, because a container running as anyone
+        # else cannot write to a bind-mounted workspace on Linux. Still
+        # numeric, which is what this assertion is about — a username would
+        # not exist in every base image.
+        assert_contains "$(cat Dockerfile)" 'USER $DEV_UID:$DEV_GID' "Uses numeric UID instead of username"
         assert_contains "$(cat Dockerfile)" "getent" "Handles existing UID/GID"
     else
         log "${YELLOW}⏭️  SKIP${NC}: Ubuntu template test (expected in test environment)"

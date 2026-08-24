@@ -158,8 +158,8 @@ func TestGitItselfRefusesAControlCharacterInABranchName(t *testing.T) {
 }
 
 func TestSanitizeKeepsTextAndDropsControl(t *testing.T) {
-	got := Sanitize("fix\x1b[31m the\ttest\x07‮")
-	if strings.ContainsAny(got, "\x1b\x07") || strings.Contains(got, "‮") {
+	got := Sanitize("fix\x1b[31m the\ttest\x07\u202e")
+	if strings.ContainsAny(got, "\x1b\x07") || strings.Contains(got, "\u202e") {
 		t.Errorf("control characters survived: %q", got)
 	}
 	if !strings.Contains(got, "fix") || !strings.Contains(got, "the\ttest") {
