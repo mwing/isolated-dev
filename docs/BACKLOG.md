@@ -928,11 +928,17 @@ Worth doing when something consumes one — an SBOM nobody reads is a file
 this tool has to keep correct for no reader. Carried over from the
 milestone plan, where it was open for the same reason.
 
-### B20. Codex end to end — `todo`
+### B20. Codex end to end — `done`
 
-The definition runs and the image builds, but it has never been driven
-through a real session with a key. Everything it shares with the claude
-path is exercised; what is unverified is the part that is its own.
+The definition runs and the image builds, but it had never been driven
+through a real session with a key: everything it shares with the claude
+path was exercised, and the part that is its own was not.
+
+Driven by hand, and it worked. Recorded as a report rather than a test —
+what was verified is that a real session runs, by the person who ran it,
+not something the suite will notice breaking. The parts that can be
+checked without a key already are; a session that needs an API key and a
+network is the part that stays manual.
 
 ### B21. Brokered credentials — `todo`
 
