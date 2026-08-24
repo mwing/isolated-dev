@@ -569,9 +569,13 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	spec.Image = image
 
 	if o.Clone || o.CloneDepth > 0 {
-		if err := useClone(ctx, env, p, &spec, o.CloneDepth); err != nil {
+		release, err := useClone(ctx, env, p, &spec, o.CloneDepth)
+		if err != nil {
 			return err
 		}
+		// Held for the run, not for the preparation: the point is that no
+		// second run writes this working tree while this one has it.
+		defer release()
 	}
 
 	switch p.Network {

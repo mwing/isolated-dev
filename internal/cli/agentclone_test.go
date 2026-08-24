@@ -192,6 +192,15 @@ func TestAnAgentIsBuiltOnTheProjectImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Accepted first: the agent path now checks whether the project image
+	// was built from these instructions rather than only whether it exists,
+	// so it reaches the build — and a build of a repository's own Dockerfile
+	// is the thing consent gates. Before, the stale image was used and
+	// nobody was asked.
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg, p, err := resolveProject(h.env)
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +225,15 @@ func TestAnAgentIsBuiltOnTheProjectImage(t *testing.T) {
 func TestAnAgentFallsBackToItsOwnBaseWithNoProject(t *testing.T) {
 	h := newHarness(t)
 	h.readyBackend()
+	// Accepted first: the agent path now checks whether the project image
+	// was built from these instructions rather than only whether it exists,
+	// so it reaches the build — and a build of a repository's own Dockerfile
+	// is the thing consent gates. Before, the stale image was used and
+	// nobody was asked.
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg, p, err := resolveProject(h.env)
 	if err != nil {
 		t.Fatal(err)

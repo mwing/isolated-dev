@@ -476,6 +476,47 @@ older version sat under the same name and was reused indefinitely. A fix
 that never reaches an existing project is not a fix — which is the same
 argument, and now the same label, as the sidecar's `dev.proxy.source`.
 
+### B31. A second external review, after 0.8.0 — `done`
+
+Four findings, all real, and the two P1s were both cases of a mechanism
+that existed and did not cover the path that mattered. That is the same
+shape as B30's, and worth naming: the defects are not in the ideas, they
+are in the places the idea was not applied.
+
+- **P1: `dev agent logout` could restore the login it had just removed.**
+  Migration keeps the old home volume on purpose, and `EnsureVolume`
+  imports from it whenever the config volume is missing — which is exactly
+  the state logout leaves behind. Logout, run, and the credential was
+  back. A command that does the opposite of its name is worse than a
+  missing command. Logout now discards the volumes it was migrated from as
+  well, and says so; the migration message points at it.
+- **P1: the clone lock was taken after the race it prevents, and one route
+  took it not at all.** `prepareCloneDir` locked once `Prepare` had created
+  the clone, a capture had fetched from it, and the config quarantine had
+  renamed `.git/config` aside and back — every one of those a thing two
+  runs must not do at once. `dev run --clone` and `dev shell --clone` never
+  locked, which made serialization a property of `dev agent run` rather
+  than of the clone. The lock is taken first now, on every route, and
+  `Lock` makes its own directory so it can be taken before the clone
+  exists. Two invariant tests: every route refuses, and nothing is created
+  when the refusal comes.
+- **P2: an agent overlay stayed current when its base image changed.** The
+  marker hashed the overlay's instructions, which name the base by tag — so
+  rebuilding a project image under the same tag left the text identical
+  while the thing underneath had changed. The base image's id is in the
+  marker now. The agent path also asked only whether the project image
+  existed, not whether it was built from these instructions: the same
+  freshness check `dev run` got, on the run that goes unattended.
+- **P2: `apply` said captures were included without checking.** It fetches
+  the clone's current HEAD; a capture made before the clone was reset or
+  replaced is not an ancestor of it. The old wording claimed inclusion for
+  every capture it listed, and with nothing else to bring back it could
+  print "Nothing new" over the top of commits nobody had. Each capture is
+  now tested for reachability, the stranded ones are named as work to
+  recover with the commands to do it, and they are not offered to
+  `DropCapture` — which would refuse them, and asking it to refuse is not
+  the same as not asking.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

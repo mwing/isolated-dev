@@ -507,6 +507,23 @@ func (e *Engine) ImageLabel(ctx context.Context, tag, label string) (string, err
 	return v, nil
 }
 
+// ImageID is the local identity of an image: what the tag resolves to
+// right now, rather than what it is called.
+//
+// Empty when there is no such image, which is not an error — the caller
+// asking is usually deciding whether something built on it is still
+// current, and "not here" answers that as well as an id would.
+func (e *Engine) ImageID(ctx context.Context, tag string) (string, error) {
+	res, err := e.docker(ctx, "image", "inspect", "--format", "{{.Id}}", tag)
+	if err != nil {
+		return "", err
+	}
+	if res.ExitCode != 0 {
+		return "", nil
+	}
+	return strings.TrimSpace(res.Stdout), nil
+}
+
 // PublishedBy returns the containers publishing a host port.
 //
 // Used to explain a bind failure. The daemon's own message names the port

@@ -322,8 +322,23 @@ func overlayDockerfile(o Options) string {
 	return project.ApplyPins(Dockerfile(o.Agent, o.BaseImage()), o.Pins)
 }
 
-func sourceMarker(dockerfile string) string {
-	sum := sha256.Sum256([]byte(dockerfile))
+// sourceMarker identifies what an overlay was built from: its
+// instructions, and the image they were built on top of.
+//
+// The base has to be in it. The overlay's instructions name the base by
+// tag, so rebuilding the project image under the same tag leaves the text
+// identical while the thing underneath has changed — and the overlay would
+// have read as current forever, running the agent on a base the project
+// replaced. A tag says what you meant, an id says what you got, which is
+// the argument this tool already makes about every other image.
+//
+// An empty baseID means the base is not here yet, which happens once on a
+// machine that has never pulled it: the build pulls it, and the next run
+// computes a different marker and rebuilds once against a warm layer
+// cache. One extra rebuild, ever, in exchange for never running on the
+// wrong base.
+func sourceMarker(dockerfile, baseID string) string {
+	sum := sha256.Sum256([]byte(dockerfile + "\x00" + baseID))
 	return hex.EncodeToString(sum[:8])
 }
 
@@ -332,7 +347,11 @@ func sourceMarker(dockerfile string) string {
 func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string, error) {
 	tag := o.Agent.ImageTag(o.BaseImage())
 	df := overlayDockerfile(o)
-	marker := sourceMarker(df)
+	baseID, err := r.Engine.ImageID(ctx, o.BaseImage())
+	if err != nil {
+		return "", err
+	}
+	marker := sourceMarker(df, baseID)
 	if !force {
 		exists, err := r.Engine.ImageExists(ctx, tag)
 		if err != nil {
@@ -355,7 +374,7 @@ func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string
 	// Context "-" with the Dockerfile on stdin and no --file: the overlay
 	// adds only the agent, so it needs no build context at all. Passing
 	// --file - as well is what docker rejects.
-	err := r.Engine.Build(ctx, container.BuildSpec{
+	err = r.Engine.Build(ctx, container.BuildSpec{
 		Tag:       tag,
 		Context:   "-",
 		Labels:    map[string]string{SourceLabel: marker},
@@ -540,14 +559,44 @@ func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
 		fmt.Fprintf(r.Out, "  %s now holds the agent's configuration only, so nothing else\n",
 			a.VolumeName())
 		fmt.Fprintf(r.Out, "  in its home carries between projects. The old volume is left\n")
-		fmt.Fprintf(r.Out, "  alone; remove it with:\n")
+		fmt.Fprintf(r.Out, "  alone until you say otherwise — `dev agent logout %s` discards\n", a.Name)
+		fmt.Fprintf(r.Out, "  both, or remove it now with:\n")
 		fmt.Fprintf(r.Out, "    docker volume rm %s\n", old)
 		return nil
 	}
 	return nil
 }
 
-// Logout removes the agent's home volume, discarding its stored login.
+// Logout discards the agent's stored login: the config volume, and every
+// volume this one was migrated out of.
+//
+// The legacy volumes are the point. They are kept after a migration so the
+// user can satisfy themselves before deleting them, and EnsureVolume copies
+// a login out of them whenever the config volume is missing — which is
+// exactly the state logout leaves behind. So logout, then run, and the
+// credential came back: a logout that logs nobody out.
+//
+// Removing them is the honest reading of the command. What they hold is a
+// superseded copy of the thing being discarded, and a home directory this
+// version no longer keeps; leaving either behind after "discard my login"
+// would be the tool deciding it knows better.
 func (r *Runner) Logout(ctx context.Context, a *Agent) error {
-	return r.Engine.VolumeRemove(ctx, a.VolumeName())
+	if err := r.Engine.VolumeRemove(ctx, a.VolumeName()); err != nil {
+		return err
+	}
+	for _, old := range legacyHomeVolumes(a) {
+		exists, err := r.Engine.VolumeExists(ctx, old)
+		if err != nil || !exists {
+			continue
+		}
+		if err := r.Engine.VolumeRemove(ctx, old); err != nil {
+			fmt.Fprintf(r.Out, "⚠  %s still holds a copy of the login and could not "+
+				"be removed: %v\n", old, err)
+			fmt.Fprintf(r.Out, "   Remove it with: docker volume rm %s\n", old)
+			continue
+		}
+		fmt.Fprintf(r.Out, "Removed %s as well: it held the copy this volume was "+
+			"migrated from.\n", old)
+	}
+	return nil
 }

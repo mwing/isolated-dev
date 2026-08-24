@@ -93,6 +93,27 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 	out io.Writer) (string, func(), error) {
 	noop := func() {}
 	dest := clone.Dir(env.Paths.Home, projectSlug(projectDir))
+
+	// Taken before the clone is touched, not after it is ready. Preparing a
+	// clone renames its config aside and back, fetches from it, and creates
+	// it if it is missing — every one of those is a thing two runs must not
+	// do at once, and the lock used to be taken once they were all done. A
+	// lock that starts after the race it prevents is a comment.
+	//
+	// A refusal here is the right outcome: the alternative is two
+	// containers writing one index, and the loser is whichever was
+	// mid-write.
+	release, lerr := clone.Lock(dest)
+	if lerr != nil {
+		return "", noop, lerr
+	}
+	// Every failure past this point releases it. A run that returns without
+	// the clone it asked for must not leave the clone held.
+	fail := func(path string, err error) (string, func(), error) {
+		release()
+		return path, noop, err
+	}
+
 	res, err := clone.Prepare(ctx, env.Runner, clone.Options{
 		Project: projectDir, Dest: dest, Depth: depth,
 	})
@@ -107,10 +128,10 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 				"   The agent edits these files directly, and nothing here\n"+
 				"   can undo that. `git init` first, or --in-place to silence this.\n\n",
 			projectDir)
-		return "", noop, nil
+		return fail("", nil)
 	}
 	if err != nil {
-		return "", noop, err
+		return fail("", err)
 	}
 	if res.Path != "" {
 		fmt.Fprintf(out, "Clone:     %s\n", res.Path)
@@ -149,13 +170,6 @@ func prepareCloneDir(ctx context.Context, env *Env, projectDir string, depth int
 	// rather than after.
 	warnCloneSpace(ctx, env)
 
-	// Taken after the clone exists and before the run uses it. A refusal
-	// here is the right outcome: the alternative is two containers writing
-	// one index, and the loser is whichever was mid-write.
-	release, lerr := clone.Lock(res.Path)
-	if lerr != nil {
-		return "", noop, lerr
-	}
 	return res.Path, release, nil
 }
 
@@ -206,7 +220,24 @@ func agentBaseImage(ctx context.Context, env *Env, eng *container.Engine,
 	if err != nil {
 		return "", err
 	}
-	if !exists {
+	// Present is not current, here as much as in a plain run. This path
+	// asked only whether the image existed, so an agent went on running on
+	// an image built by an older version of the tool — or from a Dockerfile
+	// the project has since edited — while `dev run` on the same project
+	// rebuilt. The agent is the run that goes unattended, which makes it
+	// the worse one to leave on stale instructions.
+	current := true
+	if exists {
+		current, err = imageIsCurrent(ctx, eng, cfg, p)
+		if err != nil {
+			return "", err
+		}
+		if !current {
+			fmt.Fprintf(env.Stderr, "Rebuilding %s: it was built from different "+
+				"instructions than this project now has.\n", p.Image)
+		}
+	}
+	if !exists || !current {
 		if err := buildImage(ctx, env, cfg, p, ""); err != nil {
 			return "", err
 		}
@@ -261,14 +292,30 @@ func wantCloneFor(configured, inPlace, useClone bool) bool {
 // This is the opt-in path for `dev run` and `dev shell`, where the person
 // asked for it explicitly, so a missing repository is an error rather than
 // the loud fallback prepareCloneDir makes for a default nobody chose.
+// The returned release must be held for the life of the run, like
+// prepareCloneDir's. It is never nil, so a caller can defer it without
+// checking.
+//
+// This path had no lock at all, which made the serialization a property of
+// `dev agent run` rather than of the clone: `dev run --clone` in one
+// terminal and an agent in another mounted the same working tree, and
+// neither knew. The clone is what needs protecting, so the lock belongs to
+// every route into it.
 func useClone(ctx context.Context, env *Env, p *project.Project, spec *container.RunSpec,
-	depth int) error {
+	depth int) (func(), error) {
+	noop := func() {}
 	dest := clone.Dir(env.Paths.Home, projectSlug(p.Dir))
+
+	release, lerr := clone.Lock(dest)
+	if lerr != nil {
+		return noop, lerr
+	}
 	res, err := clone.Prepare(ctx, env.Runner, clone.Options{
 		Project: p.Dir, Dest: dest, Depth: depth,
 	})
 	if err != nil {
-		return err
+		release()
+		return noop, err
 	}
 
 	mountWorkspace(spec, res.Path)
@@ -282,7 +329,7 @@ func useClone(ctx context.Context, env *Env, p *project.Project, spec *container
 	fmt.Fprintf(env.Stderr, "Review:   git -C %s status\n", res.Path)
 	fmt.Fprintf(env.Stderr, "Bring back: git -C %s fetch %s && git -C %s log FETCH_HEAD\n\n",
 		p.Dir, res.Path, p.Dir)
-	return nil
+	return release, nil
 }
 
 // explainPortConflict turns the daemon's bind failure into something

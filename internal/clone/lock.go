@@ -3,6 +3,7 @@ package clone
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -22,8 +23,15 @@ import (
 // The lock file sits beside the clone rather than inside it, for the same
 // reason the provenance does: inside is inside the bind mount, and a lock
 // an agent can delete is not a lock.
+// It is taken before the clone exists, not after: creating one is itself a
+// thing two runs must not do at once, and so is quarantining its config.
+// The lock file therefore has to be creatable on its own, which means
+// making the directory it lives in rather than relying on Prepare.
 func Lock(clonePath string) (func(), error) {
 	path := clonePath + ".lock"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("clone: making room for the lock for %s: %w", clonePath, err)
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("clone: opening the lock for %s: %w", clonePath, err)

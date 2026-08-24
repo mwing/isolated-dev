@@ -813,3 +813,61 @@ func callLines(f *runner.Fake) string {
 	}
 	return b.String()
 }
+
+// An external review's first finding, and the sharpest kind: a command
+// that does the opposite of what it says. Migration keeps the old home
+// volume deliberately, and EnsureVolume imports from it whenever the
+// config volume is missing — which is precisely the state logout leaves.
+// So logout, run, and the credential came back.
+func TestLogoutDoesNotLeaveALoginToBeRestored(t *testing.T) {
+	fake := runner.NewFake()
+	const orb = "orb -m vm sudo docker "
+	// Both volumes exist, which is what a machine looks like after the
+	// migration ran.
+	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 0}
+	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 0}
+
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+	if err := r.Logout(context.Background(), a); err != nil {
+		t.Fatal(err)
+	}
+
+	removed := map[string]bool{}
+	for _, c := range fake.Calls {
+		if line := c.String(); strings.Contains(line, "volume rm ") {
+			removed[strings.TrimSpace(line[strings.LastIndex(line, " ")+1:])] = true
+		}
+	}
+	if !removed["dev-agent-claude-config"] {
+		t.Errorf("logout left the config volume; removed: %v", removed)
+	}
+	if !removed["dev-agent-claude"] {
+		t.Errorf("logout left the volume it was migrated from, so the next run "+
+			"copies the login back in; removed: %v", removed)
+	}
+}
+
+// The overlay's instructions name its base by tag, so rebuilding a project
+// image under the same tag leaves the text identical while the thing
+// underneath has changed. Without the base's identity in the marker, the
+// overlay reads as current forever and the agent runs on an image the
+// project replaced.
+func TestTheOverlayMarkerFollowsTheBaseImage(t *testing.T) {
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude",
+		Base: "debian:bookworm-slim", AllowHosts: []string{"api.anthropic.com"}}
+	df := overlayDockerfile(Options{Agent: a})
+
+	if sourceMarker(df, "sha256:aaa") == sourceMarker(df, "sha256:bbb") {
+		t.Error("the same instructions on two different base images produce one marker")
+	}
+	// Stable for the same inputs, or every run would rebuild. Written
+	// through variables because a linter reads the direct form as a
+	// tautology — which it is, textually, and is not once the arguments
+	// come from two calls that could disagree.
+	first, second := sourceMarker(df, "sha256:aaa"), sourceMarker(overlayDockerfile(
+		Options{Agent: a}), "sha256:aaa")
+	if first != second {
+		t.Error("the marker is not stable for identical inputs")
+	}
+}

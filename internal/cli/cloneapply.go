@@ -166,15 +166,37 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	}
 
 	// Captures from runs that ended without anyone applying them. They are
-	// the same work, already in the project, so `apply` has to sweep them
-	// or it reports "nothing new" while they sit in a namespace the user
-	// has no reason to know about.
-	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project, clone.CurrentBranch(ctx, env.Runner, project)); rerr == nil && len(refs) > 0 {
-		fmt.Fprintf(env.Stdout, "%d capture(s) from earlier runs are already here:\n", len(refs))
-		for _, r := range refs {
+	// usually the same work, already in the project, because consecutive
+	// runs in one clone build on each other — so `apply` has to account for
+	// them or it reports "nothing new" while they sit in a namespace the
+	// user has no reason to know about.
+	//
+	// Usually is not always, and the difference is the whole point of the
+	// refs. This fetches the clone's current HEAD; a capture made before
+	// the clone was reset, replaced or rewound is not an ancestor of it. The
+	// old wording said "they are included below" of every capture it had
+	// listed, which was a claim about work it had not looked at — and if
+	// nothing else moved, the run could then print "Nothing new" over the
+	// top of stranded commits. Each one is checked, and the ones that did
+	// not come along are named as work to recover rather than reported as
+	// arrived.
+	included, stranded := splitCaptures(ctx, env, project, branch)
+	if len(included) > 0 {
+		fmt.Fprintf(env.Stdout, "%d capture(s) from earlier runs are included:\n", len(included))
+		for _, r := range included {
 			fmt.Fprintf(env.Stdout, "  %s\n", r)
 		}
-		fmt.Fprintf(env.Stdout, "They are included below; `git log --oneline <ref>` reads one.\n\n")
+		fmt.Fprintln(env.Stdout)
+	}
+	if len(stranded) > 0 {
+		fmt.Fprintf(env.Stdout, "⚠  %d capture(s) are NOT in what was just fetched — the clone "+
+			"has moved\n   since they were made, so this brings back different work:\n",
+			len(stranded))
+		for _, r := range stranded {
+			fmt.Fprintf(env.Stdout, "     %s\n", r)
+		}
+		fmt.Fprintf(env.Stdout, "   Read one:  git log --oneline %s\n", stranded[0])
+		fmt.Fprintf(env.Stdout, "   Take it:   git merge %s   (or cherry-pick)\n\n", stranded[0])
 	}
 
 	ahead, err := projectGit(ctx, env, project, "rev-list", "--count", "HEAD.."+branch)
@@ -183,6 +205,13 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	}
 	if strings.TrimSpace(ahead) == "0" {
 		fmt.Fprintf(env.Stdout, "Nothing new: the project already has everything on %s.\n", branch)
+		if len(stranded) > 0 {
+			// "Nothing new" is true of the clone and false of the project:
+			// the captures above are work nobody has, and printing only the
+			// first sentence is how they get forgotten.
+			fmt.Fprintf(env.Stdout, "The %d capture(s) above are still only on their refs.\n",
+				len(stranded))
+		}
 		return nil
 	}
 
@@ -207,17 +236,41 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	}
 	fmt.Fprintf(env.Stdout, "Fast-forwarded onto %s commit(s) from the clone.\n",
 		strings.TrimSpace(ahead))
-	// The captures have landed on a branch now, so the refs are only
-	// pinning objects against gc. Dropped quietly: their whole purpose was
-	// to hold the work until this moment.
-	if refs, rerr := clone.CapturedRefs(ctx, env.Runner, project, clone.CurrentBranch(ctx, env.Runner, project)); rerr == nil {
-		for _, r := range refs {
-			_ = clone.DropCapture(ctx, env.Runner, project, r)
-		}
+	// The captures that landed have landed on a branch now, so their refs
+	// are only pinning objects against gc. Dropped quietly: their whole
+	// purpose was to hold the work until this moment. The stranded ones are
+	// not offered to DropCapture at all — it would refuse them, since its
+	// rule is that a capture is dropped only once its tip is reachable from
+	// a branch, and asking it to refuse is not the same as not asking.
+	for _, r := range included {
+		_ = clone.DropCapture(ctx, env.Runner, project, r)
 	}
 	fmt.Fprintf(env.Stdout, "The clone still has them; `dev clone prune` removes it "+
 		"once the project has everything.\n")
 	return nil
+}
+
+// splitCaptures divides this branch's captures into the ones the fetched
+// branch already contains and the ones it does not.
+//
+// Reachability, asked of git, rather than inferred from the fact that a
+// capture exists. `merge-base --is-ancestor` is the question exactly: is
+// this tip already part of what is about to be applied.
+func splitCaptures(ctx context.Context, env *Env, project, branch string) (included, stranded []string) {
+	refs, err := clone.CapturedRefs(ctx, env.Runner, project,
+		clone.CurrentBranch(ctx, env.Runner, project))
+	if err != nil {
+		return nil, nil
+	}
+	for _, ref := range refs {
+		if _, err := projectGit(ctx, env, project, "merge-base", "--is-ancestor",
+			ref, branch); err == nil {
+			included = append(included, ref)
+			continue
+		}
+		stranded = append(stranded, ref)
+	}
+	return included, stranded
 }
 
 // goesToATerminal reports whether output written here is being read by a

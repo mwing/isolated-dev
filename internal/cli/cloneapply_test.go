@@ -401,3 +401,108 @@ func TestPatchSanitizingFollowsWhereTheOutputGoes(t *testing.T) {
 			"the agent's escape sequences")
 	}
 }
+
+// An external review's finding: `apply` listed every capture and said "they
+// are included below", having fetched only the clone's current HEAD. A
+// capture made before the clone was reset or replaced is not an ancestor of
+// that HEAD, so the claim was about work the command had not looked at —
+// and with nothing else to bring back it could print "Nothing new" over the
+// top of commits nobody has.
+func TestApplyDoesNotClaimStrandedCapturesAreIncluded(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"symbolic-ref", "HEAD", "refs/heads/main"},
+		{"config", "user.email", "t@example.com"}, {"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+
+	// A run whose work was captured, then a clone that no longer has it:
+	// the agent reset the branch, or the clone was replaced.
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "early.txt", "early\n", "work from an earlier run")
+	got, err := clone.Capture(ctx, h.env.Runner, project, clonePath, "earlier")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Ref == "" {
+		t.Fatal("nothing was captured, so this test proves nothing")
+	}
+	if _, err := run.Run(ctx, runner.Command{Path: "git", Dir: clonePath,
+		Args: []string{"reset", "-q", "--hard", "HEAD~1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyClone(ctx, h.env, "clone-work"); err != nil {
+		t.Fatalf("apply: %v\n%s", err, h.stderr.String())
+	}
+
+	out := h.stdout.String()
+	if strings.Contains(out, "are included") && strings.Contains(out, got.Ref) {
+		t.Errorf("a capture the fetch does not contain was reported as included:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT in what was just fetched") {
+		t.Errorf("the stranded capture is not reported at all:\n%s", out)
+	}
+	// And it is still there afterwards: reporting it and then dropping it
+	// would be worse than either.
+	refs, err := clone.AllCapturedRefs(ctx, h.env.Runner, project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range refs {
+		if r == got.Ref {
+			return
+		}
+	}
+	t.Fatalf("the stranded capture was dropped; left: %v", refs)
+}
+
+// The ordinary case still reads as it did: consecutive runs in one clone
+// build on each other, so a capture from the last run is an ancestor of
+// this HEAD and is genuinely included.
+func TestApplyStillReportsCapturesItDidBringBack(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	project := h.paths.ProjectDir
+
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, args := range [][]string{
+		{"init", "-q"}, {"symbolic-ref", "HEAD", "refs/heads/main"},
+		{"config", "user.email", "t@example.com"}, {"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := run.Run(ctx, runner.Command{Path: "git", Args: args, Dir: project}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitIn(t, project, "base.txt", "base\n", "base")
+
+	clonePath := cloneAt(t, h, project)
+	commitIn(t, clonePath, "early.txt", "early\n", "work from an earlier run")
+	if _, err := clone.Capture(ctx, h.env.Runner, project, clonePath, "earlier"); err != nil {
+		t.Fatal(err)
+	}
+	commitIn(t, clonePath, "later.txt", "later\n", "and more since")
+
+	if err := applyClone(ctx, h.env, "clone-work"); err != nil {
+		t.Fatalf("apply: %v\n%s", err, h.stderr.String())
+	}
+	out := h.stdout.String()
+	if !strings.Contains(out, "are included") {
+		t.Errorf("a capture that did come back was not reported:\n%s", out)
+	}
+	if strings.Contains(out, "NOT in what was just fetched") {
+		t.Errorf("a capture that came back was reported as stranded:\n%s", out)
+	}
+}

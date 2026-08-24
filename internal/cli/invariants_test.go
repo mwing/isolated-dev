@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/clone"
 	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/container"
+	"github.com/mwing/isolated-dev/internal/runner"
 )
 
 // INVARIANT: a project request can never widen access without a user
@@ -124,5 +129,80 @@ func TestInvariantEverySecurityAskIsClassified(t *testing.T) {
 			t.Errorf("%s is mapped to consent key %q, which the consent path does "+
 				"not produce", field, key)
 		}
+	}
+}
+
+// INVARIANT: two simultaneous runs can never write the same git working
+// tree — asserted at the command layer, where the lock has to be taken
+// before anything touches the clone rather than after it is ready.
+//
+// The lock existed and was taken last: after Prepare had created the
+// clone, after a capture had fetched from it, after the config quarantine
+// had renamed .git/config aside and back. A lock that starts once the race
+// is over is a comment. `dev run --clone` and `dev shell --clone` took no
+// lock at all, which made the serialization a property of `dev agent run`
+// rather than of the clone.
+func TestInvariantEveryRouteIntoACloneTakesTheLock(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	h.readyBackend()
+	h.readySidecar()
+	gitProject(t, h)
+
+	// Another run holds the clone.
+	dest := clone.Dir(h.paths.Home, projectSlug(h.paths.ProjectDir))
+	release, err := clone.Lock(dest)
+	if err != nil {
+		t.Fatalf("taking the clone: %v", err)
+	}
+	defer release()
+
+	// The agent route.
+	_, agentRelease, err := prepareCloneDir(t.Context(), h.env, h.paths.ProjectDir, 0, h.stderr)
+	if err == nil {
+		agentRelease()
+		t.Error("an agent run took a clone another run is holding")
+	} else if !strings.Contains(err.Error(), "in use") {
+		t.Errorf("the refusal does not say what is wrong: %v", err)
+	}
+
+	// And the `dev run --clone` route, which had no lock at all.
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cfg
+	spec := container.RunSpec{}
+	runRelease, err := useClone(t.Context(), h.env, p, &spec, 0)
+	if err == nil {
+		runRelease()
+		t.Error("`dev run --clone` took a clone another run is holding")
+	}
+}
+
+// And the lock is not merely taken but taken first: preparing a clone
+// renames its config aside and back, which is not a thing two runs may do
+// at once.
+func TestTheLockIsTakenBeforeTheCloneIsTouched(t *testing.T) {
+	h := newHarness(t)
+	h.env.Runner = runner.New(false)
+	h.readyBackend()
+	h.readySidecar()
+	gitProject(t, h)
+
+	dest := clone.Dir(h.paths.Home, projectSlug(h.paths.ProjectDir))
+	release, err := clone.Lock(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+
+	if _, r, err := prepareCloneDir(t.Context(), h.env, h.paths.ProjectDir, 0, h.stderr); err == nil {
+		r()
+		t.Fatal("the run proceeded while another held the clone")
+	}
+	// Nothing was created: the refusal came before any work on the clone.
+	if _, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil {
+		t.Error("a clone was created despite the lock being held elsewhere")
 	}
 }
