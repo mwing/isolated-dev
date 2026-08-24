@@ -419,6 +419,63 @@ What is deliberately *not* claimed: this makes host-side git against a
 clone safe to run, not the clone trustworthy. Its contents are still the
 agent's, which is what the review step is for.
 
+### B30. A review of the work above, and what it found — `done`
+
+A code review of the eight commits between 0.7.0 and the 0.8.0 tag, run
+before pushing. Eleven findings, all real, and two of them defects in the
+fixes from the same batch. Recorded because the pattern is the lesson: the
+review found more in the *mitigations* than in the code they protected.
+
+- **A grafts file was not ignored, and a comment said it was.** The worst
+  kind of finding: a false claim about a defence. `GIT_NO_REPLACE_OBJECTS`
+  covers `refs/replace` and nothing else. Measured on git 2.52.0, three
+  commits with `.git/info/grafts` naming the tip: plain and
+  `GIT_NO_REPLACE_OBJECTS` both showed 1 commit, `GIT_GRAFT_FILE=/dev/null`
+  showed 3, and the `-c core.graftsFile` form did not work at all. It
+  mattered in `State`, which counts what a deletion would destroy by
+  walking history — a graft shortens the walk, so `dev clone rm` and
+  `prune` would have deleted work without asking for `--force`. Fixed with
+  `GIT_GRAFT_FILE`; the test fails without it.
+- **The volume migration always reported success**, because the copy ended
+  in `|| true`. It then told the user to `docker volume rm` the source. A
+  claim followed by advice to delete the only copy is worse than no
+  migration at all. Now the exit status decides: nothing to carry is
+  silent, a broken copy says keep the old volume.
+- **The patch body was the one unsanitized channel** — and the default
+  output of the review command. Resolved the way git resolves colour:
+  sanitized when the output is a terminal, byte-exact when it is
+  redirected, since a redirected patch may be one someone means to apply.
+- **The residual cross-project channel includes code execution.** The
+  config directory that still persists holds `settings.json`, which can
+  declare hooks. The comment called it "settings", which would have let a
+  reader conclude B27 was closed tighter than it is.
+- **A staged-then-deleted file refused the whole run**, once `--cached`
+  joined the file list for unborn repositories: the index lists files that
+  need not exist on disk.
+- **An unborn repository filed its captures where `apply` never looks.**
+  `rev-parse --abbrev-ref HEAD` needs a commit, so the branch read as
+  detached; `symbolic-ref` answers, and still refuses a real detached HEAD.
+- **`dev pin` became fatal on any unrelated agent's image**, because the
+  registry holds every agent on the machine. Agent images are now skipped
+  with a note; a project's own base still stops the command.
+- **A pin never reached the agent overlay** without someone remembering
+  `--rebuild`. Both the overlay and the project image now carry a label of
+  the instructions they were built from, and rebuild when it differs.
+- Plus three smaller ones: `config_dir` is validated as a path under the
+  home directory now that a volume mounts there, the sanitizer covers the
+  bidi *marks* and zero-width characters alongside the overrides, and the
+  denied hostname in a console line or an egress notice is sanitized —
+  container-chosen text on a terminal, which is what the sanitizer was
+  added for two commits earlier, on a path it had not been applied to.
+
+One finding of my own, from running the release candidate rather than
+reading it: `whoami: cannot find name for user ID 501` in a real project,
+on a machine where the fix that gives every image an account had shipped.
+The image tag is the project name and the uid, so an image built by the
+older version sat under the same name and was reused indefinitely. A fix
+that never reaches an existing project is not a fix — which is the same
+argument, and now the same label, as the sidecar's `dev.proxy.source`.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

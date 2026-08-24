@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mwing/isolated-dev/internal/runner"
 )
 
 // writeDockerfile gives the project its own build instructions.
@@ -173,5 +176,79 @@ detection:
 	}
 	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
 		t.Fatalf("a template-only project asked for consent: %v\n%s", err, h.stderr.String())
+	}
+}
+
+// Found by running the release candidate against a real project:
+// `whoami: cannot find name for user ID 501`, on a machine where the fix
+// that gives every image an account had shipped. The image tag is derived
+// from the project name and the host uid, so an image built by an older
+// version of the tool sits under the same name and is reused forever — a
+// fix that never reaches an existing project is not a fix.
+//
+// The sidecar already had this problem and this answer, where the stakes
+// were higher: an image predating a bypass fix called itself filtered.
+func TestAnImageBuiltFromOtherInstructionsIsRebuilt(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\n")
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatal(err)
+	}
+	// The image is present, and carries a marker from instructions that are
+	// not these.
+	h.fake.Response[dockerKey("image", "inspect", "--format",
+		fmt.Sprintf("{{index .Config.Labels %q}}", imageSourceLabel))] =
+		runner.Result{Stdout: "0000000000000000\n"}
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+
+	var built bool
+	for _, args := range h.dockerArgs() {
+		if len(args) > 0 && args[0] == "build" && strings.Contains(argv(args), "dev-img-") {
+			built = true
+		}
+	}
+	if !built {
+		t.Errorf("a stale image was reused:\n%s", h.stderr.String())
+	}
+	if !strings.Contains(h.stderr.String(), "different instructions") {
+		t.Errorf("the rebuild was not explained:\n%s", h.stderr.String())
+	}
+}
+
+// And the other direction, or the marker would mean a rebuild on every
+// run: an image whose marker matches is used as it is.
+func TestAnImageBuiltFromTheseInstructionsIsReused(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\n")
+	if err := h.run(t, "accept", "--all"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := finalDockerfile(cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.fake.Response[dockerKey("image", "inspect", "--format",
+		fmt.Sprintf("{{index .Config.Labels %q}}", imageSourceLabel))] =
+		runner.Result{Stdout: sourceMarker(want) + "\n"}
+
+	h.stderr.Reset()
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("run: %v\n%s", err, h.stderr.String())
+	}
+	for _, args := range h.dockerArgs() {
+		if len(args) > 0 && args[0] == "build" && strings.Contains(argv(args), "dev-img-") {
+			t.Errorf("a current image was rebuilt anyway:\n%s", argv(args))
+		}
 	}
 }

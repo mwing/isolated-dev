@@ -99,6 +99,19 @@ func (a *Agent) Validate() error {
 	if !strings.HasPrefix(a.ConfigDir, "/") {
 		return fmt.Errorf("agent %q: config_dir must be absolute", a.Name)
 	}
+	// Inside the home directory, and not the home directory itself.
+	//
+	// It used to be a path that was merely read; now it is where a named
+	// volume is mounted, so `config_dir: /` or `/usr` would mount a volume
+	// over the container's own filesystem. The migration out of the old
+	// home volume also assumes this prefix. An agent definition is the
+	// user's own file rather than a hostile one, which makes this a
+	// mistake-catcher rather than a defence — but the mistake it catches is
+	// an unbootable container.
+	if !strings.HasPrefix(a.ConfigDir, HomePath+"/") || strings.Contains(a.ConfigDir, "..") {
+		return fmt.Errorf("agent %q: config_dir must be a directory under %s, not %q",
+			a.Name, HomePath, a.ConfigDir)
+	}
 	if len(a.AllowHosts) == 0 {
 		// An agent with no allowlist cannot reach its own API and would
 		// fail in a way that looks like a bug rather than a policy.
@@ -172,6 +185,16 @@ func (a *Agent) Source() string {
 // What remains shared is the config directory itself, and that is inherent:
 // one login means one place the credential lives, and the agents that keep
 // a credential keep their settings beside it. See ConfigEnv.
+//
+// Named precisely, because "settings" undersells it. For the claude
+// built-in that directory holds settings.json, which can declare hooks —
+// commands the next run executes — as well as env and permissions. So an
+// agent working in project A can still arrange for a command to run in
+// project B's container. What this change removed is everything else: the
+// shell profile, the git config, the caches, the MCP files outside the
+// config directory. The remaining channel is the price of one login, and
+// closing it means a config directory per project, which is a login per
+// project. See BACKLOG B27.
 func (a *Agent) VolumeName() string { return "dev-agent-" + a.Name + "-config" }
 
 // homeVolumeName is what the volume was called while it held the whole home

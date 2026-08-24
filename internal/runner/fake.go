@@ -31,11 +31,18 @@ func (f *Fake) Run(_ context.Context, cmd Command) (Result, error) {
 	f.Calls = append(f.Calls, cmd)
 
 	line := cmd.String()
-	if k, ok := bestKey(line, f.Err); ok {
-		return Result{}, f.Err[k]
+	// Longest match across both tables, not "errors first". Consulting Err
+	// first meant a short error key still beat a longer response key — the
+	// same prefix ambiguity bestKey exists to remove, one level up. A tie
+	// goes to Err, which is the only case where "both tables named this
+	// exact command" is a question at all.
+	errKey, haveErr := bestKey(line, f.Err)
+	resKey, haveRes := bestKey(line, f.Response)
+	if haveErr && (!haveRes || len(errKey) >= len(resKey)) {
+		return Result{}, f.Err[errKey]
 	}
-	if k, ok := bestKey(line, f.Response); ok {
-		return deliver(cmd, f.Response[k]), nil
+	if haveRes {
+		return deliver(cmd, f.Response[resKey]), nil
 	}
 	return deliver(cmd, f.Default), nil
 }

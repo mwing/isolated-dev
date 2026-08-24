@@ -20,6 +20,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/textsafe"
 )
 
 // Decision is what the user chose about a blocked destination.
@@ -330,6 +331,11 @@ func (m *Model) decide(q question, d Decision, note string) tea.Cmd {
 }
 
 func (m *Model) handleEvent(e netpolicy.Event) tea.Cmd {
+	// The host came from the workload: a DNS question carries whatever
+	// bytes the client put in it, and a CONNECT target whatever it asked
+	// for. It is about to be printed on a terminal, so it is sanitized
+	// first — the same reason the clone's commit subjects are.
+	e.Host = textsafe.Sanitize(e.Host)
 	dest := e.Host
 	if e.Port != 0 {
 		dest = fmt.Sprintf("%s:%d", e.Host, e.Port)

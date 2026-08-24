@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,17 +78,11 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	if err != nil {
 		return err
 	}
-	// A pinned digest is what makes two builds of the same project produce
-	// the same image, here and on a teammate's machine.
-	pinned := project.ApplyPins(dockerfile, cfg.Pins)
-	unpinned := project.BaseImages(pinned)
-	if cfg.UpgradePackages {
-		pinned = project.WithPackageUpgrade(pinned)
+	pinned, err := finalDockerfile(cfg, p)
+	if err != nil {
+		return err
 	}
-	// An account for the uid the run will use. The templates create one;
-	// a project's own Dockerfile does not know to, and without it the run
-	// has no name and no writable home.
-	pinned = project.WithDevUser(pinned)
+	unpinned := project.BaseImages(project.ApplyPins(dockerfile, cfg.Pins))
 
 	pol, err := loadPolicy(env)
 	if err != nil {
@@ -141,11 +137,91 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 		Context:  p.Dir,
 		Platform: platform,
 		NoCache:  noCache,
+		// What this image was built from, so a later run can tell whether
+		// the tag still means what it says. See imageSourceLabel.
+		Labels: map[string]string{imageSourceLabel: sourceMarker(pinned)},
 		// The account inside the image is created with the uid of whoever
 		// is running dev, so a bind mount is writable on a platform that
 		// does not remap ownership.
 		BuildArgs: container.UIDBuildArgs(),
 	}, pinned, env.Stdout)
+}
+
+// imageSourceLabel records the instructions an image was built from.
+//
+// The image tag is derived from the project name and the host uid, so it
+// says nothing about content: an image built by an older version of this
+// tool, or before the Dockerfile was edited, is present under the same tag
+// and gets reused. That is how the account this version adds to every
+// image reached nobody who had already run the project once —
+// `whoami: cannot find name for user ID 501`, on a machine where the fix
+// had shipped.
+//
+// The sidecar already had this problem and this answer (`dev.proxy.source`,
+// `internal/cli/proxyimage.go`), where the stakes were higher: an image
+// predating a bypass fix called itself filtered. The argument is the same
+// one `dev pin` makes about tags — a name says what you meant, a digest
+// says what you got.
+const imageSourceLabel = "dev.image.source"
+
+// sourceMarker is the label value: a digest of the instructions plus the
+// uid they were built for.
+//
+// The uid is in the tag already, and in here as well because it is a build
+// argument rather than part of the file — two builds of identical
+// instructions for different accounts are different images, and a marker
+// that could not tell them apart would be a marker that lies.
+func sourceMarker(dockerfile string) string {
+	sum := sha256.Sum256([]byte(dockerfile + "\x00" + container.HostUser()))
+	return hex.EncodeToString(sum[:8])
+}
+
+// finalDockerfile is the instructions a build would run: the project's
+// own, pinned, with the tool's transforms applied.
+//
+// One function rather than a sequence at the call site, because the run
+// path has to compute exactly what the build would in order to compare it
+// against what an existing image was built from. Two copies of that
+// sequence would agree until one of them was edited, and the failure would
+// be a silently stale image — the thing this exists to prevent.
+func finalDockerfile(cfg config.Config, p *project.Project) (string, error) {
+	dockerfile, err := p.RenderedDockerfile()
+	if err != nil {
+		return "", err
+	}
+	// A pinned digest is what makes two builds of the same project produce
+	// the same image, here and on a teammate's machine.
+	out := project.ApplyPins(dockerfile, cfg.Pins)
+	if cfg.UpgradePackages {
+		out = project.WithPackageUpgrade(out)
+	}
+	// An account for the uid the run will use. The templates create one;
+	// a project's own Dockerfile does not know to, and without it the run
+	// has no name and no writable home.
+	return project.WithDevUser(out), nil
+}
+
+// imageIsCurrent reports whether an existing image was built from the
+// instructions a build would run now.
+//
+// An unreadable or missing marker counts as not current: an image built
+// before markers existed is exactly the case this is for.
+func imageIsCurrent(ctx context.Context, eng *container.Engine, cfg config.Config,
+	p *project.Project) (bool, error) {
+	want, err := finalDockerfile(cfg, p)
+	if err != nil {
+		// Nothing to compare against, and nothing to build either: this is
+		// a project with no Dockerfile and no detected language whose image
+		// exists from an earlier state of the tree. Reporting it stale would
+		// send the caller to a build that fails with this same error, so the
+		// image it has is the image it gets.
+		return true, nil
+	}
+	got, err := eng.ImageLabel(ctx, p.Image, imageSourceLabel)
+	if err != nil {
+		return false, err
+	}
+	return got == sourceMarker(want), nil
 }
 
 // buildImageNoCache rebuilds every layer, which is what an update needs:
@@ -449,7 +525,24 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		if err != nil {
 			return err
 		}
-		if o.Rebuild || !exists {
+		// Present is not the same as current. The tag is derived from the
+		// project name and the host uid, so an image built by an older
+		// version of this tool — or before the Dockerfile was edited — sits
+		// under the same name and was reused indefinitely. That is how the
+		// account this version adds to every image reached nobody who had
+		// run the project once already.
+		current := false
+		if exists {
+			current, err = imageIsCurrent(ctx, eng, cfg, p)
+			if err != nil {
+				return err
+			}
+			if !current {
+				fmt.Fprintf(env.Stderr, "Rebuilding %s: it was built from different "+
+					"instructions than this project now has.\n", p.Image)
+			}
+		}
+		if o.Rebuild || !exists || !current {
 			if err := buildImage(ctx, env, cfg, p, ""); err != nil {
 				return err
 			}

@@ -3,6 +3,8 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -301,32 +303,62 @@ type Runner struct {
 	Out io.Writer
 }
 
-// EnsureImage builds the overlay image if it is missing.
+// SourceLabel records the instructions an overlay was built from, so a
+// later run can tell whether the tag still means what it says.
+//
+// The tag is a function of the agent's name, base, version and uid — not of
+// its pins, its install command or anything else in the file. So a pin
+// recorded after the image was built never reached it: `dev pin` said to
+// use --rebuild, and an instruction to remember a flag is not a mechanism.
+// The project image carries the same label for the same reason.
+const SourceLabel = "dev.image.source"
+
+// overlayDockerfile is the exact text a build would run, so the staleness
+// check and the build cannot disagree.
+func overlayDockerfile(o Options) string {
+	// The overlay is a build like any other, so it gets the same treatment
+	// the tool asks of every project: a tag says which image you meant, a
+	// digest says which image you got.
+	return project.ApplyPins(Dockerfile(o.Agent, o.BaseImage()), o.Pins)
+}
+
+func sourceMarker(dockerfile string) string {
+	sum := sha256.Sum256([]byte(dockerfile))
+	return hex.EncodeToString(sum[:8])
+}
+
+// EnsureImage builds the overlay image if it is missing or was built from
+// different instructions.
 func (r *Runner) EnsureImage(ctx context.Context, o Options, force bool) (string, error) {
 	tag := o.Agent.ImageTag(o.BaseImage())
+	df := overlayDockerfile(o)
+	marker := sourceMarker(df)
 	if !force {
 		exists, err := r.Engine.ImageExists(ctx, tag)
 		if err != nil {
 			return "", err
 		}
 		if exists {
-			return tag, nil
+			got, lerr := r.Engine.ImageLabel(ctx, tag, SourceLabel)
+			if lerr != nil {
+				return "", lerr
+			}
+			if got == marker {
+				return tag, nil
+			}
+			fmt.Fprintf(r.Out, "Rebuilding %s: it was built from different "+
+				"instructions than this run needs.\n", tag)
 		}
 	}
 
 	fmt.Fprintf(r.Out, "Building agent image %s...\n", tag)
-	// The overlay is a build like any other, so it gets the same treatment
-	// the tool asks of every project: a tag says which image you meant, a
-	// digest says which image you got. The tag is not derived from the
-	// pins, so a newly recorded pin takes effect on the next --rebuild —
-	// which `dev pin` says at the point it records one.
-	df := project.ApplyPins(Dockerfile(o.Agent, o.BaseImage()), o.Pins)
 	// Context "-" with the Dockerfile on stdin and no --file: the overlay
 	// adds only the agent, so it needs no build context at all. Passing
 	// --file - as well is what docker rejects.
 	err := r.Engine.Build(ctx, container.BuildSpec{
 		Tag:       tag,
 		Context:   "-",
+		Labels:    map[string]string{SourceLabel: marker},
 		BuildArgs: container.UIDBuildArgs(),
 	}, strings.NewReader(df), r.Out)
 	if err != nil {
@@ -440,7 +472,15 @@ func legacyVolumeName(a *Agent) string { return "dev2-agent-" + a.Name }
 func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
 	for _, old := range legacyHomeVolumes(a) {
 		exists, err := r.Engine.VolumeExists(ctx, old)
-		if err != nil || !exists {
+		if err != nil {
+			// Said rather than read as "there is no old volume". A daemon
+			// that cannot answer is not a daemon with nothing to carry, and
+			// the difference is a login.
+			fmt.Fprintf(r.Out, "⚠  could not check for %s, so a stored login may "+
+				"not have been carried over: %v\n", old, err)
+			continue
+		}
+		if !exists {
 			continue
 		}
 		// The source held a home directory, so the config directory is a
@@ -458,20 +498,42 @@ func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
 		// Copied inside a container because the volumes live in the VM, not
 		// on the host. Failure is reported and not fatal: the worst case is
 		// one login, and refusing to run the agent over it would be worse.
+		//
+		// The exit status is the whole point of the shape here. An earlier
+		// version ended in `|| true`, so it always succeeded — and then
+		// printed "carried the stored login" and told the user to delete the
+		// volume it had just failed to read. A claim followed by advice to
+		// delete the only copy is worse than no migration at all. Nothing
+		// there to copy is not a failure; a copy that broke, or a chown that
+		// did not stick, is.
 		spec := container.RunSpec{
 			Image:  "alpine",
 			Remove: true,
 			User:   "0:0",
 			Command: []string{"sh", "-c", fmt.Sprintf(
-				"cp -a %s/. /to/ 2>/dev/null && chown -R %d:%d /to || true",
-				from, container.HostUID(), container.HostGID())},
+				"if [ ! -d %s ]; then echo nothing-to-carry; exit 3; fi; "+
+					"cp -a %s/. /to/ && chown -R %d:%d /to",
+				from, from, container.HostUID(), container.HostGID())},
 			Mounts: []container.Mount{
 				{Source: old, Target: "/from", Volume: true, ReadOnly: true},
 				{Source: a.VolumeName(), Target: "/to", Volume: true},
 			},
 		}
-		if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
+		res, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard)
+		switch {
+		case err != nil:
 			fmt.Fprintf(r.Out, "⚠  could not carry %s over to %s: %v\n", old, a.VolumeName(), err)
+			return nil
+		case res.ExitCode == 3:
+			// The old volume exists but this agent never stored anything in
+			// it. Silent: there is nothing for the user to do, and a warning
+			// about a volume they may not know they have is noise.
+			continue
+		case res.ExitCode != 0:
+			fmt.Fprintf(r.Out, "⚠  %s holds a login and copying it into %s failed "+
+				"(exit %d), so the agent may ask you to log in again.\n",
+				old, a.VolumeName(), res.ExitCode)
+			fmt.Fprintf(r.Out, "   Keep %s: it is still the only copy.\n", old)
 			return nil
 		}
 		fmt.Fprintf(r.Out, "Carried the stored login from %s into %s.\n", old, a.VolumeName())

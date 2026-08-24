@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,10 +72,21 @@ func diffClone(ctx context.Context, env *Env, stat bool) error {
 		return err
 	}
 	if strings.TrimSpace(uncommitted) != "" {
-		// Not sanitized, deliberately: a patch is the content, and rewriting
-		// it would mean showing something other than what is there. `--stat`
-		// names files, which is the same class as a subject.
-		if stat {
+		// A patch body is the one place where sanitizing and fidelity
+		// actually conflict, and the resolution is what the output is for.
+		//
+		// On a terminal it is being read, and every byte of it — the `+++
+		// b/<path>` headers, the added lines — was chosen by the agent. That
+		// is the attack this sanitizing exists for, and it is the default
+		// output of the review command, so leaving it raw would have left
+		// the largest surface open while cleaning the smaller ones.
+		//
+		// Redirected, it may be a patch someone means to apply, and a
+		// replacement character in a CRLF file or a binary hunk would
+		// corrupt it. So the rule is the one git uses for colour: decide by
+		// where the output is going. `--stat` is filenames rather than
+		// content and is safe to clean either way.
+		if stat || goesToATerminal(env.Stdout) {
 			uncommitted = clone.SanitizeLines(uncommitted)
 		}
 		fmt.Fprintf(env.Stdout, "Uncommitted in the clone:\n\n%s\n", uncommitted)
@@ -206,6 +218,18 @@ func applyClone(ctx context.Context, env *Env, branch string) error {
 	fmt.Fprintf(env.Stdout, "The clone still has them; `dev clone prune` removes it "+
 		"once the project has everything.\n")
 	return nil
+}
+
+// goesToATerminal reports whether output written here is being read by a
+// person rather than captured.
+//
+// The distinction decides whether clone-derived bytes are sanitized: a
+// reader needs the escape sequences neutralized, a file needs the bytes.
+// Anything that is not an *os.File is a buffer or a pipe — something
+// capturing the output — so it gets the bytes.
+func goesToATerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && isTerminal(f)
 }
 
 // requireClone resolves this project's clone, or explains its absence.

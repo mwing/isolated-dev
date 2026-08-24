@@ -106,8 +106,15 @@ func resolvePins(ctx context.Context, env *Env, update bool, progress io.Writer)
 	// `node:22-bookworm-slim`, both mutable tags — so the argument this
 	// command makes about a project's bases applies to them unchanged, and
 	// exempting them would make the rule advice rather than practice.
-	images := append(project.BaseImages(dockerfile), agentImages(env)...)
-	images = dedupe(images)
+	projectImages := project.BaseImages(dockerfile)
+	agentOnly := map[string]bool{}
+	for _, i := range agentImages(env) {
+		agentOnly[i] = true
+	}
+	for _, i := range projectImages {
+		delete(agentOnly, i)
+	}
+	images := dedupe(append(projectImages, agentImages(env)...))
 	if len(images) == 0 {
 		fmt.Fprintln(env.Stdout, "Nothing to pin: every FROM is already a digest, "+
 			"a stage name, or scratch.")
@@ -127,11 +134,28 @@ func resolvePins(ctx context.Context, env *Env, update bool, progress io.Writer)
 		}
 		// Pull first: a digest can only be read from an image the daemon
 		// has, and the local copy may predate what the tag points at now.
+		//
+		// An agent's image failing is reported and skipped, not fatal. The
+		// registry holds every agent definition on the machine, including
+		// files this project never runs, so one private or mistyped image
+		// name would otherwise break `dev pin` — and `dev update`, which
+		// resolves pins on the way past — for a project that has nothing to
+		// do with it. A base image of the project's own is different: it is
+		// what the build starts from, and pinning half of it silently is
+		// worse than stopping.
 		if err := eng.Pull(ctx, image, progress); err != nil {
+			if agentOnly[image] {
+				fmt.Fprintf(progress, "⚠  skipping %s: %v\n", image, err)
+				continue
+			}
 			return nil, err
 		}
 		digest, err := eng.Digest(ctx, image)
 		if err != nil {
+			if agentOnly[image] {
+				fmt.Fprintf(progress, "⚠  skipping %s: %v\n", image, err)
+				continue
+			}
 			return nil, err
 		}
 		if pins[image] == digest {

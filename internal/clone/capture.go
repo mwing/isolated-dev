@@ -194,12 +194,27 @@ func refsUnder(ctx context.Context, run runner.Runner, projectDir, scope string)
 }
 
 // CurrentBranch is the branch a project is on, empty when detached.
+//
+// The fallback is not a nicety. `rev-parse --abbrev-ref HEAD` needs a
+// commit, so on a repository between `git init` and its first commit it
+// fails and this returned "" — which means detached, so a run's work was
+// filed under refs/dev/clone/detached/… while `apply` later looked under
+// the branch the user was on by then. Neither listed nor dropped, pinning
+// its objects forever: work quietly in a place nobody looks. `symbolic-ref`
+// answers on an unborn branch (verified: `main`) and still fails on a real
+// detached HEAD, which is the distinction that has to survive.
 func CurrentBranch(ctx context.Context, run runner.Runner, projectDir string) string {
 	out, err := gitOutput(ctx, run, projectDir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || strings.TrimSpace(out) == "HEAD" {
-		return ""
+	if err == nil && strings.TrimSpace(out) != "HEAD" {
+		return strings.TrimSpace(out)
 	}
-	return strings.TrimSpace(out)
+	if err != nil {
+		if out, serr := gitOutput(ctx, run, projectDir, "symbolic-ref", "--short",
+			"HEAD"); serr == nil {
+			return strings.TrimSpace(out)
+		}
+	}
+	return ""
 }
 
 // DropCapture removes a ref once its work has landed, releasing the objects

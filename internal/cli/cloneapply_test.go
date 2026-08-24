@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/creack/pty"
+
 	"github.com/mwing/isolated-dev/internal/clone"
 	"github.com/mwing/isolated-dev/internal/runner"
 )
@@ -367,5 +369,35 @@ func TestApplyDoesNotBringTagsOutOfTheClone(t *testing.T) {
 	}
 	if strings.Contains(tags.Stdout, "v99.0.0") {
 		t.Errorf("a tag from the clone landed in the project: %q", tags.Stdout)
+	}
+}
+
+// A patch body is the one place where sanitizing and byte fidelity
+// conflict: on a terminal every byte of it was chosen by the agent, and
+// redirected it may be a patch someone means to apply. The rule is the one
+// git uses for colour — decide by where the output is going — so the
+// decision itself is worth a test.
+func TestPatchSanitizingFollowsWhereTheOutputGoes(t *testing.T) {
+	if goesToATerminal(&strings.Builder{}) {
+		t.Error("a captured buffer was treated as a terminal")
+	}
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = devnull.Close() }()
+	if goesToATerminal(devnull) {
+		t.Error("/dev/null was treated as a terminal, which is the bug that made " +
+			"`--tty auto` ask for a terminal it did not have")
+	}
+
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Skipf("no pty available: %v", err)
+	}
+	defer func() { _ = ptmx.Close(); _ = tty.Close() }()
+	if !goesToATerminal(tty) {
+		t.Error("a real terminal was not recognized, so a reader would be shown " +
+			"the agent's escape sequences")
 	}
 }

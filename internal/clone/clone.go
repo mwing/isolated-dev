@@ -361,6 +361,14 @@ func carryUncommitted(ctx context.Context, run runner.Runner, src, dest string) 
 			continue
 		}
 		if err := copyFile(filepath.Join(src, rel), filepath.Join(dest, rel)); err != nil {
+			// A file in the index need not exist on disk: `git add f && rm f`
+			// is an ordinary state, and --cached lists it. Aborting there
+			// refused the whole run over a file the user had already deleted,
+			// with a raw lstat message. --others alone never had this, which
+			// is why it arrived with the unborn path.
+			if os.IsNotExist(err) {
+				continue
+			}
 			return notes, err
 		}
 		copied++
@@ -474,11 +482,15 @@ func hasCommits(ctx context.Context, run runner.Runner, dir string) bool {
 // Anomalies reports things in a clone that change what git means, rather
 // than working around them silently.
 //
-// Each of these is handled elsewhere — replace objects by
-// GIT_NO_REPLACE_OBJECTS, grafts by not being read — and that is exactly
+// Each of these is neutralized elsewhere — replace objects by
+// GIT_NO_REPLACE_OBJECTS, grafts by GIT_GRAFT_FILE — and that is exactly
 // why they are worth saying: a defence that works invisibly leaves the user
 // believing they are reading a repository nobody arranged for them. The
 // point of the review step is that the reader can trust what they read.
+//
+// "Handled elsewhere" was worth checking rather than asserting. An earlier
+// version of this comment said grafts were handled by not being read; they
+// are read, and only GIT_GRAFT_FILE stops it.
 func Anomalies(ctx context.Context, run runner.Runner, clonePath string) []string {
 	var notes []string
 
@@ -491,8 +503,8 @@ func Anomalies(ctx context.Context, run runner.Runner, clonePath string) []strin
 	}
 
 	if _, err := os.Lstat(filepath.Join(clonePath, ".git", "info", "grafts")); err == nil {
-		notes = append(notes, "⚠  the clone has a grafts file, which rewrites what its "+
-			"history looks like. Reads here ignore it")
+		notes = append(notes, "⚠  the clone has a grafts file, which truncates what its "+
+			"history looks like. Reads here ignore it (GIT_GRAFT_FILE)")
 	}
 
 	// A shallow file the tool did not ask for. `--depth` is reported as an
@@ -509,13 +521,10 @@ func Anomalies(ctx context.Context, run runner.Runner, clonePath string) []strin
 	return notes
 }
 
-// branchOf is the checked-out branch name, empty on a detached HEAD.
+// branchOf is the checked-out branch name, empty on a detached HEAD. It
+// answers on an unborn branch too, for the reason CurrentBranch explains.
 func branchOf(ctx context.Context, run runner.Runner, dir string) string {
-	out, err := gitOutput(ctx, run, dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || strings.TrimSpace(out) == "HEAD" {
-		return ""
-	}
-	return out
+	return CurrentBranch(ctx, run, dir)
 }
 
 // sameDir compares two paths after resolving symlinks.
@@ -594,6 +603,22 @@ func hardenedGitEnv() []string {
 		// A `git replace` in the clone makes a host-side read show benign
 		// content while a fetch delivers the real commit.
 		"GIT_NO_REPLACE_OBJECTS=1",
+		// A grafts file does the same thing by an older mechanism, and
+		// GIT_NO_REPLACE_OBJECTS does not cover it. Measured on git 2.52.0,
+		// three commits with .git/info/grafts naming the tip:
+		//
+		//	git log --oneline                       -> 1 commit
+		//	GIT_NO_REPLACE_OBJECTS=1 git log        -> 1 commit
+		//	GIT_GRAFT_FILE=/dev/null git log        -> 3 commits
+		//	git -c core.graftsFile=/dev/null log    -> 1 commit
+		//
+		// The -c form does not work, which is why this is here rather than
+		// in hardenedGitArgs, and the quarantine cannot reach it either: it
+		// moves .git/config, not .git/info. It matters most in State, which
+		// counts the commits a deletion would destroy by walking history —
+		// a graft shortens that walk, so `dev clone rm` and `prune` would
+		// delete work without asking for --force.
+		"GIT_GRAFT_FILE=/dev/null",
 		// Nothing here should ever be able to ask the user for anything.
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_ASKPASS=",

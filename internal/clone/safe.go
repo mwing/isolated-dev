@@ -3,6 +3,8 @@ package clone
 import (
 	"fmt"
 	"strings"
+
+	"github.com/mwing/isolated-dev/internal/textsafe"
 )
 
 // Everything in this file exists because a clone's contents are the
@@ -23,47 +25,15 @@ import (
 // the content, byte for byte, and rewriting it would corrupt what the user
 // asked to see.
 
-// replacement stands in for a character that was removed.
-const replacement = '\uFFFD'
+// Sanitize and SanitizeLines make text that came out of a clone safe to
+// print. They forward to internal/textsafe, which the console and the
+// egress notices use for the same reason on names that came off the wire:
+// one implementation, so a character added to one of them is added to all.
+func Sanitize(s string) string { return textsafe.Sanitize(s) }
 
-// Sanitize makes text that came out of a clone safe to print.
-//
-// Control characters are replaced rather than dropped, so a subject that
-// tried something is visibly odd instead of silently shorter. Newlines and
-// tabs survive: they are the formatting of the output this is embedded in,
-// and a subject cannot contain a newline anyway.
-func Sanitize(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\t':
-			b.WriteRune(r)
-		case r < 0x20 || r == 0x7f:
-			b.WriteRune(replacement)
-		case r >= 0x80 && r <= 0x9f:
-			b.WriteRune(replacement)
-		// Line and paragraph separators: a terminal may or may not break on
-		// them, which is enough to make one line look like two.
-		case r == '\u2028' || r == '\u2029':
-			b.WriteRune(replacement)
-		// The bidirectional overrides, one step further out: they reorder
-		// what is displayed without changing what is stored, so "fix typo"
-		// can render as something else entirely.
-		case r >= '\u202a' && r <= '\u202e', r >= '\u2066' && r <= '\u2069':
-			b.WriteRune(replacement)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// SanitizeLines applies Sanitize to text meant to be printed as a block,
-// dropping a trailing newline so callers can format around it.
-func SanitizeLines(s string) string {
-	return strings.TrimRight(Sanitize(s), "\n")
-}
+// SanitizeLines is Sanitize for a block of output, without the trailing
+// newline.
+func SanitizeLines(s string) string { return textsafe.Lines(s) }
 
 // safeArg refuses a clone-derived string that git would read as an option
 // or that is not a single line.

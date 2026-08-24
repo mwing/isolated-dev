@@ -190,3 +190,110 @@ func TestSafeSHARefusesAnythingButAnObjectName(t *testing.T) {
 		t.Errorf("safeSHA rejected an object name: %v", err)
 	}
 }
+
+// The review's first finding, and it was right: GIT_NO_REPLACE_OBJECTS
+// covers refs/replace and nothing else, so a grafts file still truncated
+// history. Measured on git 2.52.0 — three commits, .git/info/grafts naming
+// the tip: plain and GIT_NO_REPLACE_OBJECTS both showed 1 commit,
+// GIT_GRAFT_FILE=/dev/null showed 3, and the `-c core.graftsFile` form did
+// not work at all.
+//
+// State is where it mattered: it counts the commits a deletion would
+// destroy by walking history, so a shortened walk means `dev clone rm` and
+// `prune` delete work without asking for --force.
+func TestAGraftCannotHideCommitsFromState(t *testing.T) {
+	src := gitRepo(t)
+	dest := filepath.Join(t.TempDir(), "clone")
+	ctx := context.Background()
+	run := runner.New(false)
+	if _, err := Prepare(ctx, run, Options{Project: src, Dest: dest}); err != nil {
+		t.Fatal(err)
+	}
+	// Two commits the project does not have.
+	for _, n := range []string{"one", "two"} {
+		write(t, filepath.Join(dest, n+".txt"), n+"\n")
+		if _, err := git(ctx, run, dest, "add", "-A"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := git(ctx, run, dest, "commit", "-qm", n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, unmerged, _, _ := stateOf(ctx, run, dest); unmerged != 2 {
+		t.Fatalf("the clone does not hold the work this test is about: %d", unmerged)
+	}
+
+	// A graft that makes the tip look like a root commit.
+	head, err := gitOutput(ctx, run, dest, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dest, ".git", "info"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dest, ".git", "info", "grafts"), strings.TrimSpace(head)+"\n")
+
+	if _, _, unmerged, _, _ := stateOf(ctx, run, dest); unmerged != 2 {
+		t.Errorf("a graft changed what State counts as unmerged: %d, want 2 — "+
+			"`dev clone rm` would delete it without --force", unmerged)
+	}
+}
+
+// stateOf adapts State's positional returns for readability.
+func stateOf(ctx context.Context, run runner.Runner, path string) (string, int, int, string, bool) {
+	dirty, unmerged, branch, shallow := State(ctx, run, path)
+	return path, dirty, unmerged, branch, shallow
+}
+
+// `git add f && rm f` is an ordinary state, and with --cached in the list
+// for unborn repositories it became a refused run: ls-files reports index
+// entries, which need not exist on disk, and copyFile's Lstat aborted the
+// whole clone with a raw ENOENT.
+func TestAStagedThenDeletedFileDoesNotRefuseTheClone(t *testing.T) {
+	src := unbornRepo(t)
+	if err := os.Remove(filepath.Join(src, "staged.txt")); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "clone")
+
+	if _, err := Prepare(context.Background(), runner.New(false),
+		Options{Project: src, Dest: dest}); err != nil {
+		t.Fatalf("a staged-then-deleted file refused the clone: %v", err)
+	}
+	// The file that does exist still arrives.
+	if got := read(t, filepath.Join(dest, "loose.txt")); got != "untracked\n" {
+		t.Errorf("loose.txt = %q", got)
+	}
+}
+
+// An unborn repository has a branch — `git init` points HEAD at one — but
+// `rev-parse --abbrev-ref HEAD` needs a commit to answer, so this returned
+// "" and captures were filed under refs/dev/clone/detached/…. Once the
+// agent made the first commits and the user was on main, `apply` looked
+// under main and never saw them: work in a place nobody looks, pinning its
+// objects forever.
+func TestTheBranchOfAnUnbornRepositoryIsItsBranch(t *testing.T) {
+	src := unbornRepo(t)
+	ctx := context.Background()
+	run := runner.New(false)
+
+	if got := CurrentBranch(ctx, run, src); got != "main" {
+		t.Errorf("CurrentBranch on an unborn repository = %q, want main", got)
+	}
+	// And a real detached HEAD still reports nothing, or the distinction
+	// this rests on is gone.
+	if _, err := git(ctx, run, src, "commit", "-qm", "first"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := gitOutput(ctx, run, src, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, run, src, "checkout", "-q", "--detach",
+		strings.TrimSpace(head)); err != nil {
+		t.Fatal(err)
+	}
+	if got := CurrentBranch(ctx, run, src); got != "" {
+		t.Errorf("a detached HEAD reported branch %q", got)
+	}
+}

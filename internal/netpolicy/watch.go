@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mwing/isolated-dev/internal/textsafe"
 )
 
 // Notice is a policy denial worth telling the user about right now, rather
@@ -157,12 +159,20 @@ func (w *Watcher) Totals() map[string]int {
 	return out
 }
 
+// destinationKey is what a notice is keyed and reported by.
+//
+// Sanitized here rather than at each printer: the host is whatever the
+// workload asked for, a DNS question can carry arbitrary bytes, and this
+// string is both a map key and a line on someone's terminal. Doing it once,
+// where the value is formed, is what stops the next printer from being the
+// one that forgot.
 func destinationKey(e Event) string {
+	host := textsafe.Sanitize(e.Host)
 	if e.Method == "DNS" {
-		return e.Host
+		return host
 	}
 	if e.Port != 0 {
-		return fmt.Sprintf("%s:%d", e.Host, e.Port)
+		return fmt.Sprintf("%s:%d", host, e.Port)
 	}
-	return e.Host
+	return host
 }
