@@ -34,6 +34,14 @@ func resolveProject(env *Env) (config.Config, *project.Project, error) {
 	for _, note := range set.Notes {
 		fmt.Fprintf(env.Stderr, "⚠  language plugin: %s\n", note)
 	}
+	// Said at the point it matters rather than only in `dev doctor`, which
+	// nobody runs while waiting for a container. These are keys that were
+	// read and not honored — a dead key, an unknown one, a setting a
+	// project file may not make — and a config half-honored silently is
+	// worse than one not read at all.
+	for _, note := range cfg.Notes {
+		fmt.Fprintf(env.Stderr, "⚠  %s\n", note)
+	}
 	p, err := project.Resolve(env.Paths.ProjectDir, cfg, set)
 	return cfg, p, err
 }

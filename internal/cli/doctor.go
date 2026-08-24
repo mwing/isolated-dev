@@ -58,6 +58,11 @@ func runDoctor(cmd *cobra.Command, env *Env) error {
 	fmt.Fprintf(out, "  vm_name:       %s (%s)\n", cfg.VMName, cfg.Origin("vm_name"))
 	fmt.Fprintf(out, "  auto_start_vm: %t (%s)\n", cfg.AutoStartVM, cfg.Origin("auto_start_vm"))
 
+	if cfg.ForwardPorts != "" {
+		fmt.Fprintf(out, "  forward_ports: %s (%s)\n", cfg.ForwardPorts,
+			cfg.Origin("forward_ports"))
+	}
+
 	asks := cfg.Asks()
 	if asks.Empty() {
 		fmt.Fprintf(out, "  grants:        none (sandbox defaults)\n")

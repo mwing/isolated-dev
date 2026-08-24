@@ -569,25 +569,29 @@ rather than naming them one at a time — precisely so a field added later
 without consent wiring fails a test rather than shipping. Reading the two
 ends against each other already disagrees:
 
-- `config.SecurityAsks` carries `ForwardPorts` and `Describe()` announces
-  it as "publish ports: …", so `dev doctor` reports it as a requested
-  grant — but `projectAsks` has no key for it, so `dev accept` cannot
-  accept it and no run is stopped by it. It is not inert, which was my
-  first reading and wrong: `forward_ports` reaches
-  `detect.Ports(cfg.ForwardPorts, …)` in `project.go`, becomes `p.Ports`,
-  and the sidecar publishes it (the workload is on an internal network and
-  cannot publish for itself). So a project file can bind a host port —
-  127.0.0.1 only, and printed in the run header as
-  `↦ http://127.0.0.1:3000 → container :3000`, which is the mitigation
-  that keeps this small.
-- The same list is also filled by language detection and by a
-  devcontainer's `forwardPorts`, neither of which anyone asked for. A
-  detected port is the tool's own doing and needs no consent from the
-  user; a port named by the repository is a request, and requests have
-  keys. Deciding which of those `forward_ports` is — and whether localhost
-  binding is a widening worth a prompt, given a browser on the same
-  machine can reach it — is the open question. Recorded rather than
-  answered in passing.
+- ~~`config.SecurityAsks` carries `ForwardPorts` and `Describe()` announces
+  it as a requested grant, but `projectAsks` has no key for it.~~
+  **Decided.** It is not inert, which was my first reading and wrong:
+  `forward_ports` reaches `detect.Ports` in `project.go`, becomes
+  `p.Ports`, and the sidecar publishes it because the workload is on an
+  internal network and cannot publish for itself.
+
+  The choice was between giving it a consent key and taking the request
+  away, and the second is right. Publishing opens a socket on the user's
+  machine that anything else on it can reach — a browser they visit,
+  another process — so from their own config it is them configuring their
+  machine, and from a project file it is a request. A key for it would be
+  a prompt that always deserves yes for the repository you wrote and is
+  unreadable for the one you did not, and the tool already detects the
+  ports a project is likely to serve, so the request adds nothing that
+  cannot be had another way.
+
+  So `forward_ports` is honored from the global file and ignored from a
+  project file, with a note saying so — printed on a run now, not only in
+  `dev doctor`, because a config half-honored silently is worse than one
+  not read at all. `SecurityAsks` no longer carries it: it was announcing
+  a request nobody could make. The invariant test enforces both halves
+  rather than listing it as undecided.
 
 ### B25. A clone hands over more history than the run needs — `done`
 

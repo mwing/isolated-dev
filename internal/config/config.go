@@ -290,8 +290,32 @@ func (c *Config) merge(f File, o Origin) {
 		c.origins["mount_docker_socket"] = o
 	}
 	if f.ForwardPorts != nil {
-		c.ForwardPorts = *f.ForwardPorts
-		c.origins["forward_ports"] = o
+		// Yours to set, not the repository's to ask for.
+		//
+		// A published port is a socket on your machine that anything else on
+		// your machine can reach — a browser you visit, another process —
+		// and the sidecar publishes it because the workload itself is on an
+		// internal network. From the global file that is you configuring
+		// your own machine, which needs consent from nobody. From a project
+		// file it is a request, and every other request in this tool has a
+		// key that `dev accept` can weigh.
+		//
+		// The choice was between giving it a key and taking the request
+		// away. A key would be a prompt that always deserves yes for the
+		// project you wrote and is unreadable for the one you did not, and
+		// the tool already detects the ports a project is likely to serve —
+		// so the request adds nothing the user cannot get another way.
+		// Ignored, and said out loud: a config half-honored silently is
+		// worse than one not read at all.
+		if o == OriginProject {
+			c.Notes = append(c.Notes, Note{Key: "forward_ports",
+				Text: "ignored: publishing a port opens a socket on your machine, so " +
+					"it is a setting in your own config rather than something a " +
+					"repository asks for. Detected ports are published as usual"})
+		} else {
+			c.ForwardPorts = *f.ForwardPorts
+			c.origins["forward_ports"] = o
+		}
 	}
 	if f.PassEnvVars != nil {
 		c.PassEnvVars = *f.PassEnvVars
@@ -392,12 +416,15 @@ func classify(path string, keys []string) []Note {
 // SecurityAsks is the subset of configuration that grants a container
 // access to something outside itself. The trust store hashes this set, not
 // the raw files, so that routine edits never re-prompt (ROADMAP 4.2).
+// It does not carry ForwardPorts. Publishing a port is a setting in the
+// user's own config and cannot be asked for by a project at all, so
+// listing it here would announce a request nobody can make and no
+// `dev accept` can weigh.
 type SecurityAsks struct {
 	MountGitConfig    bool
 	MountDockerSocket bool
 	PassEnvPatterns   []string
 	PassEnvExplicit   []string
-	ForwardPorts      string
 }
 
 // Asks extracts the security-relevant grant set.
@@ -407,14 +434,13 @@ func (c *Config) Asks() SecurityAsks {
 		MountDockerSocket: c.MountDockerSocket,
 		PassEnvPatterns:   append([]string(nil), c.PassEnvVars.Patterns...),
 		PassEnvExplicit:   append([]string(nil), c.PassEnvVars.Explicit...),
-		ForwardPorts:      c.ForwardPorts,
 	}
 }
 
 // Empty reports whether the project asks for nothing beyond the sandbox.
 func (a SecurityAsks) Empty() bool {
 	return !a.MountGitConfig && !a.MountDockerSocket &&
-		len(a.PassEnvPatterns) == 0 && len(a.PassEnvExplicit) == 0 && a.ForwardPorts == ""
+		len(a.PassEnvPatterns) == 0 && len(a.PassEnvExplicit) == 0
 }
 
 // Describe renders the asks as human-readable lines for a trust prompt.
@@ -431,9 +457,6 @@ func (a SecurityAsks) Describe() []string {
 	}
 	if len(a.PassEnvExplicit) > 0 {
 		out = append(out, "pass host env vars: "+strings.Join(a.PassEnvExplicit, ", "))
-	}
-	if a.ForwardPorts != "" {
-		out = append(out, "publish ports: "+a.ForwardPorts)
 	}
 	return out
 }

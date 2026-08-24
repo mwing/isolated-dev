@@ -88,27 +88,15 @@ func TestInvariantEverySecurityAskIsClassified(t *testing.T) {
 		"PassEnvPatterns":   "pass_env_vars",
 		"PassEnvExplicit":   "pass_env_vars",
 	}
-	// Known, undecided, and recorded as such rather than passing silently.
-	// `forward_ports` publishes a host port through the sidecar (127.0.0.1
-	// only, and printed in the run header) with no key to accept it, while
-	// `dev doctor` announces it as a requested grant. The same port list is
-	// also filled by language detection, which is the tool's own doing and
-	// nobody's request — so whether this is a request at all is the open
-	// question. BACKLOG B28.
-	undecided := map[string]bool{"ForwardPorts": true}
-
 	fields := reflect.TypeOf(config.SecurityAsks{})
 	for i := 0; i < fields.NumField(); i++ {
 		name := fields.Field(i).Name
 		if _, ok := asked[name]; ok {
 			continue
 		}
-		if undecided[name] {
-			continue
-		}
 		t.Errorf("config.SecurityAsks.%s grants the container something and no "+
-			"consent key covers it; add one, or add it to the undecided list "+
-			"with the reason", name)
+			"consent key covers it; give it one, or take the request away as "+
+			"forward_ports was", name)
 	}
 
 	// And the keys named above have to be the ones the consent path
@@ -204,5 +192,51 @@ func TestTheLockIsTakenBeforeTheCloneIsTouched(t *testing.T) {
 	// Nothing was created: the refusal came before any work on the clone.
 	if _, statErr := os.Stat(filepath.Join(dest, ".git")); statErr == nil {
 		t.Error("a clone was created despite the lock being held elsewhere")
+	}
+}
+
+// The other way to satisfy the invariant, and the one `forward_ports`
+// took: not a consent key, but no request at all.
+//
+// Publishing a port opens a socket on the machine — reachable by anything
+// else on it, including a browser — and the sidecar does the publishing
+// because the workload is on an internal network. From the user's own
+// config that is them configuring their machine. From a project file it
+// was a request with no key, which `dev doctor` announced as a grant and
+// no `dev accept` could weigh.
+func TestInvariantAProjectCannotPublishAHostPort(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "forward_ports: \"9999\"\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ForwardPorts != "" {
+		t.Errorf("a project file published a host port: %q", cfg.ForwardPorts)
+	}
+	// And it is not dropped in silence: a config half-honored quietly is
+	// worse than one not read at all.
+	var said bool
+	for _, n := range cfg.Notes {
+		if strings.Contains(n.String(), "forward_ports") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the setting was ignored without saying so: %v", cfg.Notes)
+	}
+}
+
+// The user's own config still works, or the change has removed the
+// feature rather than moved the decision.
+func TestForwardPortsFromYourOwnConfigStillApplies(t *testing.T) {
+	h := newHarness(t)
+	h.writeGlobal(t, "forward_ports: \"9999\"\n")
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ForwardPorts != "9999" {
+		t.Errorf("forward_ports from the global config = %q", cfg.ForwardPorts)
 	}
 }

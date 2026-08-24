@@ -487,7 +487,7 @@ are inbound, and inbound is not governed by the egress allowlist.
 ## Reaching a server you do want to use
 
 Ports are published automatically from the language's defaults, or from
-`forward_ports` in `.devenv.yaml`:
+`forward_ports` in **your own** `~/.dev-envs/config.yaml`:
 
 ```sh
 dev run -c 'python3 -m http.server 8080'
@@ -496,6 +496,12 @@ dev run -c 'python3 -m http.server 8080'
 
 Ports bind to `127.0.0.1`, not `0.0.0.0` — a development service should
 not appear on the local network because you ran a command.
+
+A project file cannot set `forward_ports`, and says so if it tries.
+Publishing opens a socket on your machine that anything else on it can
+reach, which makes it a setting of yours rather than something a
+repository asks for. Detected ports are a different thing: those are this
+tool's guess about the language, not the repository's request.
 
 In allowlist mode the workload has no gateway of its own, so the **sidecar
 publishes and relays**. That is deliberate: one component owns the whole
