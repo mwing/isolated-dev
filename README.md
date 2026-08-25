@@ -115,6 +115,27 @@ still uses.
 
 ---
 
+## Pointing an agent at it
+
+There are two ways to put a coding agent behind this, and they are not
+equally strong.
+
+**Put the agent inside.** `dev agent run claude` runs the agent in the
+sandbox, in a private clone. It cannot forget, because it is not the one
+deciding.
+
+**Or teach it to reach for the sandbox.** `skills/sandboxed-execution/` is
+a skill for Claude Code: use `dev` rather than the host shell when running
+code that has not earned it — a repository just cloned, a dependency
+install, someone else's build script. Copy it into `~/.claude/skills/`.
+
+The second is a habit, not a boundary. The protection comes from the
+container, so an agent that forgets to use it is an agent running on your
+machine, and you cannot tell from the outside. Worth having, worth not
+mistaking for the first.
+
+---
+
 ## The common commands
 
 ```sh
@@ -137,6 +158,7 @@ Full list: [docs/COMMANDS.md](docs/COMMANDS.md). Every command takes
 ```
 cmd/ internal/          the tool
 languages/<lang>/       language plugins, installed into ~/.dev-envs
+skills/                 agent instructions for using it (Claude Code)
 docs/                   guides, design and history
 v1/                     the bash tool this replaces, installed as dev1
 ```

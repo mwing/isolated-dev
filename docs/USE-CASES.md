@@ -421,6 +421,18 @@ persists, and it persists per agent rather than per project — so one login
 serves every repository, and nothing else an agent writes in one project is
 there to be read in the next.
 
+**The other direction: an agent on your host, reaching for this.** The
+above puts the agent inside the sandbox. The reverse arrangement — Claude
+Code running normally on your machine, choosing to run untrusted commands
+through `dev` — is a skill in `skills/sandboxed-execution/`, copied into
+`~/.claude/skills/`.
+
+Be clear about the difference. Inside, the agent cannot forget: it is not
+the one deciding. With the skill it can, and an agent that forgets is one
+running on your machine while you believe otherwise. The skill is a habit
+worth having and not a boundary; where you want the guarantee, use
+`dev agent run`.
+
 **Committing and pushing.** The agent can commit — its identity comes from
 your `user.name` and `user.email`, nothing else from your gitconfig — but
 it cannot push. That is the review boundary: you read the diff and push
