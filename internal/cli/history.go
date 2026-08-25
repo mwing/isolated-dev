@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +61,7 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 func newHistoryCmd(env *Env) *cobra.Command {
 	var limit int
 	var deniedOnly bool
+	var asJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "history",
@@ -70,11 +73,12 @@ func newHistoryCmd(env *Env) *cobra.Command {
 			"never in the repository. It is a record of what this machine did.",
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return showHistory(env, limit, deniedOnly)
+			return showHistory(env, limit, deniedOnly, asJSON)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 10, "how many runs to show")
 	cmd.Flags().BoolVar(&deniedOnly, "denied", false, "only runs that had something blocked")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
 	cmd.AddCommand(newHistoryHostsCmd(env))
 	return cmd
 }
@@ -87,7 +91,69 @@ func projectHistoryPath(env *Env) (string, *trust.Store, error) {
 	return history.Path(store.Project.Path()), store, nil
 }
 
-func showHistory(env *Env, limit int, deniedOnly bool) error {
+// The JSON shapes. Separate from history.Run because the stored record
+// keys its counts by a rendered string — "host:port", or "host (DNS)" —
+// which is right for a file that has to stay readable by an older build
+// and wrong for something a program will act on. Decomposed here rather
+// than by changing the record, because the records on disk predate this.
+type historyJSON struct {
+	Project string    `json:"project"`
+	Runs    []runJSON `json:"runs"`
+}
+
+type runJSON struct {
+	Start   time.Time  `json:"start"`
+	End     time.Time  `json:"end"`
+	Command string     `json:"command,omitempty"`
+	Image   string     `json:"image,omitempty"`
+	Network string     `json:"network,omitempty"`
+	Allowed []destJSON `json:"allowed"`
+	Denied  []destJSON `json:"denied"`
+}
+
+// destJSON is one destination. Host is exactly what `dev allow` takes,
+// which is the point of this output: the caller relays a decision to a
+// person rather than parsing prose to find out what to relay.
+type destJSON struct {
+	Host string `json:"host"`
+	Port int    `json:"port,omitempty"`
+	// Method is "DNS" for a name refused before any request existed, and
+	// "connect" for one refused at the proxy. The difference decides what
+	// the user is told: only the second could have been held for an
+	// answer.
+	Method string `json:"method"`
+	Count  int    `json:"count"`
+}
+
+// splitKey turns a stored count key back into its parts.
+func splitKey(key string) destJSON {
+	if host, ok := strings.CutSuffix(key, " (DNS)"); ok {
+		return destJSON{Host: host, Method: "DNS"}
+	}
+	host, portText, ok := strings.Cut(key, ":")
+	if !ok {
+		return destJSON{Host: key, Method: "connect"}
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return destJSON{Host: key, Method: "connect"}
+	}
+	return destJSON{Host: host, Port: port, Method: "connect"}
+}
+
+// destinations renders a count map in a stable order: busiest first, then
+// by name, so two runs of the same thing produce the same bytes.
+func destinations(m map[string]int) []destJSON {
+	out := make([]destJSON, 0, len(m))
+	for _, key := range topKeys(m, len(m)) {
+		d := splitKey(key)
+		d.Count = m[key]
+		out = append(out, d)
+	}
+	return out
+}
+
+func showHistory(env *Env, limit int, deniedOnly, asJSON bool) error {
 	path, _, err := projectHistoryPath(env)
 	if err != nil {
 		return err
@@ -105,7 +171,7 @@ func showHistory(env *Env, limit int, deniedOnly bool) error {
 		}
 		runs = kept
 	}
-	if len(runs) == 0 {
+	if len(runs) == 0 && !asJSON {
 		fmt.Fprintln(env.Stdout, "No runs recorded for this project yet.")
 		fmt.Fprintln(env.Stdout, "Only filtered runs are recorded: `--network open` "+
 			"has no proxy to record from.")
@@ -114,6 +180,24 @@ func showHistory(env *Env, limit int, deniedOnly bool) error {
 
 	if limit > 0 && len(runs) > limit {
 		runs = runs[len(runs)-limit:]
+	}
+
+	if asJSON {
+		// An empty history is an empty list, not a sentence. A caller
+		// parsing this should never have to tell "nothing happened" apart
+		// from "the output changed".
+		out := historyJSON{Project: env.Paths.ProjectDir, Runs: []runJSON{}}
+		for _, r := range runs {
+			out.Runs = append(out.Runs, runJSON{
+				Start: r.Start, End: r.End, Command: r.Command,
+				Image: r.Image, Network: r.Network,
+				Allowed: destinations(r.Allowed),
+				Denied:  destinations(r.Denied),
+			})
+		}
+		enc := json.NewEncoder(env.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(out)
 	}
 	// Most recent last, so the newest is next to the prompt.
 	for _, r := range runs {

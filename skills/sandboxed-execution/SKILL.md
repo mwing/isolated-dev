@@ -87,11 +87,24 @@ needs no setup. Uncommitted work is not lost — `dev clone diff` shows it
 and `apply` says it is staying behind — but it stays in the clone until
 someone commits it.
 
-Look at what a run reached:
+Look at what a run reached, or was stopped from reaching:
 
 ```sh
-dev history hosts
+dev history hosts                      # every destination, ever
+dev history --denied --limit 1 --json  # what the last run was refused
 ```
+
+Use the JSON form when you are going to relay a decision. The human output
+is a rendered line and reading it is a guess about formatting; the JSON
+gives you the host exactly as `dev allow` takes it:
+
+```json
+{"host": "telemetry.example.com", "method": "DNS", "count": 4}
+{"host": "metrics.example.com", "port": 443, "method": "connect", "count": 1}
+```
+
+`method` is the difference described under **Reading what happens**: only a
+`connect` denial reached the proxy and could have been held for an answer.
 
 ## Rules
 
@@ -113,6 +126,11 @@ destination, name it to the user and let them decide:
 
 > The install was blocked reaching `registry.example.com`. Allow it with
 > `dev allow registry.example.com`, or tell me to skip that step.
+
+Name every destination the run was refused, not the first one — a client
+usually attempts several before it gives up, and granting them one round
+trip at a time is how a person ends up reaching for `--network open`.
+`dev history --denied --limit 1 --json` is the whole list.
 
 `--allow-host` for a single run is acceptable **only** when the user has
 already named that host in this conversation.

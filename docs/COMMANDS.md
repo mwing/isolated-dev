@@ -16,7 +16,7 @@ what it ran.
 | `dev interactive` | the same guided view, under its own name |
 | `dev new LANG [dir]` | scaffold a new project from a language plugin |
 | `dev doctor` | backend, sidecar image, disk, and this project's build context |
-| `dev migrate` | what changes coming from the bash tool (`dev1`) |
+| `dev migrate` | what changes coming from the bash tool |
 | `dev completion install` | install completions for your shell |
 
 `dev new python my-app` writes the plugin's files, not a Dockerfile: the
@@ -98,6 +98,8 @@ scripts and Makefiles, which are things your host runs later.
 | `dev config edit` | open this project's recorded configuration in `$EDITOR` |
 | `dev config show` | the configuration a run would resolve |
 | `dev history` | what past runs reached, and what was blocked |
+| `dev history --denied` | only the runs that had something blocked |
+| `dev history --json` | the same, machine-readable — for CI, or an agent relaying a decision |
 | `dev history hosts` | every destination, most recent first |
 | `dev policy` | the rules this machine enforces on everyone |
 | `dev status` | what is running, under which policy (`--all` for other projects) |

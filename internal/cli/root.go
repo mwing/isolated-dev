@@ -163,12 +163,14 @@ func NewRootCmd(env *Env) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "dev",
 		Short: "Isolated development environments",
+		// No mention of the tool this replaced. The front page of the help
+		// is for someone finding out what this is, and a paragraph about a
+		// predecessor answers a question almost nobody arrives with —
+		// `dev migrate` is there for the few who do.
 		Long: "Run code in a container without learning Docker, in a sandbox that\n" +
 			"is closed by default and opened one deliberate step at a time.\n\n" +
 			"Run `dev` on its own inside a project for the guided view: what is\n" +
-			"set up, what is not, and what each next step would do.\n\n" +
-			"The bash tool this replaces installs itself as `dev1` and stays\n" +
-			"available; `dev migrate` says what changes.",
+			"set up, what is not, and what each next step would do.",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// Without this cobra hands an unrecognized command to the root's own
