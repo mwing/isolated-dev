@@ -71,6 +71,22 @@ dev clone diff        # what the clone has that the project does not
 dev clone apply       # bring the commits back, when the user wants them
 ```
 
+**Commit inside the run, or the work does not come back.** `dev clone
+apply` moves commits, and deliberately does not reach into a working
+tree — doing that would mean deciding about untracked files, ignored files
+and partial staging, which are judgements about code it has not read. So
+when the point of the run is to change files, end the command with a
+commit:
+
+```sh
+dev run --clone --tty off -c 'npm run lint -- --fix && git add -A && git commit -m "lint --fix"'
+```
+
+git is in the images and the clone is given a commit identity, so this
+needs no setup. Uncommitted work is not lost — `dev clone diff` shows it
+and `apply` says it is staying behind — but it stays in the clone until
+someone commits it.
+
 Look at what a run reached:
 
 ```sh
@@ -105,7 +121,7 @@ The run's own summary offers these:
 
 ```
 Egress: blocked destinations this run:
-  blocked: lith.fi (DNS) x4
+  blocked: telemetry.example.com (DNS) x4
 Allow once:       --allow-host HOST
 Allow from now:   dev allow HOST
 Unrestricted:     --network open
