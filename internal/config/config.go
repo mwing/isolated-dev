@@ -307,14 +307,28 @@ func (c *Config) merge(f File, o Origin) {
 		// so the request adds nothing the user cannot get another way.
 		// Ignored, and said out loud: a config half-honored silently is
 		// worse than one not read at all.
-		if o == OriginProject {
-			c.Notes = append(c.Notes, Note{Key: "forward_ports",
-				Text: "ignored: publishing a port opens a socket on your machine, so " +
-					"it is a setting in your own config rather than something a " +
-					"repository asks for. Detected ports are published as usual"})
-		} else {
+		switch {
+		case o != OriginProject:
 			c.ForwardPorts = *f.ForwardPorts
 			c.origins["forward_ports"] = o
+		case strings.TrimSpace(*f.ForwardPorts) == "":
+			// Empty from a project file is honored, because it publishes
+			// nothing. Narrowing is not widening and needs no consent from
+			// anyone — and this was the documented way in v1 to stop
+			// detection guessing ports for a project that serves none.
+			c.ForwardPorts = ""
+			c.origins["forward_ports"] = o
+		default:
+			// Named ports from a project file are the request, and the
+			// note has to say which file: the same key in the global file
+			// was honored, and a user with both needs to know which one
+			// was disregarded. merge is given an Origin rather than a path,
+			// so the file is named in the text.
+			c.Notes = append(c.Notes, Note{Key: "forward_ports",
+				Text: "ignored from your project file (.devenv.yaml): publishing a " +
+					"port opens a socket on your machine, so it is a setting in " +
+					"your own config rather than something a repository asks for. " +
+					"Detected ports are published as usual"})
 		}
 	}
 	if f.PassEnvVars != nil {
@@ -414,8 +428,16 @@ func classify(path string, keys []string) []Note {
 }
 
 // SecurityAsks is the subset of configuration that grants a container
-// access to something outside itself. The trust store hashes this set, not
-// the raw files, so that routine edits never re-prompt (ROADMAP 4.2).
+// access to something outside itself.
+//
+// It is what `dev doctor` reports, and nothing else: consent is keyed by
+// `projectAsks` in internal/cli, which returns trust.Asks and has never
+// carried these field names. The comment here used to say the trust store
+// hashed this set, which was not true and was the premise the next
+// paragraph reasoned from — worth correcting, since an invariant test now
+// links these fields to consent keys by convention and this is the only
+// place documenting that link.
+//
 // It does not carry ForwardPorts. Publishing a port is a setting in the
 // user's own config and cannot be asked for by a project at all, so
 // listing it here would announce a request nobody can make and no

@@ -204,26 +204,87 @@ func TestTheLockIsTakenBeforeTheCloneIsTouched(t *testing.T) {
 // config that is them configuring their machine. From a project file it
 // was a request with no key, which `dev doctor` announced as a grant and
 // no `dev accept` could weigh.
+//
+// Asserted on the ports a run would publish rather than on the config
+// value, which is the mistake the first version of this test made: it
+// checked `cfg.ForwardPorts` and so passed while a devcontainer.json's
+// forwardPorts still published — a review found that, and the change had
+// made that path strictly more reachable. An invariant about published
+// ports has to be asked of the published ports.
 func TestInvariantAProjectCannotPublishAHostPort(t *testing.T) {
+	for _, tc := range []struct{ name, file, body string }{
+		{"devenv", ".devenv.yaml", "forward_ports: \"9999\"\n"},
+		{"devcontainer", ".devcontainer.json", `{"image": "a/b:1", "forwardPorts": [9999]}`},
+	} {
+		h := newHarness(t)
+		if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, tc.file),
+			[]byte(tc.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "Dockerfile"),
+			[]byte("FROM alpine\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		_, p, err := resolveProject(h.env)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		for _, port := range p.Ports {
+			if port == 9999 {
+				t.Errorf("%s: a project file published a host port: %v", tc.name, p.Ports)
+			}
+		}
+	}
+}
+
+// And it is not dropped in silence: a config half-honored quietly is
+// worse than one not read at all. Each file says so in its own way — the
+// config loader through a note, a devcontainer through Ignored(), which
+// is where its other unhonored keys are already reported.
+func TestIgnoringAProjectsPortsIsSaidOutLoud(t *testing.T) {
 	h := newHarness(t)
 	h.writeProject(t, "forward_ports: \"9999\"\n")
 	cfg, err := config.Load(h.paths, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ForwardPorts != "" {
-		t.Errorf("a project file published a host port: %q", cfg.ForwardPorts)
-	}
-	// And it is not dropped in silence: a config half-honored quietly is
-	// worse than one not read at all.
 	var said bool
 	for _, n := range cfg.Notes {
-		if strings.Contains(n.String(), "forward_ports") {
+		if strings.Contains(n.String(), "forward_ports") &&
+			strings.Contains(n.String(), ".devenv.yaml") {
 			said = true
 		}
 	}
 	if !said {
-		t.Errorf("the setting was ignored without saying so: %v", cfg.Notes)
+		t.Errorf("the setting was ignored without naming the file it came from: %v",
+			cfg.Notes)
+	}
+}
+
+// Narrowing is not widening. An empty value from a project file publishes
+// nothing, which is what v1 documented as the way to stop detection
+// guessing ports for a project that serves none — removing that would
+// have been an unintended casualty of taking the request away.
+func TestAProjectCanStillAskForNoPortsAtAll(t *testing.T) {
+	h := newHarness(t)
+	h.writeProject(t, "forward_ports: \"\"\n")
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "Dockerfile"),
+		[]byte("FROM alpine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(h.paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Origin("forward_ports") != config.OriginProject {
+		t.Errorf("an empty forward_ports from a project file was not honored: %v",
+			cfg.Origin("forward_ports"))
+	}
+	for _, n := range cfg.Notes {
+		if strings.Contains(n.String(), "forward_ports") {
+			t.Errorf("asking for nothing was reported as a refused request: %s", n)
+		}
 	}
 }
 

@@ -131,6 +131,12 @@ func Resolve(dir string, cfg config.Config, set *langs.Set) (*Project, error) {
 	// failure the uid work exists to remove.
 	p.Image = fmt.Sprintf("%s-img-%s%s", prefix, name, imageUIDSuffix())
 	p.Container = fmt.Sprintf("%s-ctn-%s", prefix, name)
+	// Ports come from the user's configuration or from detection, never
+	// from the repository. `.devenv.yaml` cannot set forward_ports and a
+	// devcontainer's forwardPorts is not read either (see Ignored): both
+	// are the repository's files, and publishing opens a socket on the
+	// user's machine. Detection is this tool's own guess about a language,
+	// which is a different thing from a request.
 	p.Ports = detect.Ports(cfg.ForwardPorts, p.Detected)
 
 	// Precedence: the project's own Dockerfile, then its devcontainer,
@@ -152,9 +158,6 @@ func Resolve(dir string, cfg config.Config, set *langs.Set) (*Project, error) {
 			} else if dc.Image != "" {
 				p.DevcontainerImage = dc.Image
 			}
-		}
-		if cfg.ForwardPorts == "" && len(dc.ForwardPorts) > 0 {
-			p.Ports = append([]int(nil), dc.ForwardPorts...)
 		}
 	}
 	if p.Dockerfile == "" && p.DevcontainerImage == "" && p.Detected.Found() {

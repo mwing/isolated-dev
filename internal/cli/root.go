@@ -39,6 +39,28 @@ type Env struct {
 	LookPath func(string) (string, bool)
 
 	verbose bool
+	// notesShown stops the configuration notes being printed once per call
+	// to resolveProject, which the guided menu makes on every redraw.
+	notesShown bool
+}
+
+// reportConfigNotes says which configuration keys were read and not
+// honored: a dead key, an unknown one, a setting a project file may not
+// make. Said at the point it matters rather than only in `dev doctor`,
+// which nobody runs while waiting for a container — a config half-honored
+// silently is worse than one not read at all.
+//
+// Once per process. resolveProject is called several times on some paths —
+// the guided menu calls it on every redraw — and a warning repeated per
+// frame is one the reader learns to skip.
+func (e *Env) reportConfigNotes(cfg config.Config) {
+	if e.notesShown {
+		return
+	}
+	e.notesShown = true
+	for _, note := range cfg.Notes {
+		fmt.Fprintf(e.Stderr, "⚠  %s\n", note)
+	}
 }
 
 // Verbose reports whether --verbose was given.

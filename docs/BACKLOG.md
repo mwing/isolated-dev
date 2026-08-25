@@ -517,6 +517,50 @@ are in the places the idea was not applied.
   `DropCapture` — which would refuse them, and asking it to refuse is not
   the same as not asking.
 
+### B32. The forward_ports decision, and the hole it opened — `done`
+
+Deciding an open question found a second one, and the review of the fix
+found a third — worth recording as a sequence, because each step was
+reasonable and the middle one was wrong.
+
+**The decision.** `forward_ports` from a project file published a host
+port with no consent key, while `dev doctor` announced it as a requested
+grant. The choice was a key or no request at all, and no request is right:
+a key would be a prompt that always deserves yes for the repository you
+wrote and is unreadable for the one you did not, and detection already
+guesses the ports a project is likely to serve. Honored from the user's
+config, ignored from a project file with a note. Empty from a project file
+is still honored, because publishing nothing is narrowing and narrowing
+needs no permission — that was v1's documented way to stop detection
+guessing, and losing it would have been an unintended casualty.
+
+**The hole.** A `devcontainer.json`'s `forwardPorts` published too, and it
+is as much the repository's file as `.devenv.yaml`. Worse, the fix made
+that path *more* reachable: the devcontainer list was only used when
+`cfg.ForwardPorts` was empty, which is now always true for a project-only
+config. It joins `containerEnv` and `mounts` in the devcontainer's
+`Ignored()` list, which is where the keys that are grants rather than
+settings already are.
+
+**The test that would not have caught it.** The invariant asserted on
+`config.Load`, so it passed while ports were still published by another
+route. An invariant about published ports has to be asked of the published
+ports — it reads `project.Resolve` now and covers both files. Verified by
+restoring the devcontainer branch and watching it fail.
+
+Smaller findings from the same review, fixed: the note now names the file
+it ignored (a user with the key in both files needs to know which one was
+disregarded); configuration notes print once per process rather than once
+per call to `resolveProject`, which the guided menu makes on every redraw;
+and the comment claiming the trust store hashes `SecurityAsks` was false —
+consent is keyed by `projectAsks`, and the false claim was the premise the
+next paragraph reasoned from.
+
+Not fixed, and worth stating: `dev doctor` still cannot answer "what will
+actually be published on my machine", because it reports the configured
+value rather than the resolved port list. The run header does print every
+mapping.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

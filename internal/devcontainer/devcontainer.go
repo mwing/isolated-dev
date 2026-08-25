@@ -198,6 +198,12 @@ func (c *Config) Ignored() []string {
 		out = append(out, "remoteUser/containerUser: the uid is set by dev, "+
 			"so an image cannot choose to run as root")
 	}
+	if len(c.ForwardPorts) > 0 {
+		out = append(out, fmt.Sprintf("forwardPorts (%d): publishing opens a socket "+
+			"on your machine, so it is a setting in your own config rather than "+
+			"something a repository asks for; detected ports are published as usual",
+			len(c.ForwardPorts)))
+	}
 	if c.PostCreate != nil {
 		out = append(out, "postCreateCommand: not run")
 	}

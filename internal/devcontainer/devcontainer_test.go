@@ -112,11 +112,26 @@ func TestIgnoredPartsAreNamed(t *testing.T) {
 }
 
 func TestNothingIgnoredWhenNothingUnsupported(t *testing.T) {
-	dir := write(t, `{"image": "a/b:1", "forwardPorts": [3000], "workspaceFolder": "/workspace"}`)
+	dir := write(t, `{"image": "a/b:1", "workspaceFolder": "/workspace"}`)
 	path, _ := Find(dir)
 	c, _ := Load(path)
 	if got := c.Ignored(); len(got) != 0 {
 		t.Errorf("Ignored() = %v, want nothing", got)
+	}
+}
+
+// forwardPorts used to be honored, which made a devcontainer.json the one
+// file in the repository that could still publish a socket on the user's
+// machine — the same request `.devenv.yaml` is refused, in the other file
+// the repository owns. It joins containerEnv and mounts: a grant here,
+// not a setting.
+func TestForwardPortsIsIgnoredAndSaidSo(t *testing.T) {
+	dir := write(t, `{"image": "a/b:1", "forwardPorts": [3000, 5000]}`)
+	path, _ := Find(dir)
+	c, _ := Load(path)
+	got := strings.Join(c.Ignored(), "\n")
+	if !strings.Contains(got, "forwardPorts") {
+		t.Errorf("a devcontainer's forwardPorts is dropped without saying so:\n%s", got)
 	}
 }
 

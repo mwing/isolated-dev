@@ -497,11 +497,16 @@ dev run -c 'python3 -m http.server 8080'
 Ports bind to `127.0.0.1`, not `0.0.0.0` — a development service should
 not appear on the local network because you ran a command.
 
-A project file cannot set `forward_ports`, and says so if it tries.
-Publishing opens a socket on your machine that anything else on it can
-reach, which makes it a setting of yours rather than something a
-repository asks for. Detected ports are a different thing: those are this
-tool's guess about the language, not the repository's request.
+A project file cannot name ports to publish, and says so if it tries —
+neither `forward_ports` in `.devenv.yaml` nor `forwardPorts` in a
+`devcontainer.json`. Publishing opens a socket on your machine that
+anything else on it can reach, which makes it a setting of yours rather
+than something a repository asks for. Detected ports are a different
+thing: those are this tool's guess about the language, not the
+repository's request.
+
+A project file *can* set `forward_ports` to empty, which publishes
+nothing. Asking for less needs no permission from anyone.
 
 In allowlist mode the workload has no gateway of its own, so the **sidecar
 publishes and relays**. That is deliberate: one component owns the whole

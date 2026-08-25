@@ -83,7 +83,7 @@ detection:
 registries:                   # egress this language's toolchain needs
   - packages.example.com
 
-ports: [8080]                 # forwarded unless the project sets forward_ports
+ports: [8080]                 # published unless your own config sets forward_ports
 
 files:
   dockerfile: Dockerfile.template     # optional; this is the default

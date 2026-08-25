@@ -34,14 +34,7 @@ func resolveProject(env *Env) (config.Config, *project.Project, error) {
 	for _, note := range set.Notes {
 		fmt.Fprintf(env.Stderr, "⚠  language plugin: %s\n", note)
 	}
-	// Said at the point it matters rather than only in `dev doctor`, which
-	// nobody runs while waiting for a container. These are keys that were
-	// read and not honored — a dead key, an unknown one, a setting a
-	// project file may not make — and a config half-honored silently is
-	// worse than one not read at all.
-	for _, note := range cfg.Notes {
-		fmt.Fprintf(env.Stderr, "⚠  %s\n", note)
-	}
+	env.reportConfigNotes(cfg)
 	p, err := project.Resolve(env.Paths.ProjectDir, cfg, set)
 	return cfg, p, err
 }
@@ -616,6 +609,24 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 		fmt.Fprintf(env.Stderr,
 			"⚠  --egress-prompt ask needs stdin, which this session gives to the\n"+
 				"   workload. Reporting instead; a blocked host will fail rather than wait.\n")
+		resolved = EgressReport
+	}
+	// Asked for explicitly, with nobody there to ask.
+	//
+	// `auto` already resolves to reporting without a terminal, but an
+	// explicit `ask` was taken at its word: every blocked destination was
+	// then held for the full AskTimeout and denied, so a scripted run — CI,
+	// or an agent driving this tool — stalled a minute per host and failed
+	// with something that reads like a network fault. "Ask" with no one
+	// present is a slow deny, which is the worst of both.
+	//
+	// Reported rather than refused: the run is still the run the user
+	// asked for, and the mode they wanted is unavailable rather than wrong.
+	if resolved == EgressAsk && !env.stdinIsTerminal() {
+		fmt.Fprintf(env.Stderr,
+			"⚠  --egress-prompt ask has no terminal to ask on. Reporting instead;\n"+
+				"   a blocked host fails immediately rather than waiting %s for an\n"+
+				"   answer nobody is there to give.\n", AskTimeout)
 		resolved = EgressReport
 	}
 
