@@ -99,8 +99,8 @@ scripts and Makefiles, which are things your host runs later.
 | `dev config show` | the configuration a run would resolve |
 | `dev history` | what past runs reached, and what was blocked |
 | `dev history --denied` | only the runs that had something blocked |
-| `dev history --json` | the same, machine-readable — for CI, or an agent relaying a decision |
-| `dev history hosts` | every destination, most recent first |
+| `dev history --json` | machine-readable, with or without `--denied` — for CI, or an agent relaying a decision |
+| `dev history hosts` | every destination, most recent first (`--json` too) |
 | `dev policy` | the rules this machine enforces on everyone |
 | `dev status` | what is running, under which policy (`--all` for other projects) |
 

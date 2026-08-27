@@ -142,3 +142,48 @@ func TestWatcherToleratesGarbageLines(t *testing.T) {
 		t.Fatalf("notices = %+v", got.all())
 	}
 }
+
+// The review's finding, and the reason destinations are recorded as
+// fields: the method used to be carried in-band, as the suffix " (DNS)"
+// on the host. A hostname is text the workload chooses, and the proxy
+// emits a denial with the raw request-line target when it cannot parse one
+// — so a container could describe its own refusal as a name lookup, which
+// is the one thing a reader uses to decide whether the request could have
+// been held for an answer.
+func TestAWorkloadCannotChooseHowItsDenialIsDescribed(t *testing.T) {
+	logs := `{"action":"deny","host":"evil.example.com (DNS)","method":"CONNECT","reason":"bad target"}
+{"action":"deny","host":"real.example.com","method":"DNS","reason":"not in allowlist"}`
+
+	byHost := map[string]Destination{}
+	for _, d := range Destinations(logs) {
+		byHost[d.Host] = d
+	}
+
+	forged, ok := byHost["evil.example.com (DNS)"]
+	if !ok {
+		t.Fatalf("the forged host was not recorded as itself: %+v", byHost)
+	}
+	if forged.Method != "connect" {
+		t.Errorf("a proxy refusal was described as %q because the host said so",
+			forged.Method)
+	}
+	if real, ok := byHost["real.example.com"]; !ok || real.Method != "DNS" {
+		t.Errorf("a real name refusal lost its method: %+v", real)
+	}
+}
+
+// A name resolved is not a destination reached: counting an allowed lookup
+// as contact would be exactly the claim a grant review must not get wrong.
+func TestAnAllowedLookupIsNotAContact(t *testing.T) {
+	logs := `{"action":"allow","host":"example.com","method":"DNS"}
+{"action":"allow","host":"example.com","port":443,"method":"CONNECT"}`
+	var reached []Destination
+	for _, d := range Destinations(logs) {
+		if !d.Denied {
+			reached = append(reached, d)
+		}
+	}
+	if len(reached) != 1 || reached[0].Port != 443 {
+		t.Errorf("reached = %+v, want one connection on 443", reached)
+	}
+}

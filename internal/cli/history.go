@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +11,7 @@ import (
 
 	"github.com/mwing/isolated-dev/internal/history"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/textsafe"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
 
@@ -36,7 +35,7 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 	if err != nil {
 		return nil, err
 	}
-	allowed, denied := netpolicy.ParseEvents(logs)
+	_, denied := netpolicy.ParseEvents(logs)
 
 	if rec.Path != "" {
 		r := history.Run{
@@ -45,8 +44,19 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 			Command: strings.Join(rec.Command, " "),
 			Image:   rec.Image,
 			Network: rec.Network,
-			Allowed: allowed,
-			Denied:  denied,
+		}
+		// Recorded as destinations rather than as rendered keys. The old
+		// shape is still read (see history.Run), and no longer written:
+		// what it could not represent was an address with colons in it,
+		// and what it let the workload choose was how its own denial was
+		// described.
+		for _, d := range netpolicy.Destinations(logs) {
+			dest := history.Dest{Host: d.Host, Port: d.Port, Method: d.Method, Count: d.Count}
+			if d.Denied {
+				r.Blocked = append(r.Blocked, dest)
+				continue
+			}
+			r.To = append(r.To, dest)
 		}
 		// A failure to record is worth saying but never worth failing a
 		// run over: the work is already done, and losing the record is
@@ -116,7 +126,10 @@ type runJSON struct {
 // person rather than parsing prose to find out what to relay.
 type destJSON struct {
 	Host string `json:"host"`
-	Port int    `json:"port,omitempty"`
+	// No omitempty: a destination with no port, a name lookup and a value
+	// that could not be parsed would otherwise be indistinguishable to a
+	// program, which is the audience.
+	Port int `json:"port"`
 	// Method is "DNS" for a name refused before any request existed, and
 	// "connect" for one refused at the proxy. The difference decides what
 	// the user is told: only the second could have been held for an
@@ -125,30 +138,23 @@ type destJSON struct {
 	Count  int    `json:"count"`
 }
 
-// splitKey turns a stored count key back into its parts.
-func splitKey(key string) destJSON {
-	if host, ok := strings.CutSuffix(key, " (DNS)"); ok {
-		return destJSON{Host: host, Method: "DNS"}
-	}
-	host, portText, ok := strings.Cut(key, ":")
-	if !ok {
-		return destJSON{Host: key, Method: "connect"}
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil {
-		return destJSON{Host: key, Method: "connect"}
-	}
-	return destJSON{Host: host, Port: port, Method: "connect"}
-}
-
-// destinations renders a count map in a stable order: busiest first, then
-// by name, so two runs of the same thing produce the same bytes.
-func destinations(m map[string]int) []destJSON {
-	out := make([]destJSON, 0, len(m))
-	for _, key := range topKeys(m, len(m)) {
-		d := splitKey(key)
-		d.Count = m[key]
-		out = append(out, d)
+// destinations renders recorded destinations for output.
+//
+// The host is sanitized on the way out for the reason internal/textsafe
+// exists: it was chosen by the workload, it is about to be read by a
+// person deciding whether to allow it, and a name that renders as one
+// thing and grants another is the whole point of that package. A name
+// carrying anything a terminal acts on will not match a real host, which
+// is the correct outcome — it is not a host anyone should allow.
+func destinations(in []history.Dest) []destJSON {
+	out := make([]destJSON, 0, len(in))
+	for _, d := range in {
+		out = append(out, destJSON{
+			Host:   textsafe.Sanitize(d.Host),
+			Port:   d.Port,
+			Method: d.Method,
+			Count:  d.Count,
+		})
 	}
 	return out
 }
@@ -165,7 +171,7 @@ func showHistory(env *Env, limit int, deniedOnly, asJSON bool) error {
 	if deniedOnly {
 		kept := runs[:0]
 		for _, r := range runs {
-			if len(r.Denied) > 0 {
+			if len(r.Refused()) > 0 {
 				kept = append(kept, r)
 			}
 		}
@@ -191,8 +197,8 @@ func showHistory(env *Env, limit int, deniedOnly, asJSON bool) error {
 			out.Runs = append(out.Runs, runJSON{
 				Start: r.Start, End: r.End, Command: r.Command,
 				Image: r.Image, Network: r.Network,
-				Allowed: destinations(r.Allowed),
-				Denied:  destinations(r.Denied),
+				Allowed: destinations(r.Reached()),
+				Denied:  destinations(r.Refused()),
 			})
 		}
 		enc := json.NewEncoder(env.Stdout)
@@ -212,37 +218,52 @@ func showHistory(env *Env, limit int, deniedOnly, asJSON bool) error {
 		}
 		fmt.Fprintf(env.Stdout, "%s  %s  (%s)\n",
 			r.Start.Local().Format("2006-01-02 15:04"), cmd, r.Duration().Round(time.Second))
-		if len(r.Allowed) > 0 {
-			fmt.Fprintf(env.Stdout, "    reached: %s\n", strings.Join(topKeys(r.Allowed, 6), " "))
+		if reached := r.Reached(); len(reached) > 0 {
+			fmt.Fprintf(env.Stdout, "    reached: %s\n", strings.Join(names(reached, 6), " "))
 		}
-		for _, line := range netpolicy.Summary(r.Denied) {
+		for _, line := range refusalLines(r.Refused()) {
 			fmt.Fprintf(env.Stdout, "    ✗ %s\n", line)
 		}
 	}
 	return nil
 }
 
-// topKeys returns the busiest destinations, so a long tail of one-request
-// hosts does not bury the ones a run actually depended on.
-func topKeys(m map[string]int, n int) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+// names renders the busiest destinations, so a long tail of one-request
+// hosts does not bury the ones a run actually depended on. Sanitized for
+// the same reason the JSON is: the names came from the workload.
+func names(dests []history.Dest, n int) []string {
+	out := make([]string, 0, len(dests))
+	for _, d := range dests {
+		out = append(out, textsafe.Sanitize(history.Key(d.Host, d.Port)))
 	}
-	sort.Slice(keys, func(i, j int) bool {
-		if m[keys[i]] != m[keys[j]] {
-			return m[keys[i]] > m[keys[j]]
+	if len(out) > n {
+		return append(out[:n:n], fmt.Sprintf("(+%d more)", len(out)-n))
+	}
+	return out
+}
+
+// refusalLines renders blocked destinations the way a run's own summary
+// does, so the same event reads the same whether it is seen live or looked
+// up later.
+func refusalLines(dests []history.Dest) []string {
+	out := make([]string, 0, len(dests))
+	for _, d := range dests {
+		name := textsafe.Sanitize(history.Key(d.Host, d.Port))
+		if d.Method == history.MethodDNS {
+			name += " (DNS)"
 		}
-		return keys[i] < keys[j]
-	})
-	if len(keys) > n {
-		return append(keys[:n:n], fmt.Sprintf("(+%d more)", len(keys)-n))
+		if d.Count != 1 {
+			out = append(out, fmt.Sprintf("blocked: %s x%d", name, d.Count))
+			continue
+		}
+		out = append(out, "blocked: "+name)
 	}
-	return keys
+	return out
 }
 
 func newHistoryHostsCmd(env *Env) *cobra.Command {
-	return &cobra.Command{
+	var asJSON bool
+	cmd := &cobra.Command{
 		Use:   "hosts",
 		Short: "Every destination this project has reached, most recent first",
 		Args:  cobra.NoArgs,
@@ -256,17 +277,46 @@ func newHistoryHostsCmd(env *Env) *cobra.Command {
 				return err
 			}
 			contacts := history.Contacts(runs)
+			if asJSON {
+				out := make([]contactJSON, 0, len(contacts))
+				for _, c := range contacts {
+					out = append(out, contactJSON{
+						Host: textsafe.Sanitize(c.Host), Port: c.Port,
+						Last: c.Last, Count: c.Count,
+					})
+				}
+				enc := json.NewEncoder(env.Stdout)
+				enc.SetIndent("", "  ")
+				return enc.Encode(hostsJSON{Project: env.Paths.ProjectDir, Hosts: out})
+			}
 			if len(contacts) == 0 {
 				fmt.Fprintln(env.Stdout, "Nothing recorded for this project yet.")
 				return nil
 			}
 			for _, c := range contacts {
 				fmt.Fprintf(env.Stdout, "  %-45s  %s  (%d)\n",
-					history.Key(c.Host, c.Port), ago(c.Last), c.Count)
+					textsafe.Sanitize(history.Key(c.Host, c.Port)), ago(c.Last), c.Count)
 			}
 			return nil
 		},
 	}
+	// The same flag as the parent, because a caller told "use --json" and
+	// finding it on only one of two adjacent commands would reasonably
+	// conclude the output was broken.
+	cmd.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
+	return cmd
+}
+
+type hostsJSON struct {
+	Project string        `json:"project"`
+	Hosts   []contactJSON `json:"hosts"`
+}
+
+type contactJSON struct {
+	Host  string    `json:"host"`
+	Port  int       `json:"port"`
+	Last  time.Time `json:"last"`
+	Count int       `json:"count"`
 }
 
 // ago is a coarse relative time. The exact minute a host was last reached

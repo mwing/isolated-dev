@@ -138,3 +138,50 @@ func appendRaw(path, line string) error {
 	_, err = f.WriteString(line)
 	return err
 }
+
+// Records written before destinations were fields carry a rendered key,
+// and are still read. Best-effort, because the shape is genuinely
+// ambiguous in places — which is the reason it stopped being written.
+func TestOldRecordsAreStillReadable(t *testing.T) {
+	r := Run{
+		Allowed: map[string]int{"registry.npmjs.org:443": 3},
+		Denied: map[string]int{
+			"telemetry.example.com (DNS)": 4,
+			"metrics.example.com:443":     1,
+			"[2001:db8::1]:443":           1,
+		},
+	}
+	byHost := map[string]Dest{}
+	for _, d := range r.Refused() {
+		byHost[d.Host] = d
+	}
+	for _, want := range []Dest{
+		{Host: "telemetry.example.com", Method: MethodDNS, Count: 4},
+		{Host: "metrics.example.com", Port: 443, Method: MethodConnect, Count: 1},
+		// Bracketed, so it can be taken apart. Unbracketed it cannot be,
+		// which is why nothing writes that any more.
+		{Host: "2001:db8::1", Port: 443, Method: MethodConnect, Count: 1},
+	} {
+		if got := byHost[want.Host]; got != want {
+			t.Errorf("decoded %q as %+v, want %+v", want.Host, got, want)
+		}
+	}
+	if reached := r.Reached(); len(reached) != 1 || reached[0].Port != 443 {
+		t.Errorf("allowed decode = %+v", reached)
+	}
+}
+
+// The " (DNS)" marker was only ever written for a denial, so a *reached*
+// host whose name ends that way is a name rather than a method — and a
+// reached destination can never be a DNS one anyway: a name resolved is
+// not a destination reached.
+func TestAReachedDestinationIsNeverADNSOne(t *testing.T) {
+	r := Run{Allowed: map[string]int{"weird.example.com (DNS)": 1}}
+	got := r.Reached()
+	if len(got) != 1 {
+		t.Fatalf("reached = %+v", got)
+	}
+	if got[0].Method == MethodDNS {
+		t.Errorf("an allowed destination decoded as a name lookup: %+v", got[0])
+	}
+}

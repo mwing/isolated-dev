@@ -290,6 +290,54 @@ func ParseDenials(logs string) map[string]int {
 // sidecar's own diagnostics) are ignored.
 func ParseEvents(logs string) (allowed, denied map[string]int) {
 	allowed, denied = map[string]int{}, map[string]int{}
+	for _, d := range Destinations(logs) {
+		key := d.Host
+		if d.Port != 0 {
+			key = fmt.Sprintf("%s:%d", d.Host, d.Port)
+		}
+		if d.Method == "DNS" {
+			key = d.Host + " (DNS)"
+		}
+		if d.Denied {
+			denied[key] += d.Count
+			continue
+		}
+		allowed[key] += d.Count
+	}
+	return allowed, denied
+}
+
+// Destination is one host a run was decided about, and how.
+//
+// Fields rather than a rendered "host:port", because that string cannot be
+// taken apart again: a host may contain colons, and the marker for a
+// refused name lookup was a suffix on the host — text a container chooses.
+// A workload could therefore describe its own denial as a different kind
+// of event, which is the one thing the record must not let it do.
+type Destination struct {
+	Host   string
+	Port   int
+	Method string
+	Count  int
+	Denied bool
+}
+
+// Destinations tallies a sidecar's event log.
+//
+// A name resolved is not a destination reached, so an allowed DNS answer
+// is not counted: reporting one as contact would be exactly the claim a
+// grant review must not get wrong. A *refused* lookup is counted, because
+// nothing else records the attempt.
+func Destinations(logs string) []Destination {
+	type ident struct {
+		host   string
+		port   int
+		method string
+		denied bool
+	}
+	counts := map[ident]int{}
+	order := []ident{}
+
 	sc := bufio.NewScanner(strings.NewReader(logs))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
@@ -301,29 +349,35 @@ func ParseEvents(logs string) (allowed, denied map[string]int) {
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
 			continue
 		}
-		key := e.Host
-		if e.Port != 0 {
-			key = fmt.Sprintf("%s:%d", e.Host, e.Port)
-		}
+		var id ident
 		switch e.Action {
 		case "deny":
-			// A refused name lookup and a refused connection are
-			// different events about the same intent; keeping the
-			// distinction is what makes a denial explainable.
-			if e.Method == "DNS" {
-				key = e.Host + " (DNS)"
-			}
-			denied[key]++
+			id = ident{host: e.Host, port: e.Port, method: e.Method, denied: true}
 		case "allow":
-			// A name resolved is not a destination reached. Counting
-			// both would report hosts as contacted that a workload only
-			// looked up, which is exactly the claim a grant review must
-			// not get wrong.
 			if e.Method == "DNS" {
 				continue
 			}
-			allowed[key]++
+			id = ident{host: e.Host, port: e.Port, method: e.Method}
+		default:
+			continue
 		}
+		// The method is the sidecar's own account of which check refused
+		// the request, never a substring of a name the workload supplied.
+		if id.method != "DNS" {
+			id.method = "connect"
+		}
+		if _, seen := counts[id]; !seen {
+			order = append(order, id)
+		}
+		counts[id]++
 	}
-	return allowed, denied
+
+	out := make([]Destination, 0, len(order))
+	for _, id := range order {
+		out = append(out, Destination{
+			Host: id.host, Port: id.port, Method: id.method,
+			Count: counts[id], Denied: id.denied,
+		})
+	}
+	return out
 }

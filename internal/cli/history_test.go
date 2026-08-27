@@ -33,8 +33,12 @@ func TestHistoryJSONNamesWhatToAllow(t *testing.T) {
 		End:     time.Now(),
 		Command: "npm install",
 		Network: "allowlist",
-		Allowed: map[string]int{"registry.npmjs.org:443": 3},
-		Denied:  map[string]int{"telemetry.example.com (DNS)": 4, "metrics.example.com:443": 1},
+		To: []history.Dest{{Host: "registry.npmjs.org", Port: 443,
+			Method: history.MethodConnect, Count: 3}},
+		Blocked: []history.Dest{
+			{Host: "telemetry.example.com", Method: history.MethodDNS, Count: 4},
+			{Host: "metrics.example.com", Port: 443, Method: history.MethodConnect, Count: 1},
+		},
 	})
 
 	if err := h.run(t, "history", "--denied", "--json"); err != nil {
@@ -97,9 +101,10 @@ func TestHistoryJSONIsStillJSONWithNoRuns(t *testing.T) {
 func TestHistoryStillReadsAsProseWithoutTheFlag(t *testing.T) {
 	h := newHarness(t)
 	record(t, h, history.Run{
-		Start:  time.Now().Add(-time.Minute),
-		End:    time.Now(),
-		Denied: map[string]int{"telemetry.example.com (DNS)": 4},
+		Start: time.Now().Add(-time.Minute),
+		End:   time.Now(),
+		Blocked: []history.Dest{{Host: "telemetry.example.com",
+			Method: history.MethodDNS, Count: 4}},
 	})
 	if err := h.run(t, "history", "--denied"); err != nil {
 		t.Fatal(err)
@@ -110,5 +115,31 @@ func TestHistoryStillReadsAsProseWithoutTheFlag(t *testing.T) {
 	}
 	if strings.HasPrefix(strings.TrimSpace(out), "{") {
 		t.Errorf("JSON was printed without --json:\n%s", out)
+	}
+}
+
+// The host is chosen by the workload and is about to be read by a person
+// deciding whether to allow it. internal/textsafe exists for exactly that,
+// and this output is the newest place that has to use it: a name that
+// renders as one thing and grants another defeats the review the output
+// exists to enable.
+func TestHistoryJSONDoesNotCarryTerminalEscapesOutOfTheContainer(t *testing.T) {
+	h := newHarness(t)
+	record(t, h, history.Run{
+		Start: time.Now().Add(-time.Minute),
+		End:   time.Now(),
+		Blocked: []history.Dest{{Host: "evil.example.com\u202e", Port: 443,
+			Method: history.MethodConnect, Count: 1}},
+	})
+	if err := h.run(t, "history", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	var got historyJSON
+	if err := json.Unmarshal(h.stdout.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	host := got.Runs[0].Denied[0].Host
+	if strings.ContainsRune(host, '\u202e') {
+		t.Errorf("a bidi override reached the caller: %q", host)
 	}
 }

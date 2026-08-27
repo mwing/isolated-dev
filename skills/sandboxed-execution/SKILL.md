@@ -96,15 +96,28 @@ dev history --denied --limit 1 --json  # what the last run was refused
 
 Use the JSON form when you are going to relay a decision. The human output
 is a rendered line and reading it is a guess about formatting; the JSON
-gives you the host exactly as `dev allow` takes it:
+gives you the host exactly as `dev allow` takes it. One object, with the
+runs inside it:
 
 ```json
-{"host": "telemetry.example.com", "method": "DNS", "count": 4}
-{"host": "metrics.example.com", "port": 443, "method": "connect", "count": 1}
+{
+  "project": "/home/you/code/thing",
+  "runs": [
+    {
+      "command": "npm install",
+      "allowed": [{"host": "registry.npmjs.org", "port": 443, "method": "connect", "count": 1}],
+      "denied": [
+        {"host": "telemetry.example.com", "port": 0, "method": "DNS", "count": 4},
+        {"host": "metrics.example.com", "port": 443, "method": "connect", "count": 1}
+      ]
+    }
+  ]
+}
 ```
 
-`method` is the difference described under **Reading what happens**: only a
-`connect` denial reached the proxy and could have been held for an answer.
+So the hosts to relay are `.runs[-1].denied[].host`. `method` is the
+difference described under **Reading what happens**: only a `connect`
+denial reached the proxy and could have been held for an answer.
 
 ## Rules
 
