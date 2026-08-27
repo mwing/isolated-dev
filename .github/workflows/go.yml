@@ -123,16 +123,38 @@ jobs:
       - name: Fuzz ${{ matrix.target }}
         env:
           FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '60s' }}
+        # Twice on failure, and only on failure.
+        #
+        # Go's fuzzing reports `context deadline exceeded` when the
+        # -fuzztime deadline lands while a worker is mid-exchange: no
+        # crasher, no corpus entry, a red build for finishing on time. That
+        # blocked a release once, which is the wrong thing to spend a
+        # release on.
+        #
+        # A retry cannot hide a real finding. A crasher is written into
+        # testdata/fuzz and replayed as a seed on the next run, so the
+        # second attempt fails in the first second rather than the last.
         run: |
-          go test ./internal/netpolicy/ -run '^$' \
-            -fuzz='^${{ matrix.target }}$' -fuzztime="$FUZZTIME"
+          fuzz() {
+            go test ./internal/netpolicy/ -run '^$' \
+              -fuzz='^${{ matrix.target }}$' -fuzztime="$FUZZTIME"
+          }
+          fuzz || { echo "retrying once: a deadline race leaves no crasher behind"; fuzz; }
       - name: Show the failing input
         if: failure()
-        # The corpus entry is the whole finding, and it is written inside the
-        # runner. Printed here so it can be copied into testdata/ from the
-        # log rather than reproduced by guesswork.
+        # The corpus entry is the whole finding, and it is written inside
+        # the runner. Printed here so it can be copied into testdata/ from
+        # the log rather than reproduced by guesswork.
+        #
+        # Asked of git rather than of mtimes: `find -newer` matched every
+        # committed seed, because checkout writes them all at once — so a
+        # real finding arrived buried in a list of inputs that were already
+        # fixed.
         run: |
-          find internal/netpolicy/testdata/fuzz -type f -newer go.mod -print -exec cat {} \;
+          git status --porcelain --untracked-files=all internal/netpolicy/testdata/fuzz \
+            | awk '{print $2}' | tee /dev/stderr | xargs -r -I{} sh -c 'echo "--- {}"; cat {}'
+          git status --porcelain internal/netpolicy/testdata/fuzz | grep -q . \
+            || echo "no new corpus entry: the failure was not a finding"
 
   # The release config is only exercised by a tag, which is the worst
   # moment to learn it does not parse: v0.5.0 failed here on a field that
