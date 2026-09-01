@@ -135,6 +135,17 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 		// them is one whose own limits should have caught it first.
 		Memory: "256m",
 		CPUs:   "1",
+		// The proxy is a Go program under a 256m cap, and the runtime does
+		// not read a memory cgroup limit on its own: without GOMEMLIMIT the
+		// GC is unaware of the ceiling and can be OOM-killed under an
+		// allocation burst before it collects — and this is the one
+		// container every filtered run depends on. Set below the hard cap,
+		// leaving headroom for non-heap overhead, so the GC runs first.
+		//
+		// Only the memory limit. GOMAXPROCS the runtime does derive from the
+		// cpu cap since Go 1.25 (go.mod is 1.26), so pinning it would only
+		// restate what it already picks for --cpus 1.
+		Env:    []string{"GOMEMLIMIT=230MiB"},
 		Labels: map[string]string{"dev.role": "egress-sidecar"},
 		Command: []string{
 			"--allow", strings.Join(s.Allow, ","),

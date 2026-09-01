@@ -127,7 +127,24 @@ func Hardened() RunSpec {
 	return RunSpec{
 		User:    HostUser(),
 		CapDrop: []string{"ALL"},
-		CapAdd:  []string{"CHOWN", "DAC_OVERRIDE", "SETGID", "SETUID"},
+		// Nothing added back. The four that used to be here — CHOWN,
+		// DAC_OVERRIDE, SETGID, SETUID — were kept in the bounding set,
+		// which is a ceiling, not a grant. Two things made that ceiling
+		// harmless, and it is worth being exact about which: a non-root
+		// process has an empty effective set, and no-new-privileges stops a
+		// setuid-root or file-capability binary in a base image from raising
+		// one into it. Take either away and a bounding-set capability could
+		// become real. And under a rootful invocation (HostUser returns 0:0
+		// when dev is run by root) the first was already gone, so the four
+		// were effective there.
+		//
+		// Emptying the bounding set removes the ceiling itself, so none of
+		// that has to hold: verified, even a root container with cap-drop
+		// ALL and no additions has an empty effective set and cannot chown
+		// across uids. It costs the normal non-root run nothing, checked
+		// against a real workload. Add one back only on a command that shows
+		// it needs it, never here.
+		CapAdd: nil,
 		// Every hardened run gets an init: PidsLimit makes leaked zombies
 		// fatal rather than merely untidy, so the two belong together.
 		Init: true,

@@ -35,29 +35,16 @@ func TestHardenedDropsAllCapabilities(t *testing.T) {
 	}
 }
 
-// The added-back set must stay small and boring. Each of these is needed
-// only to set up the run's own account and file ownership; none of them is
-// on the escape surface. A future addition from the forbidden list fails
-// here with the reason attached.
-func TestHardenedAddsBackOnlyHarmlessCapabilities(t *testing.T) {
-	allowed := map[string]bool{
-		"CHOWN": true, "DAC_OVERRIDE": true, "SETGID": true, "SETUID": true,
-	}
-	// Ranging over an empty slice would pass this test while saying nothing.
-	// The four are load-bearing — an account and its file ownership — so
-	// their absence is itself a regression worth catching here.
-	if len(Hardened().CapAdd) == 0 {
-		t.Fatal("CapAdd is empty; the run cannot create its account or own its files")
-	}
-	for _, c := range Hardened().CapAdd {
-		if why, forbidden := forbiddenCaps[c]; forbidden {
-			t.Errorf("Hardened adds %s, which grants: %s", c, why)
-		}
-		if !allowed[c] {
-			t.Errorf("Hardened adds %s, which is not in the small known-harmless "+
-				"set; if it is genuinely needed, add it to the allowed set here "+
-				"with the reason", c)
-		}
+// Nothing is added back. Four capabilities used to be — CHOWN, DAC_OVERRIDE,
+// SETGID, SETUID — and a review prompted checking whether they were needed:
+// they were inert for a non-root run and dangerous only for a rootful one,
+// so they were dropped. This asserts the empty set stays empty. Adding one
+// back belongs on the specific command that shows it needs it, never in the
+// baseline, so a non-empty set here is the regression.
+func TestHardenedAddsNoCapabilities(t *testing.T) {
+	if got := Hardened().CapAdd; len(got) != 0 {
+		t.Errorf("Hardened adds %v; the baseline adds nothing back, and a "+
+			"capability a single command needs belongs on that command", got)
 	}
 }
 

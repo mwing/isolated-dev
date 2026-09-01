@@ -626,7 +626,7 @@ agent-as-red-teamer idea is not automated: the agents refuse to attempt an
 escape, so it cannot be a deterministic gate — it stays a manual exercise,
 and anything it finds becomes a case in the corpus above.
 
-### B34. External confinement review, and what verifying it found — `doing`
+### B34. External confinement review, and what verifying it found — `done`
 
 An external (codex) review of confinement, static-only — it ran no go or
 docker, and said so. Three findings; the process the review rules ask for
@@ -650,15 +650,25 @@ container as root, where the caps *are* effective. The suggestion: test
 the escalation attempts, now done. And it prompted the question worth
 acting on:
 
-- **Open, recommended, needs a decision:** drop the four cap-adds entirely.
-  They are inert for the normal non-root run, so dropping them costs it
-  nothing — verified: a `cap-drop ALL` container with no additions still
-  writes its workspace, runs node/npm, and chowns its own files. And it
-  closes the rootful edge for free, because `cap-drop ALL` empties even
-  root's effective set. The only thing it removes is a privileged operation
-  the sandbox is trying to deny anyway. It is a posture change to a
-  security tool, so it waits for a deliberate yes rather than riding in on
-  a review.
+- **Done: dropped the four cap-adds entirely.** They were inert for the
+  normal non-root run, so dropping them cost it nothing — verified against
+  a real workload: a `cap-drop ALL` container with no additions still
+  writes its workspace, runs pip/node/npm, and an agent still commits in
+  its clone. And it closes the rootful edge for free, because `cap-drop
+  ALL` empties even root's effective set — verified: a root container with
+  no adds has an empty effective and bounding set and cannot chown across
+  uids.
+
+  A coderabbit review of the first pass sharpened the reason. The caps
+  being inert was not down to the non-root uid alone: `no-new-privileges`
+  was co-load-bearing, since a setuid-root or file-capability binary in a
+  base image could otherwise raise a bounding-set capability into effect.
+  Emptying the bounding set removes that vector too, not just the rootful
+  one — a stronger result than "inert for non-root" had it. The
+  containment corpus now runs its capability assertion under both
+  invocations rather than skipping the rootful one, which only became
+  meaningful once the bounding set was empty; the probe changes a file to
+  a third uid so it is a real ownership change under either.
 
 **Medium, real: the sidecar had no memory or cpu bound.** A process cap
 only. **Done:** 256m / 1 cpu. Its job is to move bytes between two sockets,

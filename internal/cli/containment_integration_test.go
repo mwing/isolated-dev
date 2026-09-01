@@ -55,8 +55,10 @@ echo "capbnd=$(awk '/^CapBnd:/{print $2}' /proc/self/status)"
 echo "nnp=$(awk '/^NoNewPrivs:/{print $2}' /proc/self/status)"
 echo "seccomp=$(awk '/^Seccomp:/{print $2}' /proc/self/status)"
 if echo x > /proc/sys/kernel/core_pattern 2>/dev/null; then echo "procsys_writable=yes"; else echo "procsys_writable=no"; fi
-touch /tmp/cap_probe 2>/dev/null
-if chown 0:0 /tmp/cap_probe 2>/dev/null; then echo "chown_to_root=yes"; else echo "chown_to_root=no"; fi
+target=99; [ "$(id -u)" = "$target" ] && target=98
+if ! touch /tmp/cap_probe 2>/dev/null; then echo "chown_other=touch_failed"; \
+elif chown "$target:$target" /tmp/cap_probe 2>/dev/null; then echo "chown_other=yes"; \
+else echo "chown_other=no"; fi
 sysopts=$(awk '$2=="/sys"{print $4; exit}' /proc/mounts)
 case ",$sysopts," in *,ro,*) echo "sys_ro=yes";; *) echo "sys_ro=no";; esac
 cgopts=$(awk '$2=="/sys/fs/cgroup"{print $4; exit}' /proc/mounts)
@@ -69,10 +71,13 @@ if [ -e /var/run/docker.sock ] || [ -e /run/docker.sock ]; then echo "docker_soc
 func TestIntegrationContainmentBlocksTheKnownEscapes(t *testing.T) {
 	r := probeInsideHardened(t, containmentProbe)
 
-	if r["uid"] == "0" {
-		t.Skip("the probe ran as root, so its capabilities describe a different " +
-			"posture than a normal invocation; run the suite as a non-root user")
-	}
+	// No skip on a root invocation, deliberately. Once the capability adds
+	// were dropped, cap-drop ALL empties even root's effective set — so
+	// every assertion below holds whether the container runs as the host's
+	// non-root account or, on a rootful invocation, as root. A review noted
+	// that the earlier version skipped exactly the rootful posture the
+	// capabilities were dangerous in; dropping them is what lets this cover
+	// it instead.
 
 	for _, tc := range []struct{ key, want, why string }{
 		{"capeff", "0000000000000000",
@@ -92,16 +97,18 @@ func TestIntegrationContainmentBlocksTheKnownEscapes(t *testing.T) {
 		{"procsys_writable", "no",
 			"a writable /proc/sys is core_pattern tampering (the parent always " +
 				"exists, so this write fails for the read-only reason)"},
-		// An external review read the four added-back capabilities (CHOWN,
-		// DAC_OVERRIDE, SETGID, SETUID) as a way for a non-root workload to
-		// regain root. They are in the bounding set, not the effective set:
-		// running as non-root clears the effective and permitted sets, so
-		// the caps are inert. A chown to a different uid needs CAP_CHOWN to
-		// be effective; that it fails is that capability proven inert, and
-		// stands for the rest. See capeff above.
-		{"chown_to_root", "no",
-			"a non-root workload changed a file's owner to root, which needs " +
-				"CAP_CHOWN effective — the added-back capabilities are not inert"},
+		// An external review read the four capabilities that used to be
+		// added back (CHOWN, DAC_OVERRIDE, SETGID, SETUID) as a way to
+		// regain root. They were dropped, so the bounding set is now empty
+		// and nothing can raise them into effect — for a non-root workload
+		// or a root one. Changing a file to a third uid needs CAP_CHOWN
+		// effective; that it fails is that capability proven absent, and
+		// stands for the rest. The target is 99, not the process's own uid,
+		// so it is a real ownership change under both invocations rather
+		// than a no-op that would pass without proving anything.
+		{"chown_other", "no",
+			"the workload changed a file's owner, which needs CAP_CHOWN — a " +
+				"dropped capability is effective again"},
 		{"docker_sock", "absent",
 			"the docker socket is root on the host by another name"},
 	} {
@@ -124,15 +131,17 @@ func TestIntegrationContainmentBlocksTheKnownEscapes(t *testing.T) {
 // about image tags.
 func TestIntegrationContainmentPostureMatchesTheKnownDefault(t *testing.T) {
 	r := probeInsideHardened(t, containmentProbe)
-	if r["uid"] == "0" {
-		t.Skip("posture is pinned for a non-root invocation, the normal case")
-	}
+	// No root skip: with the capability adds gone, the pin holds under both
+	// invocations — an empty bounding set is empty whoever runs the
+	// container.
 
-	// capbnd 0xc3 = bits 0,1,6,7 = CHOWN, DAC_OVERRIDE, SETGID, SETUID, and
-	// nothing else. SYS_ADMIN is bit 21; its absence is the point.
+	// capbnd empty: no capabilities in the bounding set at all, so none can
+	// be raised into effect. It was 0xc3 (CHOWN, DAC_OVERRIDE, SETGID,
+	// SETUID) until those were dropped; if this reads non-zero, something
+	// added a capability back — SYS_ADMIN is bit 21, 0x200000.
 	pinned := map[string]struct{ want, note string }{
 		"capeff":  {"0000000000000000", "no effective capabilities"},
-		"capbnd":  {"00000000000000c3", "exactly CHOWN, DAC_OVERRIDE, SETGID, SETUID"},
+		"capbnd":  {"0000000000000000", "no capabilities in the bounding set"},
 		"nnp":     {"1", "no-new-privileges is on"},
 		"seccomp": {"2", "seccomp filtering is active (SECCOMP_MODE_FILTER); 0 would mean docker shipped, or we passed, seccomp=unconfined"},
 	}
