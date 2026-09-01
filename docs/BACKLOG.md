@@ -561,6 +561,71 @@ actually be published on my machine", because it reports the configured
 value rather than the resolved port list. The run header does print every
 mapping.
 
+### B33. Test the containment, not just trust the flags — `done`
+
+An audit of the container boundary — the direct question, can a workload
+break out — followed by tests so the answer stays true.
+
+**The audit found no escape.** Probed from inside a run: effective
+capabilities are empty (the four in the bounding set are inert under
+non-root + no-new-privileges), `/sys` and `/proc/sys` are read-only so the
+cgroup `release_agent` and `core_pattern` escapes are closed, no docker
+socket is mounted and no daemon is reachable, the sidecar's control channel
+is a unix socket reached only host→sidecar so a workload cannot grant
+itself the network, and SSRF through the proxy to cloud metadata, the
+docker gateway, and private IPs is refused. The one way a workload reaches
+the host is the documented, intended one: on a plain `dev run` it can write
+the working tree and plant something the host runs later — which is exactly
+what clone-by-default for agents contains, confirmed by a write that landed
+in the clone and never in the real tree.
+
+**Two honest limits on "no escape found".** It tested this tool's
+containment, not the kernel underneath it: a runc or kernel 0-day escapes
+regardless, and that is a finding about the host's patch level, not about
+this tool. And on macOS there are two boundaries (container → OrbStack VM →
+host), while on the plain-docker Linux path an escape lands on the host
+directly — so that path is where the hardening carries its full weight, and
+where the live tests run.
+
+**What now guards it, cheapest and most durable first:**
+
+- `internal/container/hardened_test.go` asserts `Hardened()` directly:
+  drops all capabilities, adds back only four named harmless ones, sets
+  no-new-privileges, runs as an explicit non-root account, and its rendered
+  argv never carries `--privileged`, host namespaces, `seccomp=unconfined`,
+  or a dangerous `--cap-add`. Each forbidden capability is listed with what
+  it would grant, so the next person tempted to add one reads the reason.
+- `internal/cli/containment_invariants_test.go` walks every run path — run,
+  shell, agent — and asserts the *actual emitted* argv is hardened, because
+  a path that forgets to start from `Hardened()` would pass every unit test
+  and drop the sandbox.
+- `internal/cli/containment_integration_test.go` asks the kernel, on the
+  plain-docker Linux path: the escape corpus (caps empty, `/sys` and
+  `/proc/sys` read-only, release_agent unwritable, no socket) each fails,
+  and a hardened run still does ordinary work — writes a bind mount as the
+  invoking account — because hardening that breaks the feature is not
+  hardening.
+- The network half of the escape corpus already lived in
+  `internal/netpolicy/proxy_test.go`: metadata, gateway, private and
+  loopback addresses all refused.
+
+**The posture is pinned.** `TestIntegrationContainmentPostureMatchesTheKnownDefault`
+records the effective posture — capabilities effective and bounding,
+no-new-privileges, and that seccomp filtering is *on* — as exact values,
+so the day docker or the kernel changes a default under us (seccomp
+switched off, a capability added to the bounding set) the test fails rather
+than a probe session noticing by luck. It is `dev pin` turned on the
+sandbox itself: a failure is the ground moving, and the fix is to re-audit
+and re-pin on purpose.
+
+**Left as a deliberate decision, not a gap:** no hand-rolled seccomp
+profile. The tool inherits docker's default and pins that it is active,
+rather than shipping a tighter profile that would be an ongoing liability
+across many language images and arbitrary project Dockerfiles. And the
+agent-as-red-teamer idea is not automated: the agents refuse to attempt an
+escape, so it cannot be a deterministic gate — it stays a manual exercise,
+and anything it finds becomes a case in the corpus above.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`
