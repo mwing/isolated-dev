@@ -626,6 +626,62 @@ agent-as-red-teamer idea is not automated: the agents refuse to attempt an
 escape, so it cannot be a deterministic gate — it stays a manual exercise,
 and anything it finds becomes a case in the corpus above.
 
+### B34. External confinement review, and what verifying it found — `doing`
+
+An external (codex) review of confinement, static-only — it ran no go or
+docker, and said so. Three findings; the process the review rules ask for
+(verify before applying) changed the shape of all three.
+
+**High, and wrong on the mechanism.** The review read the four added-back
+capabilities (CHOWN, DAC_OVERRIDE, SETGID, SETUID) as a way for a non-root
+workload to `setuid(0)` and regain root. Tested directly:
+`setuid(0)` → EPERM, `/etc/shadow` unreadable, `chown 0:0` → not permitted,
+and `CapEff` is empty. The caps are in the *bounding* set — a ceiling on
+what could be added — not the *effective* set, which running as non-root
+clears. A bounding-set capability grants nothing; the review conflated the
+two, which is the error a static read makes and a run catches. Now a
+regression test in the containment corpus (`chown_to_root`) pins the caps
+inert.
+
+The review is not therefore worthless on this point — it has a real
+residual and a good suggestion. The residual: `HostUser()` returns `0:0`
+when `dev` is itself run by root, so a rootful invocation runs the
+container as root, where the caps *are* effective. The suggestion: test
+the escalation attempts, now done. And it prompted the question worth
+acting on:
+
+- **Open, recommended, needs a decision:** drop the four cap-adds entirely.
+  They are inert for the normal non-root run, so dropping them costs it
+  nothing — verified: a `cap-drop ALL` container with no additions still
+  writes its workspace, runs node/npm, and chowns its own files. And it
+  closes the rootful edge for free, because `cap-drop ALL` empties even
+  root's effective set. The only thing it removes is a privileged operation
+  the sandbox is trying to deny anyway. It is a posture change to a
+  security tool, so it waits for a deliberate yes rather than riding in on
+  a review.
+
+**Medium, real: the sidecar had no memory or cpu bound.** A process cap
+only. **Done:** 256m / 1 cpu. Its job is to move bytes between two sockets,
+so those are generous and still a ceiling — and it is the one component
+every filtered run depends on, so a workload pressuring the daemon through
+it was worth closing. Plain `dev run`/`shell` staying unlimited is the
+deliberate "a human watching their own run" choice from B27; agents already
+have limits.
+
+**Medium/design, real and already documented: the allowlist is not DLP.**
+Because TLS is relayed untouched, code that can reach an allowed host can
+send it anything inside the session, and a shared host like
+`storage.googleapis.com` (granted to Go for the module mirror) is an
+observable endpoint an attacker can own a bucket on. The review credited
+the docs for acknowledging per-host filtering; **done** is saying the
+consequence out loud in CONCEPTS — "egress filtered" means reaches only
+these hosts, not cannot exfiltrate, and the boundary for hostile code is
+`--offline`, not the allowlist. Making registry access a separately visible
+grant is a further step left open.
+
+The review's own doc committed in the clone is not merged: it records the
+High finding as fact, which it is not. This entry is the corrected record.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

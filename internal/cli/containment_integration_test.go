@@ -55,6 +55,8 @@ echo "capbnd=$(awk '/^CapBnd:/{print $2}' /proc/self/status)"
 echo "nnp=$(awk '/^NoNewPrivs:/{print $2}' /proc/self/status)"
 echo "seccomp=$(awk '/^Seccomp:/{print $2}' /proc/self/status)"
 if echo x > /proc/sys/kernel/core_pattern 2>/dev/null; then echo "procsys_writable=yes"; else echo "procsys_writable=no"; fi
+touch /tmp/cap_probe 2>/dev/null
+if chown 0:0 /tmp/cap_probe 2>/dev/null; then echo "chown_to_root=yes"; else echo "chown_to_root=no"; fi
 sysopts=$(awk '$2=="/sys"{print $4; exit}' /proc/mounts)
 case ",$sysopts," in *,ro,*) echo "sys_ro=yes";; *) echo "sys_ro=no";; esac
 cgopts=$(awk '$2=="/sys/fs/cgroup"{print $4; exit}' /proc/mounts)
@@ -90,6 +92,16 @@ func TestIntegrationContainmentBlocksTheKnownEscapes(t *testing.T) {
 		{"procsys_writable", "no",
 			"a writable /proc/sys is core_pattern tampering (the parent always " +
 				"exists, so this write fails for the read-only reason)"},
+		// An external review read the four added-back capabilities (CHOWN,
+		// DAC_OVERRIDE, SETGID, SETUID) as a way for a non-root workload to
+		// regain root. They are in the bounding set, not the effective set:
+		// running as non-root clears the effective and permitted sets, so
+		// the caps are inert. A chown to a different uid needs CAP_CHOWN to
+		// be effective; that it fails is that capability proven inert, and
+		// stands for the rest. See capeff above.
+		{"chown_to_root", "no",
+			"a non-root workload changed a file's owner to root, which needs " +
+				"CAP_CHOWN effective — the added-back capabilities are not inert"},
 		{"docker_sock", "absent",
 			"the docker socket is root on the host by another name"},
 	} {

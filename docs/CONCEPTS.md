@@ -57,6 +57,16 @@ Two consequences worth knowing:
   is per-host, not per-path. Reading the hostname out of the opening
   handshake is not terminating it — the record is inspected on its way
   past, and the session it opens is between your client and the far end.
+- **Which means the allowlist is not data-loss prevention.** Because the
+  proxy relays an allowed session untouched, code that can reach an allowed
+  host can send it anything — workspace bytes encoded in a path, a header,
+  a request body — and the proxy cannot see it inside the TLS. This matters
+  most for shared multi-tenant hosts: `storage.googleapis.com` is granted
+  to Go projects for the module mirror, and an attacker who owns a bucket
+  there has an observable endpoint on an allowed name. "Egress filtered"
+  means "reaches only these hosts", not "cannot exfiltrate". For genuinely
+  hostile code, the boundary is `--offline` or `network: none`, not the
+  allowlist.
 - **A process that ignores `HTTP_PROXY` gets nowhere.** The variables are
   a convenience for well-behaved clients, never the boundary.
 

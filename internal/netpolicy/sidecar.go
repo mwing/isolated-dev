@@ -126,7 +126,16 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 		CapDrop:     []string{"ALL"},
 		SecurityOpt: []string{"no-new-privileges:true"},
 		PidsLimit:   256,
-		Labels:      map[string]string{"dev.role": "egress-sidecar"},
+		// The sidecar had a process cap and no memory or cpu bound, so a
+		// workload that hammered it with connections could pressure the
+		// daemon or the VM through it — the one component every filtered run
+		// depends on. Its job is to move bytes between two sockets; its
+		// footprint is small and known, so these are generous for that and
+		// still a ceiling. A workload that produces enough traffic to reach
+		// them is one whose own limits should have caught it first.
+		Memory: "256m",
+		CPUs:   "1",
+		Labels: map[string]string{"dev.role": "egress-sidecar"},
 		Command: []string{
 			"--allow", strings.Join(s.Allow, ","),
 			"--proxy-addr", fmt.Sprintf(":%d", t.ProxyPort),
