@@ -75,6 +75,11 @@ type Options struct {
 	// Memory and CPUs bound the container.
 	Memory string
 	CPUs   string
+	// AllowMCP turns the agent's MCP connectors back on for this run: its
+	// MCPHosts are added to the allowlist and its MCPOffArgs are not passed.
+	// Off by default, because a connector reaches an account outside the
+	// sandbox with a live token, which is the reach the sandbox withholds.
+	AllowMCP bool
 }
 
 // Allowlist is the effective policy for a run: the agent's defaults plus
@@ -82,6 +87,12 @@ type Options struct {
 func (o Options) Allowlist() []string {
 	out := append([]string(nil), o.Agent.AllowHosts...)
 	out = append(out, o.ExtraHosts...)
+	// The connector hosts join the allowlist only when the run asked for
+	// MCP. Off by default, they are the difference between an agent that
+	// can reach the user's Gmail and one that cannot.
+	if o.AllowMCP {
+		out = append(out, o.Agent.MCPHosts...)
+	}
 	return out
 }
 
@@ -270,6 +281,13 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 	// in-agent prompts as a second layer.
 	if !o.Safe {
 		spec.Command = append(spec.Command, a.Args...)
+	}
+	// MCP off unless asked for. The egress block is the real boundary — the
+	// connector host is not in the allowlist — and these args stop the
+	// agent even trying, and stop it loading an MCP server a hostile
+	// repository put in the clone's `.mcp.json`.
+	if !o.AllowMCP {
+		spec.Command = append(spec.Command, a.MCPOffArgs...)
 	}
 	// Trailing arguments go to the agent, they do not replace it.
 	// `dev agent run claude -- "fix the retry logic"` reads as a prompt

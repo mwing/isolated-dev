@@ -40,6 +40,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		inPlace    bool
 		cloneDepth int
 		dockSocket bool
+		allowMCP   bool
 	)
 
 	cmd := &cobra.Command{
@@ -57,7 +58,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
 				rebuild, extraHosts, shell, agentName, record,
 				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth},
-				runGrants{dockerSocket: dockSocket})
+				runGrants{dockerSocket: dockSocket, allowMCP: allowMCP})
 		},
 	}
 	addCloneFlag(cmd, &useCloneD, &cloneDepth)
@@ -71,6 +72,9 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		"treat the command as interactive: give it a terminal and the keyboard")
 	cmd.Flags().StringVar(&agentName, "agent", "",
 		"run this agent in the console, using its stored login")
+	cmd.Flags().BoolVar(&allowMCP, "allow-mcp", false,
+		"let the agent use its MCP connectors (off by default: a connector "+
+			"reaches an account outside the sandbox with a live token)")
 	cmd.Flags().StringVar(&record, "record", "",
 		"record the workload's output and terminal sizes to a file")
 	cmd.Flags().StringVar(&replay, "replay", "",
@@ -189,7 +193,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		grants    project.Grants
 	)
 	if agentName != "" {
-		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command)
+		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command, run.allowMCP)
 		if err != nil {
 			return err
 		}
@@ -390,7 +394,7 @@ func paneSize() (cols, rows int) {
 // the same named volume, so a session started here is already
 // authenticated.
 func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
-	store *trust.Store, cfg config.Config, name string, command []string) (*agent.Options, string, []string, error) {
+	store *trust.Store, cfg config.Config, name string, command []string, allowMCP bool) (*agent.Options, string, []string, error) {
 	reg, err := registry(env)
 	if err != nil {
 		return nil, "", nil, err
@@ -431,6 +435,7 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		Image:       base,
 		Memory:      firstSet(saved.Memory, request.Memory),
 		CPUs:        firstSet(saved.CPUs, request.CPUs),
+		AllowMCP:    allowMCP,
 		// Without this the agent cannot commit — the container has no
 		// ~/.gitconfig, so git refuses with "please tell me who you are",
 		// and in a clone that means the work has no way back out. `dev agent

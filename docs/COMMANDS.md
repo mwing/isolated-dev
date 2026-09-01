@@ -56,6 +56,11 @@ Useful flags on `run` and `shell`:
 docker socket for that run only and records nothing: it is root on the
 docker host, and `dev accept` will not remember it without `--remember`.
 
+`--allow-mcp` is on `agent run` and `console`. An agent's MCP connectors
+are off by default — a connector reaches an account outside the sandbox
+(Gmail, Linear) with a live token — and this turns them on for a run you
+trust with them.
+
 `console` takes `--allow-host`, `--clone`, `--clone-depth`, `--in-place`,
 `--allow-docker-socket`, `--rebuild` and `--agent`. It has no `--offline`,
 `--network` or

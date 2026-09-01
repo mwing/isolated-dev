@@ -692,6 +692,42 @@ grant is a further step left open.
 The review's own doc committed in the clone is not merged: it records the
 High finding as fact, which it is not. This entry is the corrected record.
 
+### B35. MCP connectors reached the user's accounts from the sandbox — `done`
+
+Found in use, not by review. An agent run inside the sandbox listed the
+user's cloud MCP connectors as connected, and one — Gmail — actually
+worked: the agent could read the user's mail. The mechanism: the config
+volume carries the connectors' definitions and OAuth tokens (they live in
+`CLAUDE_CONFIG_DIR`), and the host they route through,
+`mcp-proxy.anthropic.com`, was in the claude agent's default allowlist,
+added in a past session with the note "connectors are on by default". So
+code the sandbox does not trust had live reach into accounts *outside* the
+box — the one thing the sandbox exists to withhold — via a host that was
+allowed by default.
+
+The gosta MCP, a local stdio server reading Azure credentials, did *not*
+appear: its binary and `~/.azure` are not in the container, which is the
+distinction that matters — a remote OAuth connector carries its token in
+the config and reaches over the network, a local stdio server needs host
+state the container does not have.
+
+Fixed, off by default, opened deliberately like every other host grant:
+
+- `mcp-proxy.anthropic.com` moved out of the default allowlist into a new
+  `MCPHosts`, added back only under `--allow-mcp`. This is the enforcement,
+  at the egress boundary the tool controls — the connector is unreachable
+  regardless of what config the agent inherited.
+- The agent is passed `--strict-mcp-config` by default, so it ignores its
+  inherited MCP config. Belt to the allowlist's braces, and it also closes
+  a second vector: an MCP server a hostile repository ships in a `.mcp.json`
+  the clone carries.
+- `--allow-mcp` on `dev agent run` and `dev console`, symmetric so the safe
+  default does not depend on which command started the agent. It adds the
+  host and drops the ignore flag. Codex is unaffected: its allowlist named
+  no connector-proxy host, so it had no cloud-connector leak to close.
+
+Shipped as 0.10.1, a security fix on a version that had the hole.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

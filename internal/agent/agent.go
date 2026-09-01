@@ -37,6 +37,22 @@ type Agent struct {
 	Args []string `yaml:"args"`
 	// AllowHosts is the agent's default egress allowlist.
 	AllowHosts []string `yaml:"allow_hosts"`
+	// MCPHosts are the egress destinations the agent's MCP connectors reach
+	// through, kept OUT of the default allowlist on purpose. A connector
+	// like Gmail routes through a host here and carries a live token in the
+	// config volume, so an agent running untrusted code could read the
+	// user's mail with it — reach into an account outside the sandbox,
+	// which is the one thing the sandbox exists to withhold. They are added
+	// to the allowlist only under --allow-mcp, so the connectors are off by
+	// default and turned on deliberately, like every other host grant.
+	MCPHosts []string `yaml:"mcp_hosts"`
+	// MCPOffArgs disable the agent's inherited MCP configuration when
+	// --allow-mcp is not given. This is belt to the allowlist's braces: the
+	// egress block is the enforcement, and these stop the agent even
+	// attempting a connector — and, more importantly, stop it loading an
+	// MCP server a hostile repository shipped in a `.mcp.json` the clone
+	// carries. For Claude Code that is `--strict-mcp-config`.
+	MCPOffArgs []string `yaml:"mcp_off_args"`
 	// ConfigDir is the path inside the container holding credentials and
 	// settings. It is backed by a named volume so an OAuth login survives
 	// across runs — and it is the only part of the home directory that

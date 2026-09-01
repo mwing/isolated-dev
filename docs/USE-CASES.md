@@ -421,6 +421,23 @@ persists, and it persists per agent rather than per project — so one login
 serves every repository, and nothing else an agent writes in one project is
 there to be read in the next.
 
+**MCP connectors are off unless you ask.** A claude.ai account's connectors
+— Gmail, Linear, Notion — reach accounts *outside* the sandbox with live
+tokens the config volume carries, which is exactly the reach the sandbox
+exists to withhold from code it does not trust. So the host they route
+through is not in the allowlist by default, and the agent is told to ignore
+its inherited MCP config (which also stops an MCP server a hostile
+repository shipped in a `.mcp.json`). Turn them on for a run you trust with
+them:
+
+```sh
+dev agent run claude --allow-mcp
+```
+
+Even then, defence in depth holds: a connector is reachable only because
+`--allow-mcp` adds its host to the allowlist, so it is still a named,
+reviewable destination in `dev history` like any other.
+
 **The other direction: an agent on your host, reaching for this.** The
 above puts the agent inside the sandbox. The reverse arrangement — Claude
 Code running normally on your machine, choosing to run untrusted commands

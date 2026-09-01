@@ -50,8 +50,6 @@ func builtins() []Agent {
 				"claude.ai",
 				"platform.claude.com",
 				"console.anthropic.com",
-				// MCP connectors are on by default for claude.ai accounts.
-				"mcp-proxy.anthropic.com",
 				// Documentation lookups by the built-in guide agent.
 				"code.claude.com",
 				"statsig.anthropic.com",
@@ -61,6 +59,13 @@ func builtins() []Agent {
 				"codeload.github.com",
 				"*.githubusercontent.com",
 			},
+			// The connector proxy, off the allowlist by default. A claude.ai
+			// account's connectors — Gmail, Linear, Notion — route through
+			// here, so without --allow-mcp an agent cannot reach them and
+			// cannot use the tokens in its config volume to read the user's
+			// accounts.
+			MCPHosts:   []string{"mcp-proxy.anthropic.com"},
+			MCPOffArgs: []string{"--strict-mcp-config"},
 		},
 		{
 			Name:         "codex",

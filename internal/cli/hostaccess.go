@@ -50,6 +50,10 @@ var breakGlass = map[string]bool{
 // typed, rather than by a recorded acceptance.
 type runGrants struct {
 	dockerSocket bool
+	// allowMCP turns an agent's MCP connectors on for this run. Only the
+	// console-agent path reads it; a plain run has no agent and so no
+	// connectors.
+	allowMCP bool
 }
 
 // authorizes reports whether this run was given the key outright.

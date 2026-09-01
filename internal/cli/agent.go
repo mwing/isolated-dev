@@ -216,6 +216,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		inPlace    bool
 		useClone   bool
 		cloneDepth int
+		allowMCP   bool
 	)
 
 	cmd := &cobra.Command{
@@ -255,6 +256,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				CPUs:        cpus,
 				Args:        args[1:],
 				Safe:        safe,
+				AllowMCP:    allowMCP,
 			}
 
 			opts.GitIdentity = gitIdentity(env)
@@ -335,6 +337,9 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		"work in a private clone (the default; use when config turns it off)")
 	cmd.Flags().IntVar(&cloneDepth, "clone-depth", 0,
 		"copy only this many commits of history into the clone (0: all)")
+	cmd.Flags().BoolVar(&allowMCP, "allow-mcp", false,
+		"let the agent use its MCP connectors (off by default: a connector "+
+			"reaches an account outside the sandbox with a live token)")
 	cmd.Flags().BoolVar(&safe, "safe", false,
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
