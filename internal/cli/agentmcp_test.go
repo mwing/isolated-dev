@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/mwing/isolated-dev/internal/netpolicy"
 	"strings"
 	"testing"
 )
@@ -99,12 +100,23 @@ func TestAllowMCPFlagIsOnBothCommands(t *testing.T) {
 // can request the connector host, and a routine accept would hand over
 // Gmail. The connector host is now grantable only through --allow-mcp.
 func TestGrantingTheConnectorHostDoesNotReopenMCP(t *testing.T) {
+	// The forms that must not slip past, including the two the string gate
+	// missed: a port suffix and a wildcard both reach the connector.
 	for _, tc := range []struct {
-		name string
-		args []string
+		name    string
+		command []string
+		host    string // what to grant, and to look for in the allowlist
 	}{
-		{"--allow-host", []string{"agent", "run", "claude", "--tty", "off",
-			"--allow-host", "mcp-proxy.anthropic.com"}},
+		{"agent run --allow-host", []string{"agent", "run", "claude"},
+			"mcp-proxy.anthropic.com"},
+		{"agent run --allow-host :443", []string{"agent", "run", "claude"},
+			"mcp-proxy.anthropic.com:443"},
+		{"agent run --allow-host wildcard", []string{"agent", "run", "claude"},
+			"*.anthropic.com"},
+		{"console --allow-host", []string{"console", "--agent", "claude"},
+			"mcp-proxy.anthropic.com"},
+		{"console --allow-host :443", []string{"console", "--agent", "claude"},
+			"mcp-proxy.anthropic.com:443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -113,15 +125,24 @@ func TestGrantingTheConnectorHostDoesNotReopenMCP(t *testing.T) {
 			gitProject(t, h)
 			h.writeGlobal(t, "agent_clone: false\n")
 
-			if err := h.run(t, tc.args...); err != nil {
-				t.Fatalf("run: %v\n%s", err, h.stderr.String())
+			args := append(append([]string(nil), tc.command...), "--allow-host", tc.host)
+			if tc.command[0] == "agent" {
+				args = append(args, "--tty", "off")
 			}
-			if contains(h.sidecarAllow(t), "mcp-proxy.anthropic.com") {
-				t.Errorf("%s put the connector host in the allowlist without "+
-					"--allow-mcp:\n%v", tc.name, h.sidecarAllow(t))
+			_ = h.run(t, args...)
+
+			// The precise question, asked with the sidecar's own rules: is
+			// the connector reachable? A port suffix or a wildcard makes the
+			// string absent while the rule still matches, which is the bug.
+			al, err := netpolicy.Parse(h.sidecarAllow(t))
+			if err != nil {
+				t.Fatalf("parsing the sidecar allowlist: %v", err)
 			}
-			// And it is refused out loud, not silently dropped.
-			if !strings.Contains(h.stderr.String(), "need --allow-mcp") {
+			if al.AllowsName("mcp-proxy.anthropic.com") {
+				t.Errorf("%s left the connector reachable without --allow-mcp:\n%v",
+					tc.name, h.sidecarAllow(t))
+			}
+			if !strings.Contains(h.stderr.String(), "allow-mcp") {
 				t.Errorf("%s dropped the host with no explanation:\n%s",
 					tc.name, h.stderr.String())
 			}
@@ -148,5 +169,31 @@ func TestAPersistentAllowOfTheConnectorHostIsStillGated(t *testing.T) {
 	if contains(h.sidecarAllow(t), "mcp-proxy.anthropic.com") {
 		t.Errorf("a stored `dev allow` of the connector host reopened it without "+
 			"--allow-mcp:\n%v", h.sidecarAllow(t))
+	}
+}
+
+// reachesConnector is the primitive under all three gate points — the agent
+// allowlist, the console allowlist, and the console prompt. It matches by
+// the sidecar's rules, so the forms that defeated a string compare are the
+// ones it must catch.
+func TestReachesConnectorMatchesByRuleNotString(t *testing.T) {
+	mcp := []string{"mcp-proxy.anthropic.com"}
+	for _, reach := range []string{
+		"mcp-proxy.anthropic.com",
+		"mcp-proxy.anthropic.com:443",
+		"*.anthropic.com",
+	} {
+		if !reachesConnector(reach, mcp) {
+			t.Errorf("%q reaches the connector but was not caught", reach)
+		}
+	}
+	for _, safe := range []string{
+		"api.anthropic.com",                // a real, unrelated host
+		"mcp-proxy.anthropic.com.evil.com", // a lookalike, not the host
+		"github.com",
+	} {
+		if reachesConnector(safe, mcp) {
+			t.Errorf("%q does not reach the connector but was caught", safe)
+		}
 	}
 }

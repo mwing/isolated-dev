@@ -98,61 +98,12 @@ func (o Options) Allowlist() []string {
 	return out
 }
 
-// GateMCP removes the agent's connector hosts from a finished allowlist
-// unless this run enabled MCP.
-//
-// A function over the result rather than a property of one assembly path,
-// because the two run paths build the final allowlist differently and a
-// filter in only one was the gap a review found: a cloud connector reaches
-// an account outside the sandbox with a live token, so the connector host is
-// grantable *only* through --allow-mcp. The generic host machinery must not
-// be a side door — a hostile cloned repo can put the connector host in its
-// .devenv.yaml, and a routine `dev accept` would otherwise hand over the
-// user's Gmail. And it is the only control that can: --strict-mcp-config
-// does not disable a cloud connector, which is fetched server-side.
-func (o Options) GateMCP(allowlist []string) []string {
-	if o.AllowMCP {
-		return allowlist
-	}
-	return removeHosts(allowlist, o.Agent.MCPHosts)
-}
-
-// SuppressedMCPHosts are connector hosts present in a finished allowlist
-// that GateMCP will remove because this run did not pass --allow-mcp. The
-// caller reports them: a grant silently ignored is worse than one refused
-// out loud, and a user who ran `dev allow mcp-proxy.anthropic.com` deserves
-// to be told why it did nothing.
-func (o Options) SuppressedMCPHosts(allowlist []string) []string {
-	if o.AllowMCP {
-		return nil
-	}
-	var out []string
-	for _, h := range o.Agent.MCPHosts {
-		if containsHost(allowlist, h) {
-			out = append(out, h)
-		}
-	}
-	return out
-}
-
-func containsHost(hosts []string, h string) bool {
-	for _, x := range hosts {
-		if x == h {
-			return true
-		}
-	}
-	return false
-}
-
-func removeHosts(hosts, remove []string) []string {
-	out := hosts[:0:0]
-	for _, h := range hosts {
-		if !containsHost(remove, h) {
-			out = append(out, h)
-		}
-	}
-	return out
-}
+// The connector hosts are gated out of the final allowlist unless a run
+// enabled MCP — but that gate lives in the CLI glue layer, not here,
+// because the final allowlist is assembled there from grants, project
+// accepts and flags, and it has to match by the sidecar's own rules so a
+// port suffix or a wildcard cannot slip a connector host past a string
+// compare. See gateConnectorHosts in internal/cli.
 
 // BaseImage returns the image the overlay is built on.
 func (o Options) BaseImage() string {

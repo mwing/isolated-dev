@@ -728,17 +728,28 @@ Fixed, off by default, opened deliberately like every other host grant:
   default does not depend on which command started the agent. Codex is
   unaffected: its allowlist named no connector-proxy host.
 
-A coderabbit review of the first pass caught the real gap, rated High: the
-connector host was grantable through *other* doors that did not consult
-`--allow-mcp` — `dev allow`, a project `.devenv.yaml` requesting it plus a
-routine `dev accept`, `--allow-host` — and the run's own egress summary
-prompts the user toward exactly those. The accept path was the worst: a
-hostile cloned repo could request the connector host, and one `dev accept`
-would hand over Gmail. Fixed: `Options.GateMCP` strips the connector hosts
-from the *finished* allowlist in both run paths unless `--allow-mcp`, so
-they are grantable only through the one gate. A suppressed grant is said
-out loud, not dropped in silence. Two regression tests, both failing
-without the gate.
+Two coderabbit reviews were needed to make the block airtight, and each
+found the previous fix leakier than claimed — the finding rate on this one
+is itself the lesson.
+
+The first found the connector host was grantable through doors that never
+consulted `--allow-mcp`: `dev allow`, a project `.devenv.yaml` requesting
+it plus a routine `dev accept`, `--allow-host`. The accept path was the
+worst — a hostile cloned repo requesting the connector host, one accept
+handing over Gmail. The first fix strung a string-match filter over the
+result.
+
+The second found that filter was defeated three ways: a string compare
+missed `mcp-proxy.anthropic.com:443` and `*.anthropic.com` (both reach the
+connector by the sidecar's rules); the console re-added `--allow-host`
+*after* the filter; and the console's interactive prompt could grant the
+connector mid-run, persisting it. So the gate is one function,
+`gateConnectorHosts`, matching by `netpolicy` rules rather than strings,
+applied to the finished allowlist that reaches the sidecar on both paths,
+with the console's grant prompt routed through the same check. A suppressed
+grant is said out loud, not dropped in silence. Regression tests cover the
+port and wildcard forms and both commands, and each failed against the
+version before it.
 
 The review also named a structural assumption worth stating: the block
 rests on connector *data* flowing through `mcp-proxy.anthropic.com`
@@ -749,6 +760,26 @@ them as connected; only the data path is cut. If that data ever moved to
 it — the tests assert the host is absent from the allowlist, which is all
 they can assert without a live account. A known, documented dependency
 rather than a hidden one.
+
+A third review confirmed the gate airtight for every hostname form of the
+connector — bare, `:443`, any port, `*.anthropic.com`, uppercase, trailing
+dot — across every sidecar start and grant handler both commands reach. Two
+residuals it found, both outside the untrusted-code threat and left as
+recorded limits rather than fixed:
+
+- The gate matches by name (`AllowsName`), which skips literal-IP rules, so
+  a *deliberate* `dev allow <the connector's raw IP>` is not caught while a
+  CONNECT to it would be. Reaching it needs the user to grant an
+  undocumented, rotating Anthropic edge IP and untrusted code to hardcode
+  it with the right SNI — the name itself will not resolve. Resolving
+  hostnames inside the gate would be fragile, and refusing every raw-IP
+  grant under an agent would break legitimate use, so this is a known limit,
+  not a fix.
+- A *user-authored* agent definition that carries connector tokens but
+  omits `mcp_hosts` gets no gate. The tool can only gate a host it has been
+  told is a connector, so this sits with trusted agent-definition authoring,
+  not the threat B35 addresses. Declare `mcp_hosts` on any agent whose
+  connectors should be gated.
 
 Shipped as 0.10.1, a security fix on a version that had the hole.
 

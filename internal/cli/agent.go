@@ -95,14 +95,52 @@ func moved(env *Env, cmd *cobra.Command, from, to string) *cobra.Command {
 	return cmd
 }
 
-// warnSuppressedMCP says when a granted host was withheld because it is an
-// MCP connector and the run did not ask for MCP — so `dev allow
-// mcp-proxy...` does not silently do nothing.
-func warnSuppressedMCP(env *Env, o agent.Options, assembled []string) {
-	for _, h := range o.SuppressedMCPHosts(assembled) {
-		fmt.Fprintf(env.Stderr, "⚠  %s is granted, but it is an MCP connector "+
-			"host and connectors need --allow-mcp; not enabling it for this run.\n", h)
+// gateConnectorHosts removes an agent's MCP connector hosts from a finished
+// allowlist unless the run enabled MCP, and says which it removed.
+//
+// The single gate. A cloud connector reaches an account outside the sandbox
+// with a live token, so the connector host is grantable *only* through
+// --allow-mcp — the generic host machinery (a `dev allow`, a `dev accept`
+// of a hostile repo's request, a `--allow-host`) must not be a side door to
+// the user's Gmail. Every path assembles its final allowlist differently,
+// so the gate is applied here, over the finished set that is about to reach
+// the sidecar, on both `dev agent run` and `dev console --agent` — and the
+// console's interactive grant runs each host through reachesConnector too.
+//
+// Matched by the sidecar's own rules, not by string: `mcp-proxy...:443` and
+// `*.anthropic.com` both reach the connector, and a plain `==` let them
+// past — the gap the second review found.
+func gateConnectorHosts(env *Env, o *agent.Options, entries []string) []string {
+	if o == nil || o.AllowMCP || len(o.Agent.MCPHosts) == 0 {
+		return entries
 	}
+	var kept []string
+	for _, e := range entries {
+		if reachesConnector(e, o.Agent.MCPHosts) {
+			fmt.Fprintf(env.Stderr, "⚠  %s is granted, but it reaches an MCP "+
+				"connector host, and connectors need --allow-mcp; not enabling "+
+				"it for this run.\n", e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept
+}
+
+// reachesConnector reports whether one allowlist entry — or a single held
+// hostname — would let a run reach a connector host, judged by the same
+// rules the sidecar enforces so a port or a wildcard cannot hide one.
+func reachesConnector(entry string, mcpHosts []string) bool {
+	al, err := netpolicy.Parse([]string{entry})
+	if err != nil {
+		return false
+	}
+	for _, h := range mcpHosts {
+		if al.AllowsName(h) {
+			return true
+		}
+	}
+	return false
 }
 
 func registry(env *Env) (*agent.Registry, error) {
@@ -139,6 +177,7 @@ func newAgentListCmd(env *Env) *cobra.Command {
 
 func newAgentPolicyCmd(env *Env) *cobra.Command {
 	var extra []string
+	var allowMCP bool
 	cmd := &cobra.Command{
 		Use:   "policy <agent>",
 		Short: "Show the egress policy a run would enforce, without running it",
@@ -153,13 +192,14 @@ func newAgentPolicyCmd(env *Env) *cobra.Command {
 				return err
 			}
 			// This command exists to answer "what would a run permit?", so
-			// it has to refuse what a run would refuse. Printing a policy
-			// the real run rejects would be a worse answer than none.
+			// it has to refuse what a run would refuse — including gating the
+			// MCP connector hosts, or it would report a run permitting the
+			// user's Gmail when it does not.
 			if err := checkHosts(env, extra); err != nil {
 				return err
 			}
-			opts := agent.Options{Agent: a, ExtraHosts: extra}
-			allow, err := netpolicy.Parse(opts.Allowlist())
+			opts := agent.Options{Agent: a, ExtraHosts: extra, AllowMCP: allowMCP}
+			allow, err := netpolicy.Parse(gateConnectorHosts(env, &opts, opts.Allowlist()))
 			if err != nil {
 				return err
 			}
@@ -177,6 +217,8 @@ func newAgentPolicyCmd(env *Env) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringArrayVar(&extra, "allow-host", nil, "additional destination for this run")
+	cmd.Flags().BoolVar(&allowMCP, "allow-mcp", false,
+		"show the policy with MCP connectors enabled")
 	return cmd
 }
 
@@ -678,9 +720,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return verr
 	}
 
-	assembled := permittedHosts(env, pol, opts.Allowlist())
-	warnSuppressedMCP(env, opts, assembled)
-	allowEntries := opts.GateMCP(assembled)
+	allowEntries := gateConnectorHosts(env, &opts, permittedHosts(env, pol, opts.Allowlist()))
 	allow, err := netpolicy.Parse(allowEntries)
 	if err != nil {
 		return err

@@ -217,7 +217,11 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 			return err
 		}
 	}
-	allowed = permittedHosts(env, pol, append(allowed, extraHosts...))
+	// Gated here, after --allow-host is folded in, because that is the
+	// finished set the sidecar enforces. Gating earlier (inside
+	// prepareAgent) missed a `--allow-host mcp-proxy...` added afterward —
+	// the console side door the second review found.
+	allowed = gateConnectorHosts(env, agentOpts, permittedHosts(env, pol, append(allowed, extraHosts...)))
 
 	side, topo, err := startSidecar(ctx, env, eng, p, allowed, EgressAsk)
 	if err != nil {
@@ -273,6 +277,21 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 				// The dialog is a route in like the CLI prompt: it widens
 				// egress mid-run and can persist what it widens. A denied
 				// destination is refused outright rather than held.
+				//
+				// A connector host is refused here too. In ask mode the
+				// agent's blocked attempt to reach mcp-proxy is held and
+				// surfaced as this prompt; without this, one "allow for the
+				// project" would reopen Gmail mid-run and write it down. The
+				// connector is grantable only through --allow-mcp, and this
+				// is the last door to it.
+				if agentOpts != nil && !agentOpts.AllowMCP &&
+					reachesConnector(host, agentOpts.Agent.MCPHosts) {
+					if err := side.Grant(runCtx, "refuse", host); err != nil {
+						return err
+					}
+					return fmt.Errorf("%s is an MCP connector host; restart with "+
+						"--allow-mcp to use connectors", host)
+				}
 				if verr := pol.CheckHost(host); verr != nil {
 					if err := side.Grant(runCtx, "refuse", host); err != nil {
 						return err
@@ -453,14 +472,12 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		return nil, "", nil, err
 	}
 
-	assembled := agentEgress(p, opts.Allowlist(), saved.AllowHosts,
+	// The connector gate is applied by the caller, after it folds in
+	// --allow-host, so the finished set is what gets gated. Returning the
+	// ungated assembly here would gate too early and miss that flag.
+	allowed := agentEgress(p, opts.Allowlist(), saved.AllowHosts,
 		store.AcceptedRequest(a.Name, request))
-	// The same gate `dev agent run` applies, because the leak is the same
-	// and the safe default must not depend on which command started the
-	// agent: a granted or accepted connector host is withheld unless this
-	// run passed --allow-mcp.
-	warnSuppressedMCP(env, opts, assembled)
-	return &opts, image, opts.GateMCP(assembled), nil
+	return &opts, image, allowed, nil
 }
 
 func firstSet(vals ...string) string {
