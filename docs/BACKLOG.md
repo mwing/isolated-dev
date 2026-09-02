@@ -716,15 +716,39 @@ Fixed, off by default, opened deliberately like every other host grant:
 - `mcp-proxy.anthropic.com` moved out of the default allowlist into a new
   `MCPHosts`, added back only under `--allow-mcp`. This is the enforcement,
   at the egress boundary the tool controls — the connector is unreachable
-  regardless of what config the agent inherited.
-- The agent is passed `--strict-mcp-config` by default, so it ignores its
-  inherited MCP config. Belt to the allowlist's braces, and it also closes
-  a second vector: an MCP server a hostile repository ships in a `.mcp.json`
-  the clone carries.
+  regardless of what config the agent inherited. And it is the *only*
+  enforcement for the connector threat: `--strict-mcp-config` does not
+  disable a cloud connector, which is fetched server-side and connects on
+  its own, so it guards a different vector (below), not this one.
+- The agent is passed `--strict-mcp-config` by default. Its narrow job:
+  stop the agent loading an MCP server a hostile repository ships in a
+  `.mcp.json` the clone carries. Not a backstop for the connector block —
+  a separate defence for a separate vector.
 - `--allow-mcp` on `dev agent run` and `dev console`, symmetric so the safe
-  default does not depend on which command started the agent. It adds the
-  host and drops the ignore flag. Codex is unaffected: its allowlist named
-  no connector-proxy host, so it had no cloud-connector leak to close.
+  default does not depend on which command started the agent. Codex is
+  unaffected: its allowlist named no connector-proxy host.
+
+A coderabbit review of the first pass caught the real gap, rated High: the
+connector host was grantable through *other* doors that did not consult
+`--allow-mcp` — `dev allow`, a project `.devenv.yaml` requesting it plus a
+routine `dev accept`, `--allow-host` — and the run's own egress summary
+prompts the user toward exactly those. The accept path was the worst: a
+hostile cloned repo could request the connector host, and one `dev accept`
+would hand over Gmail. Fixed: `Options.GateMCP` strips the connector hosts
+from the *finished* allowlist in both run paths unless `--allow-mcp`, so
+they are grantable only through the one gate. A suppressed grant is said
+out loud, not dropped in silence. Two regression tests, both failing
+without the gate.
+
+The review also named a structural assumption worth stating: the block
+rests on connector *data* flowing through `mcp-proxy.anthropic.com`
+(blockable) rather than `api.anthropic.com` (which the agent needs and
+cannot lose). The connector *roster* is still fetched, so the agent lists
+them as connected; only the data path is cut. If that data ever moved to
+`api.anthropic.com`, the block would fail silently, and no test would catch
+it — the tests assert the host is absent from the allowlist, which is all
+they can assert without a live account. A known, documented dependency
+rather than a hidden one.
 
 Shipped as 0.10.1, a security fix on a version that had the hole.
 

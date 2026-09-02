@@ -46,12 +46,15 @@ type Agent struct {
 	// to the allowlist only under --allow-mcp, so the connectors are off by
 	// default and turned on deliberately, like every other host grant.
 	MCPHosts []string `yaml:"mcp_hosts"`
-	// MCPOffArgs disable the agent's inherited MCP configuration when
-	// --allow-mcp is not given. This is belt to the allowlist's braces: the
-	// egress block is the enforcement, and these stop the agent even
-	// attempting a connector — and, more importantly, stop it loading an
-	// MCP server a hostile repository shipped in a `.mcp.json` the clone
-	// carries. For Claude Code that is `--strict-mcp-config`.
+	// MCPOffArgs disable the agent's inherited *local* MCP configuration
+	// when --allow-mcp is not given. Its job is narrow and worth stating
+	// exactly: it stops the agent loading an MCP server a hostile repository
+	// shipped in a `.mcp.json` the clone carries. It does NOT disable a
+	// claude.ai account's cloud connectors — those are fetched server-side
+	// and connect independently of local config — so the connector threat
+	// (a live token reaching Gmail) is carried by the egress block on
+	// MCPHosts alone, not by this. For Claude Code the flag is
+	// `--strict-mcp-config`.
 	MCPOffArgs []string `yaml:"mcp_off_args"`
 	// ConfigDir is the path inside the container holding credentials and
 	// settings. It is backed by a named volume so an OAuth login survives

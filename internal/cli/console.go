@@ -453,9 +453,14 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		return nil, "", nil, err
 	}
 
-	allowed := agentEgress(p, opts.Allowlist(), saved.AllowHosts,
+	assembled := agentEgress(p, opts.Allowlist(), saved.AllowHosts,
 		store.AcceptedRequest(a.Name, request))
-	return &opts, image, allowed, nil
+	// The same gate `dev agent run` applies, because the leak is the same
+	// and the safe default must not depend on which command started the
+	// agent: a granted or accepted connector host is withheld unless this
+	// run passed --allow-mcp.
+	warnSuppressedMCP(env, opts, assembled)
+	return &opts, image, opts.GateMCP(assembled), nil
 }
 
 func firstSet(vals ...string) string {

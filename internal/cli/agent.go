@@ -95,6 +95,16 @@ func moved(env *Env, cmd *cobra.Command, from, to string) *cobra.Command {
 	return cmd
 }
 
+// warnSuppressedMCP says when a granted host was withheld because it is an
+// MCP connector and the run did not ask for MCP — so `dev allow
+// mcp-proxy...` does not silently do nothing.
+func warnSuppressedMCP(env *Env, o agent.Options, assembled []string) {
+	for _, h := range o.SuppressedMCPHosts(assembled) {
+		fmt.Fprintf(env.Stderr, "⚠  %s is granted, but it is an MCP connector "+
+			"host and connectors need --allow-mcp; not enabling it for this run.\n", h)
+	}
+}
+
 func registry(env *Env) (*agent.Registry, error) {
 	r := agent.NewRegistry()
 	if err := r.LoadDir(filepath.Join(env.Paths.Home, "agents")); err != nil {
@@ -668,7 +678,9 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return verr
 	}
 
-	allowEntries := permittedHosts(env, pol, opts.Allowlist())
+	assembled := permittedHosts(env, pol, opts.Allowlist())
+	warnSuppressedMCP(env, opts, assembled)
+	allowEntries := opts.GateMCP(assembled)
 	allow, err := netpolicy.Parse(allowEntries)
 	if err != nil {
 		return err
