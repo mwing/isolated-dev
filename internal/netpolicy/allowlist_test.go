@@ -226,3 +226,28 @@ func TestThePublicSuffixRefusalExplainsItself(t *testing.T) {
 		t.Fatalf("unhelpful refusal: %v", err)
 	}
 }
+
+// An external review: a wildcard grant reached a host an org policy
+// denied, because the deny was checked against the grant string (which a
+// wildcard slips) and the sidecar never saw it. Denies are layered onto
+// the allowlist now and win, per concrete destination, on every protocol.
+func TestADenyBeatsAWildcardGrant(t *testing.T) {
+	al, err := mustParse(t, "*.example.com").WithDeny([]string{"blocked.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The wildcard still allows an ordinary sibling.
+	if !al.Allows("ok.example.com", 443) {
+		t.Error("the wildcard grant stopped allowing a permitted sibling")
+	}
+	// But not the denied host — on any port, and not its lookup either.
+	if al.Allows("blocked.example.com", 443) {
+		t.Error("a denied host was reachable through the parent wildcard")
+	}
+	if al.Allows("blocked.example.com", 8080) {
+		t.Error("the deny was port-specific; it must forbid the host entirely")
+	}
+	if al.AllowsName("blocked.example.com") {
+		t.Error("the denied host could still be resolved")
+	}
+}

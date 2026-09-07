@@ -739,17 +739,32 @@ func startSidecarWithPorts(ctx context.Context, env *Env, eng *container.Engine,
 	for _, port := range ports {
 		forwards = append(forwards, fmt.Sprintf("%d:%s:%d", port, p.Container, port))
 	}
+	// The machine policy's denies go to the sidecar so they are enforced per
+	// concrete request, where a wildcard grant would otherwise slip a
+	// forbidden host past a grant-time string check. A policy that fails to
+	// load is not a reason to run without its denies: that is the direction
+	// that fails open.
+	pol, perr := loadPolicy(env)
+	if perr != nil {
+		return nil, netpolicy.Topology{}, perr
+	}
 	side := &netpolicy.Sidecar{
 		Engine:     eng,
 		Image:      image,
 		Allow:      allowed,
+		Deny:       pol.DenyHosts,
 		AskTimeout: ask,
 		Forwards:   forwards,
 		Ports:      ports,
+		// Named by the path-qualified slug, not the basename display name:
+		// two directories both called `project` would otherwise share these
+		// networks and sidecar, and a run in one would collide with — or
+		// route through — the other's. The agent path already names them
+		// this way; this makes `dev run` match.
 		Topology: netpolicy.Topology{
-			InternalNetwork: "dev-" + p.Name + "-internal",
-			EgressNetwork:   "dev-" + p.Name + "-egress",
-			SidecarName:     "dev-" + p.Name + "-proxy",
+			InternalNetwork: "dev-" + projectSlug(p.Dir) + "-internal",
+			EgressNetwork:   "dev-" + projectSlug(p.Dir) + "-egress",
+			SidecarName:     "dev-" + projectSlug(p.Dir) + "-proxy",
 			ProxyPort:       3128,
 			DNSPort:         53,
 		},

@@ -801,6 +801,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		Engine:   eng,
 		Image:    proxyImage,
 		Allow:    allowEntries,
+		Deny:     pol.DenyHosts,
 		Topology: topo,
 	}
 	live, err := side.Start(ctx)
@@ -899,7 +900,11 @@ func projectSlug(path string) string {
 	if len(s) > 30 {
 		s = s[:30]
 	}
-	return s
+	// Path-qualified, for the same reason the image tag is: the slug keys
+	// the clone directory and the run's networks, and two directories that
+	// share a basename would otherwise share a clone — one project's agent
+	// working in another's copy — and collide on network names.
+	return s + "-" + project.PathID(path)
 }
 
 // proxyImageTag is the image carrying the egress sidecar.

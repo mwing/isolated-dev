@@ -36,6 +36,65 @@ type Rule struct {
 // Allowlist decides whether a destination may be reached.
 type Allowlist struct {
 	rules []Rule
+	// deny is a machine policy's forbidden destinations, checked before the
+	// allow rules and winning over them. Without it a wildcard grant like
+	// *.example.com reached a denied blocked.example.com: the deny was
+	// matched against the grant *string* at grant time, which a wildcard
+	// slips, and the sidecar — where concrete requests are decided — never
+	// saw the deny at all. Here every check goes through one predicate, so
+	// deny-before-allow holds for CONNECT, plain HTTP, SOCKS and DNS alike.
+	deny []Rule
+}
+
+// WithDeny returns the allowlist with a set of denied destinations layered
+// over it. A destination a deny rule matches is refused whatever the allow
+// rules say.
+func (a *Allowlist) WithDeny(entries []string) (*Allowlist, error) {
+	if a == nil {
+		a = &Allowlist{}
+	}
+	for _, raw := range entries {
+		entry := strings.TrimSpace(raw)
+		if entry == "" || strings.HasPrefix(entry, "#") {
+			continue
+		}
+		r, err := parseEntry(entry)
+		if err != nil {
+			return nil, err
+		}
+		a.deny = append(a.deny, r)
+	}
+	return a, nil
+}
+
+// denied reports whether any deny rule matches the host. Denies are
+// host-level: a forbidden host is forbidden on every port, so the port is
+// not consulted.
+func (a *Allowlist) denied(host string) bool {
+	if a == nil || len(a.deny) == 0 {
+		return false
+	}
+	h := normalizeHost(host)
+	ip := net.ParseIP(h)
+	for _, r := range a.deny {
+		switch {
+		case r.IP != nil:
+			if ip != nil && r.IP.Equal(ip) {
+				return true
+			}
+		case ip != nil:
+			continue
+		case r.Wildcard:
+			if h == r.Host || strings.HasSuffix(h, "."+r.Host) {
+				return true
+			}
+		default:
+			if h == r.Host {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Parse builds an allowlist from entries such as:
@@ -185,6 +244,9 @@ func (a *Allowlist) Allows(host string, port int) bool {
 	if a == nil {
 		return false
 	}
+	if a.denied(host) {
+		return false
+	}
 	h := normalizeHost(host)
 	ip := net.ParseIP(h)
 
@@ -218,6 +280,9 @@ func (a *Allowlist) Allows(host string, port int) bool {
 // never even looked up.
 func (a *Allowlist) AllowsName(name string) bool {
 	if a == nil {
+		return false
+	}
+	if a.denied(name) {
 		return false
 	}
 	h := normalizeHost(name)
@@ -318,6 +383,14 @@ func (a *Allowlist) matchedByWildcard(host string) bool {
 // nobody granted.
 func (a *Allowlist) AllowsIP(ip net.IP) bool {
 	if a == nil {
+		return false
+	}
+	// The deny is consulted here too. This is a real authorization path —
+	// the one that lets an otherwise-blocked infrastructure address through
+	// when it is literally granted — and the whole point of the deny is
+	// that every check goes through it. Missing it here was the one path
+	// that did not.
+	if a.denied(ip.String()) {
 		return false
 	}
 	for _, r := range a.rules {

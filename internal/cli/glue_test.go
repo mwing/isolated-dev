@@ -33,7 +33,7 @@ func TestWorkspaceRunRendersAHardenedContainerOnTheInternalNetwork(t *testing.T)
 	args := h.workloadRun(t)
 	for _, want := range []string{
 		"--user", container.HostUser(), // the tool sets the uid, not the image
-		"--network", internalNetwork, // no route out except the sidecar
+		"--network", h.internalNetwork(), // no route out except the sidecar
 		"--dns", "172.31.0.2", // the sidecar's filtering resolver
 	} {
 		if !contains(args, want) {
@@ -54,11 +54,21 @@ func TestWorkspaceRunRendersAHardenedContainerOnTheInternalNetwork(t *testing.T)
 // existingNetwork makes `network create --internal` report that the network
 // is already there, which is the state a crashed run leaves behind.
 func (h *harness) existingNetwork(internal bool) {
-	h.fake.Response[dockerKey("network", "create", "--internal", internalNetwork)] =
+	// Keyed on the create args the tool now uses — internal networks carry
+	// the isolated-gateway option — so the fake reports "already exists" for
+	// the real call.
+	h.fake.Response[dockerKey("network", "create", "--internal", "--opt",
+		"com.docker.network.bridge.gateway_mode_ipv4=isolated", h.internalNetwork())] =
 		runner.Result{ExitCode: 1, Stderr: "Error response from daemon: network with name " +
-			internalNetwork + " already exists\n"}
-	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", internalNetwork)] =
+			h.internalNetwork() + " already exists\n"}
+	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", h.internalNetwork())] =
 		runner.Result{Stdout: fmt.Sprintf("%v\n", internal)}
+	// An internal network is trusted for reuse only if it also has the
+	// gateway isolation; report it present so the internal-and-isolated
+	// case reuses cleanly.
+	h.fake.Response[dockerKey("network", "inspect", "--format",
+		"{{index .Options \"com.docker.network.bridge.gateway_mode_ipv4\"}}",
+		h.internalNetwork())] = runner.Result{Stdout: "isolated\n"}
 }
 
 func TestARunRefusesAPreExistingNetworkThatIsNotInternal(t *testing.T) {
@@ -103,7 +113,7 @@ func TestAnUnreadableInternalFlagRefuses(t *testing.T) {
 	h.readyBackend()
 	h.readySidecar()
 	h.existingNetwork(false)
-	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", internalNetwork)] =
+	h.fake.Response[dockerKey("network", "inspect", "--format", "{{.Internal}}", h.internalNetwork())] =
 		runner.Result{Stdout: "<no value>\n"}
 
 	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err == nil {
@@ -949,7 +959,7 @@ func TestAnAgentRunHonorsRequiredLimits(t *testing.T) {
 func (h *harness) sidecarFor() *netpolicy.Sidecar {
 	return &netpolicy.Sidecar{
 		Engine:   container.New(h.env.driver(vmName)),
-		Topology: netpolicy.Topology{SidecarName: sidecarName},
+		Topology: netpolicy.Topology{SidecarName: h.sidecarName()},
 	}
 }
 
@@ -1248,4 +1258,32 @@ func TestTheGitConfigFilterKeepsSectionsIntact(t *testing.T) {
 	if strings.Contains(got, "editor") {
 		t.Fatalf("a dropped setting survived:\n%s", got)
 	}
+}
+
+// An external review: `--internal` blocks the route out but leaves the
+// bridge's host gateway reachable, so a workload can hit services on the
+// docker host directly. Fixed with isolated gateway mode. A network left
+// behind before that fix is internal yet still exposes the gateway, so
+// reuse checks the gateway mode too, not only .Internal — and warns,
+// naming the one-command fix, the same posture the create fallback takes so
+// the two paths agree.
+func TestReusingAnInternalNetworkWithoutGatewayIsolationWarns(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.existingNetwork(true)
+	// An older network: internal, but no gateway isolation.
+	h.fake.Response[dockerKey("network", "inspect", "--format",
+		"{{index .Options \"com.docker.network.bridge.gateway_mode_ipv4\"}}",
+		h.internalNetwork())] = runner.Result{Stdout: "\n"}
+
+	// It proceeds rather than hard-refusing — the same posture as the
+	// create fallback, so reuse does not reject the very network the
+	// fallback makes. (The warning itself goes to the engine's os.Stderr,
+	// which the harness does not capture; the behaviour under test is that
+	// the run is not refused.)
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("a run on a pre-isolation network was refused rather than warned: %v", err)
+	}
+	h.workloadRun(t)
 }

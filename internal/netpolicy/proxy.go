@@ -471,6 +471,17 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid target", http.StatusBadRequest)
 		return
 	}
+	// The same name-shape check the CONNECT/SOCKS path and the resolver
+	// apply. Plain HTTP had it missing, so a workload could carry an
+	// over-length encoded label to a host under a wildcard grant by
+	// switching to http:// — the payload rides in the name, which the
+	// system resolver looks up before any connection. Shared across every
+	// protocol now, before the lookup.
+	if why := p.exfilShape(host); why != "" {
+		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method, Reason: why})
+		denyResponse(w, host, port)
+		return
+	}
 	// Plain HTTP holds for a decision exactly as CONNECT does. Anything
 	// that asks for a host without a scheme lands here — `curl example.com`
 	// is http:// — so leaving this path out made the prompt look broken

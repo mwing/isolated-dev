@@ -515,3 +515,34 @@ func TestALiteralGrantReachesAPrivateAddress(t *testing.T) {
 		t.Fatal("a private address nobody granted was permitted")
 	}
 }
+
+// An external review: the DNS/CONNECT/SOCKS paths reject an over-length
+// encoded name under a wildcard grant, but plain HTTP did not call the
+// shape check — so a workload could carry the payload to a lookup by
+// switching to http://. The check is shared across protocols now.
+func TestPlainHTTPAppliesTheExfilShapeCheck(t *testing.T) {
+	c := &collector{}
+	p := NewProxy(mustParse(t, "*.example.com"))
+	p.Emit = c.emit
+	addr := startProxy(t, p)
+
+	// 56 characters in the first label — valid DNS, over the tool's
+	// heuristic — under the granted wildcard.
+	host := strings.Repeat("qz7x", 14) + ".example.com"
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	fmt.Fprintf(conn, "GET http://%s/ HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host, host)
+	line, _ := bufio.NewReader(conn).ReadString('\n')
+	if !strings.Contains(line, "403") {
+		t.Fatalf("an over-length encoded name reached upstream over plain HTTP: %q", line)
+	}
+	// A normal short name under the same grant still passes the shape check
+	// (it will fail to dial in the test, but not be refused by shape).
+	if events := c.all(); len(events) == 0 || events[0].Action != "deny" {
+		t.Fatalf("the refusal was not recorded as a denial: %+v", events)
+	}
+}

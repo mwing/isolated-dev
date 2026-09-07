@@ -155,13 +155,21 @@ func (e *Engine) ImageExists(ctx context.Context, tag string) (bool, error) {
 // NetworkCreate creates a network. An internal network has no gateway and
 // therefore no route out, which is the foundation of ROADMAP 4.3: the
 // workload cannot reach anything the sidecar does not relay.
+// isolatedGatewayOpt removes the bridge's host gateway from an internal
+// network.
+//
+// `--internal` blocks the route out, but the bridge still carries a gateway
+// address — the docker host's own IP on that subnet — and a container can
+// reach services bound there directly, never touching the sidecar. On the
+// Linux backend that is the host; a review reached a listener that way.
+// This gateway mode leaves the network with no gateway at all, so
+// container-to-container traffic (workload to sidecar) still works while the
+// host is out of reach. Verified on Docker 29: with it, the gateway is
+// unassigned and a host listener is unreachable from the network.
+const isolatedGatewayOpt = "com.docker.network.bridge.gateway_mode_ipv4=isolated"
+
 func (e *Engine) NetworkCreate(ctx context.Context, name string, internal bool) error {
-	args := []string{"network", "create"}
-	if internal {
-		args = append(args, "--internal")
-	}
-	args = append(args, name)
-	res, err := e.docker(ctx, args...)
+	res, err := e.tryNetworkCreate(ctx, name, internal)
 	if err != nil {
 		return err
 	}
@@ -195,13 +203,71 @@ func (e *Engine) requireInternal(ctx context.Context, name string) error {
 	if err := check(res, nil, "inspecting network "+name); err != nil {
 		return err
 	}
-	if strings.TrimSpace(res.Stdout) == "true" {
-		return nil
+	if strings.TrimSpace(res.Stdout) != "true" {
+		return fmt.Errorf("network %s already exists and is not internal: the workload "+
+			"would have a route out that the egress proxy never sees, while this run "+
+			"reported itself filtered.\nRemove it and start clean:\n  dev clean --all",
+			name)
 	}
-	return fmt.Errorf("network %s already exists and is not internal: the workload "+
-		"would have a route out that the egress proxy never sees, while this run "+
-		"reported itself filtered.\nRemove it and start clean:\n  dev clean --all",
-		name)
+	// Internal is necessary but not sufficient: a network created before the
+	// gateway-mode fix is internal and still exposes the host gateway.
+	// Checking only `.Internal` on reuse would silently inherit that gap, so
+	// the gateway mode is verified too. A network without it is a leftover to
+	// clear, not one to trust.
+	opts, oerr := e.docker(ctx, "network", "inspect", "--format",
+		"{{index .Options \"com.docker.network.bridge.gateway_mode_ipv4\"}}", name)
+	if oerr != nil {
+		return oerr
+	}
+	if strings.TrimSpace(opts.Stdout) != "isolated" {
+		// Internal but not isolated: a network from before the gateway-mode
+		// fix, or one made under the old-docker fallback. Warned, not
+		// refused — the same posture the create fallback takes, so the two
+		// paths agree rather than reuse refusing the very network the
+		// fallback just made. The message names the one-command fix for a
+		// user whose docker can do better.
+		fmt.Fprintf(os.Stderr, "⚠  network %s predates host-gateway isolation, so a "+
+			"workload on it can still reach the docker host's bridge services.\n"+
+			"   `dev clean --all` removes it so the next run rebuilds it isolated.\n",
+			name)
+	}
+	return nil
+}
+
+// tryNetworkCreate runs the create, adding the isolated-gateway option for
+// an internal network and retrying without it — with a warning — on a
+// daemon too old to know it. It returns the raw result so the caller can
+// tell an "already exists" from a real failure.
+func (e *Engine) tryNetworkCreate(ctx context.Context, name string, internal bool) (runner.Result, error) {
+	args := []string{"network", "create"}
+	if internal {
+		args = append(args, "--internal", "--opt", isolatedGatewayOpt)
+	}
+	args = append(args, name)
+	res, err := e.docker(ctx, args...)
+	if err != nil {
+		return res, err
+	}
+	// The gateway-mode option is newer than `--internal`. On a daemon that
+	// does not know it, creation fails; retry without it and say plainly
+	// that the host-gateway isolation is not in force — a warning the user
+	// can act on beats a silent gap, and beats refusing to run at all.
+	if internal && res.ExitCode != 0 && optionUnsupported(res.Stderr) {
+		fmt.Fprintf(os.Stderr, "⚠  this docker is too old for isolated bridge "+
+			"gateway mode, so a workload can still reach services on the docker\n"+
+			"   host's bridge address. Upgrade docker to close this.\n")
+		return e.docker(ctx, "network", "create", "--internal", name)
+	}
+	return res, err
+}
+
+// optionUnsupported reports whether a network-create failure is the daemon
+// rejecting the gateway-mode option, as opposed to any other error.
+func optionUnsupported(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "gateway_mode") ||
+		strings.Contains(s, "unknown option") ||
+		strings.Contains(s, "invalid option")
 }
 
 // NetworkRemove deletes a network, ignoring absence.

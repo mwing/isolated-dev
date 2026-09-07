@@ -36,6 +36,7 @@ func run() error {
 		socksAddr = flag.String("socks-addr", ":1080",
 			"listen address for the SOCKS5 front end; empty disables it")
 		allowFlag = flag.String("allow", "", "comma-separated allowlist entries")
+		denyFlag  = flag.String("deny", "", "comma-separated denied destinations, checked before allows")
 		allowFile = flag.String("allow-file", "", "file with one allowlist entry per line")
 		noDNS     = flag.Bool("no-dns", false, "do not serve DNS")
 		ctlPath   = flag.String("control-socket", "/run/dev-control.sock",
@@ -63,6 +64,19 @@ func run() error {
 	allow, err := netpolicy.Parse(entries)
 	if err != nil {
 		return err
+	}
+	// Denies come from the machine policy and win over any allow, so a
+	// wildcard grant cannot reach a forbidden host. Layered onto the
+	// allowlist rather than checked separately, so every protocol's one
+	// allow decision carries them.
+	var denyEntries []string
+	if *denyFlag != "" {
+		denyEntries = strings.Split(*denyFlag, ",")
+		allow, err = allow.WithDeny(denyEntries)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "dev-proxy: denying %s (wins over allows)\n", *denyFlag)
 	}
 
 	// An empty policy is legal and means "deny everything". Say so out
@@ -127,7 +141,7 @@ func run() error {
 	}
 
 	if *ctlPath != "" {
-		ctl := netpolicy.NewControl(proxy, resolverFor(dnsSrv), entries)
+		ctl := netpolicy.NewControl(proxy, resolverFor(dnsSrv), entries, denyEntries)
 		ctl.OnChange = func(op, host string, rules []string) {
 			// Policy changes belong in the same log as the decisions they
 			// affect, or a later denial looks inexplicable.

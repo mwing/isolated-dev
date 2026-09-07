@@ -504,3 +504,48 @@ func TestOwnDockerfileGainsAnAccountForTheRunUid(t *testing.T) {
 		t.Error("the stanza can fail a build it should only decline to change")
 	}
 }
+
+// An external review: a devcontainer image and a pin value are concatenated
+// into FROM lines, so a newline in either injects a Dockerfile instruction
+// into a build the tool treats as trusted-generated and never asks about.
+func TestInjectedImageReferencesAreRefused(t *testing.T) {
+	if validImageRef("alpine:3.22\nRUN echo pwned") {
+		t.Error("a multiline devcontainer image was accepted")
+	}
+	if validImageRef("alpine:3.22 RUN echo pwned") {
+		t.Error("a space-bearing image reference was accepted")
+	}
+	if !validImageRef("alpine:3.22") || !validImageRef("ghcr.io/x/y@sha256:abc") {
+		t.Error("a legitimate image reference was refused")
+	}
+	// A pin with an injected instruction is left unapplied; the original
+	// FROM stands rather than the build gaining a RUN.
+	got := ApplyPins("FROM alpine:3.22\n", map[string]string{
+		"alpine:3.22": "alpine:3.22\nRUN echo pwned",
+	})
+	if strings.Contains(got, "RUN echo pwned") {
+		t.Errorf("an injected pin reached the Dockerfile:\n%s", got)
+	}
+}
+
+// An external review: two different directories that share a basename got
+// the same image tag, so once one was built the other reused it — running
+// its own workspace and grants against the first project's baked-in code.
+// The identity is path-qualified now.
+func TestSameBasenameProjectsGetDistinctIdentity(t *testing.T) {
+	a := filepath.Join(t.TempDir(), "project")
+	b := filepath.Join(t.TempDir(), "project")
+	for _, d := range []string{a, b} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if PathID(a) == PathID(b) {
+		t.Fatalf("two different /project dirs share a path id: %s", PathID(a))
+	}
+	// And the same directory reached twice is one id.
+	first, second := PathID(a), PathID(a)
+	if first != second {
+		t.Error("PathID is not stable for one directory")
+	}
+}

@@ -33,7 +33,7 @@ func newControl(t *testing.T, entries ...string) (*Control, *Proxy, *Resolver) {
 	allow := mustParse(t, entries...)
 	p := NewProxy(allow)
 	r := NewResolver(allow)
-	return NewControl(p, r, entries), p, r
+	return NewControl(p, r, entries, nil), p, r
 }
 
 func TestAllowTakesEffectWithoutRestart(t *testing.T) {
@@ -502,7 +502,7 @@ func TestRefusedDestinationFailsFastInsteadOfHoldingAgain(t *testing.T) {
 	p.Emit = c.emit
 	p.AskTimeout = 30 * time.Second
 	p.AskPoll = 20 * time.Millisecond
-	ctl := NewControl(p, nil, []string{"a.example.com"})
+	ctl := NewControl(p, nil, []string{"a.example.com"}, nil)
 	addr := startProxy(t, p)
 
 	if resp := ctl.Apply(Request{Op: "refuse", Host: "no.example.com"}); !resp.OK {
@@ -529,7 +529,7 @@ func TestRefusedDestinationFailsFastInsteadOfHoldingAgain(t *testing.T) {
 func TestAllowingAfterRefusingWorks(t *testing.T) {
 	// Changing your mind must not be blocked by the earlier no.
 	p := NewProxy(mustParse(t, "a.example.com"))
-	ctl := NewControl(p, nil, []string{"a.example.com"})
+	ctl := NewControl(p, nil, []string{"a.example.com"}, nil)
 
 	ctl.Apply(Request{Op: "refuse", Host: "later.example.com"})
 	if resp := ctl.Apply(Request{Op: "allow", Host: "later.example.com"}); !resp.OK {
@@ -540,5 +540,54 @@ func TestAllowingAfterRefusingWorks(t *testing.T) {
 	}
 	if p.isRefused("later.example.com") {
 		t.Fatal("refusal survived the grant and would still fail fast")
+	}
+}
+
+// A review's critical: mutate rebuilt the allowlist from Parse (which has
+// no denies) and installed it, so the first runtime grant or revoke — the
+// ordinary ask-to-approve flow — silently dropped the whole deny list, and
+// every denied host became reachable. The deny has to survive a grant.
+func TestARuntimeGrantDoesNotDropTheDenyList(t *testing.T) {
+	allow, err := mustParse(t, "*.example.com").WithDeny([]string{"blocked.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewProxy(allow)
+	r := NewResolver(allow)
+	c := NewControl(p, r, []string{"*.example.com"}, []string{"blocked.example.com"})
+
+	if p.Allowlist().Allows("blocked.example.com", 443) {
+		t.Fatal("denied before any grant — the fixture is wrong")
+	}
+
+	// Grant an unrelated host, the ordinary mid-run approval.
+	if resp := c.mutate("allow", "ok.example.com", true); !resp.OK {
+		t.Fatalf("grant failed: %s", resp.Error)
+	}
+
+	// The deny must still hold on both the proxy and the resolver.
+	if p.Allowlist().Allows("blocked.example.com", 443) {
+		t.Error("a runtime grant dropped the deny: the denied host is reachable")
+	}
+	if r.Allowlist().AllowsName("blocked.example.com") {
+		t.Error("a runtime grant dropped the deny on the resolver too")
+	}
+	// And a revoke likewise keeps it.
+	c.mutate("revoke", "ok.example.com", false)
+	if p.Allowlist().Allows("blocked.example.com", 443) {
+		t.Error("a revoke dropped the deny")
+	}
+}
+
+// A review's high: AllowsIP was the one authorization path that did not
+// consult the deny, so a denied infrastructure IP that was also literally
+// granted slipped through.
+func TestAllowsIPConsultsTheDeny(t *testing.T) {
+	al, err := mustParse(t, "10.0.0.5").WithDeny([]string{"10.0.0.5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if al.AllowsIP(net.ParseIP("10.0.0.5")) {
+		t.Error("a denied IP was permitted through AllowsIP")
 	}
 }

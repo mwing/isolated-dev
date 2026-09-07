@@ -71,6 +71,11 @@ type Sidecar struct {
 	// changed afterwards only through the control socket, which is
 	// reachable from the host and not from the workload (see Control).
 	Allow []string
+	// Deny is the machine policy's forbidden destinations, enforced by the
+	// sidecar before any allow. It is what stops a wildcard grant reaching a
+	// denied host: the deny is evaluated per concrete request, where a
+	// grant-time string check of the wildcard could not see it.
+	Deny []string
 	// AskTimeout holds denied connections while someone decides. Zero
 	// fails them immediately.
 	AskTimeout time.Duration
@@ -154,6 +159,9 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 			"--socks-addr", fmt.Sprintf(":%d", t.SOCKSPort),
 			"--ask-timeout", s.AskTimeout.String(),
 		},
+	}
+	if len(s.Deny) > 0 {
+		spec.Command = append(spec.Command, "--deny", strings.Join(s.Deny, ","))
 	}
 	for _, f := range s.Forwards {
 		spec.Command = append(spec.Command, "--forward", f)

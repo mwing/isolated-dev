@@ -42,12 +42,26 @@ type Control struct {
 
 	mu    sync.Mutex
 	entry []string
-	ln    net.Listener
+	// deny is the machine policy's forbidden set. It never changes at
+	// runtime — only the allow entries do — but it has to be re-applied
+	// every time the allowlist is rebuilt, or a single grant would drop it.
+	// That was a real bug: mutate rebuilt from Parse (deny nil) and every
+	// previously-denied host became reachable the moment any host was
+	// allowed or revoked. The deny is held here so it survives.
+	deny []string
+	ln   net.Listener
 }
 
-// NewControl returns a control server over the current policy entries.
-func NewControl(p *Proxy, r *Resolver, entries []string) *Control {
-	return &Control{Proxy: p, Resolver: r, entry: append([]string(nil), entries...)}
+// NewControl returns a control server over the current policy entries. deny
+// is the machine policy's forbidden destinations, re-applied on every
+// runtime change so a grant cannot drop them.
+func NewControl(p *Proxy, r *Resolver, entries, deny []string) *Control {
+	return &Control{
+		Proxy:    p,
+		Resolver: r,
+		entry:    append([]string(nil), entries...),
+		deny:     append([]string(nil), deny...),
+	}
 }
 
 // Request is one control operation.
@@ -182,6 +196,13 @@ func (c *Control) mutate(op, host string, add bool) Response {
 	// mid-run, which would fail every subsequent connection.
 	allow, err := Parse(next)
 	if err != nil {
+		c.mu.Unlock()
+		return Response{Error: err.Error()}
+	}
+	// Re-apply the deny set. Parse returns a fresh allowlist with no denies,
+	// so without this the first grant or revoke silently unblocks every
+	// denied host on both the proxy and the resolver.
+	if allow, err = allow.WithDeny(c.deny); err != nil {
 		c.mu.Unlock()
 		return Response{Error: err.Error()}
 	}

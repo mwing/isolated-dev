@@ -185,13 +185,17 @@ func dockerKey(args ...string) string {
 
 var proxyInspect = dockerKey("image", "inspect", proxyImageTag)
 
-// The sidecar and its networks are named after the project directory. The
-// harness fixes that directory at <tmp>/project, and both `dev run` and
-// `dev agent run` derive the same names from its base.
-const (
-	sidecarName     = "dev-project-proxy"
-	internalNetwork = "dev-project-internal"
-)
+// The sidecar and its networks are named after the project directory,
+// which now includes a hash of its full path so two same-basename projects
+// do not collide — so the names are computed per harness from the real
+// slug rather than fixed.
+func (h *harness) sidecarName() string {
+	return "dev-" + projectSlug(h.paths.ProjectDir) + "-proxy"
+}
+
+func (h *harness) internalNetwork() string {
+	return "dev-" + projectSlug(h.paths.ProjectDir) + "-internal"
+}
 
 // readySidecar makes the fake runner look like a daemon that can bring the
 // egress sidecar up: the image is present, the container reports itself
@@ -201,12 +205,12 @@ const (
 // layer these tests exist to cover.
 func (h *harness) readySidecar() {
 	h.fake.Response[proxyInspect] = runner.Result{Stdout: "[]\n"}
-	h.fake.Response[dockerKey("logs", sidecarName)] = runner.Result{
+	h.fake.Response[dockerKey("logs", h.sidecarName())] = runner.Result{
 		Stdout: netpolicy.ReadyLine + "\n",
 	}
 	h.fake.Response[dockerKey("inspect", "--format",
-		fmt.Sprintf("{{ (index .NetworkSettings.Networks %q).IPAddress }}", internalNetwork),
-		sidecarName)] = runner.Result{Stdout: "172.31.0.2\n"}
+		fmt.Sprintf("{{ (index .NetworkSettings.Networks %q).IPAddress }}", h.internalNetwork()),
+		h.sidecarName())] = runner.Result{Stdout: "172.31.0.2\n"}
 }
 
 // writePolicy installs the machine policy. It is the one file the tool

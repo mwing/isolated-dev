@@ -297,3 +297,101 @@ func TestTheBranchOfAnUnbornRepositoryIsItsBranch(t *testing.T) {
 		t.Errorf("a detached HEAD reported branch %q", got)
 	}
 }
+
+// An external review's critical: the config quarantine set aside
+// `.git/config`, but `.git/commondir` names a different directory whose
+// config git reads instead — so a filter.<x>.clean there, chosen by an
+// in-tree .gitattributes, ran on the host during an ordinary `git status`,
+// escaping the quarantine entirely. Confirmed against host git 2.52.0
+// before the fix. The layout a workload rewrote this way is refused, not
+// read.
+func TestACommondirRedirectionIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, a := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := git(ctx, run, dir, a...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(dir, "kept.txt"), "original\n")
+	if _, err := git(ctx, run, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, run, dir, "commit", "-qm", "init"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Move the real repository into a common dir the agent points at, and
+	// plant the filter there — outside the .git/config the quarantine sees.
+	if err := os.MkdirAll(filepath.Join(dir, ".git", "common"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"config", "refs", "objects"} {
+		if err := os.Rename(filepath.Join(dir, ".git", n),
+			filepath.Join(dir, ".git", "common", n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(dir, ".git", "commondir"), "common\n")
+	marker := filepath.Join(t.TempDir(), "HOST-MARKER")
+	f, err := os.OpenFile(filepath.Join(dir, ".git", "common", "config"),
+		os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("[filter \"review\"]\n\tclean = \"touch " + marker + "; cat\"\n")
+	_ = f.Close()
+	write(t, filepath.Join(dir, ".gitattributes"), "kept.txt filter=review\n")
+	write(t, filepath.Join(dir, ".git", "config"), "# harmless decoy\n")
+	write(t, filepath.Join(dir, "kept.txt"), "ORIGINAL\n") // same length, changed
+
+	_, err = Read(ctx, run, dir, "status", "--porcelain")
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("a filter named in a redirected common config ran on the host")
+	}
+	if err == nil {
+		t.Errorf("the redirected clone was read rather than refused")
+	}
+}
+
+// The review's structural point on the quarantine: a two-file blocklist
+// keeps missing the next redirection mechanism. A symlinked objects
+// directory redirects the store the same way the alternates file does, and
+// the first fix caught the file but not the directory. Refused now.
+func TestASymlinkedObjectsDirIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	run := runner.New(false)
+	ctx := context.Background()
+	for _, a := range [][]string{
+		{"init", "-q"}, {"config", "user.email", "t@t"}, {"config", "user.name", "t"},
+		{"config", "commit.gpgsign", "false"},
+	} {
+		if _, err := git(ctx, run, dir, a...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(t, filepath.Join(dir, "f.txt"), "x\n")
+	if _, err := git(ctx, run, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, run, dir, "commit", "-qm", "i"); err != nil {
+		t.Fatal(err)
+	}
+	// Redirect the object store to an agent-chosen path via a symlink.
+	elsewhere := t.TempDir()
+	real := filepath.Join(dir, ".git", "objects")
+	if err := os.Rename(real, filepath.Join(elsewhere, "objects")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(elsewhere, "objects"), real); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Read(ctx, run, dir, "status", "--porcelain"); err == nil {
+		t.Error("a clone with a symlinked objects directory was read rather than refused")
+	}
+}

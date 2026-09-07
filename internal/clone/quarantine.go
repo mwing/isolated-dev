@@ -146,6 +146,58 @@ func checkCloneLayout(dir string) error {
 		return fmt.Errorf("%s is not a directory — a `gitdir:` pointer names a "+
 			"repository somewhere this tool did not put it", gitDir)
 	}
+
+	// Redirections that move the effective repository out from under the
+	// quarantine. Setting `.git/config` aside is worth nothing if git reads
+	// its config from somewhere else, and two files do exactly that:
+	//
+	//   - `.git/commondir` names a common directory whose config, refs and
+	//     objects git uses instead. An agent that writes it, moves the real
+	//     config into that directory, and names a `filter.<x>.clean` there
+	//     gets that program run on the host during an ordinary `git status`
+	//     — the config quarantine never touches it, and the hardened flags
+	//     cannot blank a filter chosen by an in-tree `.gitattributes`.
+	//     Confirmed against a real host git 2.52.0.
+	//   - `.git/objects/info/alternates` redirects the object store the same
+	//     way, to a path the agent chose.
+	//
+	// A clone this tool made has neither: a plain, self-contained `.git`.
+	// So their presence is not a layout to accommodate but a repository the
+	// agent redirected, and the safe answer is to refuse to run host git
+	// against it at all.
+	for _, redirect := range []string{
+		filepath.Join("commondir"),
+		filepath.Join("objects", "info", "alternates"),
+	} {
+		p := filepath.Join(gitDir, redirect)
+		if _, err := os.Lstat(p); err == nil {
+			return fmt.Errorf("%s redirects the repository elsewhere; this clone "+
+				"was rewritten by the workload and host git will not read it", p)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("checking %s: %w", p, err)
+		}
+	}
+
+	// The same redirection, one layer down: a symlinked objects, refs or
+	// logs directory points the store at a path the agent chose — the
+	// directory equivalent of the alternates file above. A clone this tool
+	// made has these as real directories, so a symlink is not a layout to
+	// accommodate. HEAD is here too: a symlinked HEAD can point the
+	// effective ref elsewhere.
+	for _, entry := range []string{"objects", "refs", "logs", "HEAD"} {
+		p := filepath.Join(gitDir, entry)
+		fi, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("checking %s: %w", p, err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symlink, redirecting the repository to a "+
+				"path the workload chose; host git will not read it", p)
+		}
+	}
 	return nil
 }
 

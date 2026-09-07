@@ -783,6 +783,77 @@ recorded limits rather than fixed:
 
 Shipped as 0.10.1, a security fix on a version that had the hole.
 
+### B36. Astra (codex) security review — six findings, all real — `done`
+
+A thorough external review at `c03bda8`, one critical, four high, one
+medium, each with a working reproduction. Every one verified before fixing;
+all held.
+
+- **Critical — `.git/commondir` escaped the config quarantine.** The
+  quarantine set aside `.git/config`, but a `commondir` file redirects git
+  to a different directory whose config it reads instead — so a
+  `filter.<x>.clean` there, chosen by an in-tree `.gitattributes`, ran on
+  the host during an ordinary `git status`. Reproduced against host git
+  2.52.0 (`HOST-MARKER` written). `checkCloneLayout` now refuses a clone
+  carrying `commondir` or `objects/info/alternates` — the redirections a
+  clone this tool made never has — rather than reading it.
+- **High — image references injected build instructions.** A devcontainer
+  `image` and a pin value were concatenated into `FROM` lines unvalidated,
+  so `"alpine\nRUN …"` injected an instruction into a build treated as
+  trusted-generated, with no consent. `validImageRef` now rejects anything
+  that is not a single reference; an injected pin is left unapplied.
+- **High — same-basename projects shared an image.** Tags were basename +
+  uid, no path, so two directories both called `project` collided and one
+  reused the other's built image with its own workspace and credentials.
+  Now path-qualified via `project.PathID` — image, container, networks and
+  the clone directory — matching what the trust store already did.
+- **High — `--internal` still reached docker-host services.** It blocks the
+  route out but leaves the bridge's host gateway reachable. Reproduced: an
+  internal-only container reached a host-namespace listener via the
+  gateway. Fixed with docker's isolated gateway mode (verified: gateway
+  unassigned, listener unreachable, container-to-container intact), with a
+  warned fallback on older docker, and reuse now checks the gateway mode,
+  not only `.Internal`.
+- **High — a wildcard grant bypassed `deny_hosts`.** The deny was matched
+  against the grant string, which a wildcard slips, and the sidecar never
+  saw it. Denies are layered into the allowlist now and evaluated
+  deny-before-allow per concrete destination, on CONNECT, plain HTTP, SOCKS
+  and DNS alike, carried to the sidecar with a new `--deny`.
+- **Medium — plain HTTP skipped the exfil-shape check.** The
+  DNS/CONNECT/SOCKS paths reject an over-length encoded name under a
+  wildcard; `handleHTTP` did not. The check is shared across protocols now,
+  before the lookup.
+
+Each fix has a regression test that fails against the prior code, and the
+network fix was checked live: a filtered run still reaches an allowed host
+through the isolated network.
+
+A coderabbit review of the fixes found the deny work leaked twice more,
+both fixed:
+
+- **Critical:** the control socket rebuilt the allowlist from `Parse` on
+  every runtime grant or revoke, which has no denies — so the first
+  ask-to-approve or `dev allow` mid-run silently dropped the entire deny
+  list. `Control` holds the deny set now and re-applies it on every change.
+- **High:** `AllowsIP` was the one authorization path that skipped the deny
+  check, so a denied infrastructure IP that was also literally granted
+  slipped through. It consults the deny now, like `Allows` and `AllowsName`.
+
+And two lower ones from the same review: the network reuse path was made to
+warn-and-proceed on a pre-isolation network rather than hard-refuse, so it
+agrees with the create fallback instead of rejecting the very network the
+fallback makes; and `checkCloneLayout` now refuses a symlinked `objects`,
+`refs`, `logs` or `HEAD` — the directory form of the object-store
+redirection the alternates check already caught. The review's larger note
+stands: a blocklist keeps missing the next mechanism, and moving hostile
+git inspection into a restricted container is the durable answer (1.0
+plan).
+
+The review's larger recommendation — inspect hostile git inside a
+restricted container rather than quarantining config paths on the host — is
+the right long-term direction and is recorded under the 1.0 plan, not done
+here.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`
