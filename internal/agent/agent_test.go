@@ -150,17 +150,27 @@ func TestLoadDirRejectsInvalidDefinition(t *testing.T) {
 	}
 }
 
-func TestVolumeIsPerAgentNotPerProject(t *testing.T) {
-	// One login should serve every project; scoping per project would ask
-	// the user to authenticate again in each repo.
+func TestConfigIsPerProjectAndLoginIsShared(t *testing.T) {
 	a := &Agent{Name: "claude"}
-	if got := a.VolumeName(); got != "dev-agent-claude-config" {
-		t.Errorf("VolumeName = %q", got)
+	// The login is one shared volume; scoping it per project would ask the
+	// user to authenticate again in each repo.
+	if got := a.AuthVolume(); got != "dev-agent-claude-auth" {
+		t.Errorf("AuthVolume = %q", got)
 	}
-	// And it is not the old whole-home volume under a new name: that one is
-	// read once to carry a login forward and then left alone.
-	if a.VolumeName() == homeVolumeName(a) {
-		t.Error("the config volume reuses the home volume's name")
+	// The config is per project, so two projects get different volumes and
+	// a hook or MCP grant in one does not reach the other.
+	x := a.ConfigVolume("/home/me/projectX")
+	y := a.ConfigVolume("/home/me/projectY")
+	if x == y {
+		t.Errorf("two projects share a config volume: %q", x)
+	}
+	// The same project is stable across calls, and carries the agent prefix
+	// so logout can find it.
+	if x != a.ConfigVolume("/home/me/projectX") {
+		t.Error("ConfigVolume is not stable for one project")
+	}
+	if !strings.HasPrefix(x, a.configVolumePrefix()) {
+		t.Errorf("config volume %q is not under the agent prefix %q", x, a.configVolumePrefix())
 	}
 }
 
@@ -350,7 +360,7 @@ func TestSpecMountsWorkspaceAndAgentVolumeOnly(t *testing.T) {
 	if spec.Mounts[0].Source != "/host/proj" || spec.Mounts[0].Target != WorkspacePath {
 		t.Errorf("workspace mount = %+v", spec.Mounts[0])
 	}
-	if !spec.Mounts[1].Volume || spec.Mounts[1].Source != "dev-agent-claude-config" {
+	if !spec.Mounts[1].Volume || spec.Mounts[1].Source != a.ConfigVolume("/host/proj") {
 		t.Errorf("config volume = %+v", spec.Mounts[1])
 	}
 	// No ~/.ssh, no ~/.gitconfig, no docker socket.
@@ -712,100 +722,6 @@ func contains(list []string, want string) bool {
 	return false
 }
 
-// The rename moved this volume, and the volume holds an OAuth login. A
-// fresh empty one would look like a bug: the agent just asks you to log in
-// again, with nothing to explain why.
-func TestEnsureVolumeAdoptsThePreRenameVolume(t *testing.T) {
-	fake := runner.NewFake()
-	// Keys are a prefix of the whole rendered command, which the backend
-	// wraps in its own invocation.
-	const orb = "orb -m vm sudo docker "
-	// Nothing exists but the one from before the rename.
-	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 1}
-	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 1}
-	fake.Response[orb+"volume inspect dev2-agent-claude"] = runner.Result{ExitCode: 0}
-
-	r := &Runner{
-		Engine: container.New(orbstack.New("vm", fake)),
-		Out:    io.Discard,
-	}
-	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
-	if err := r.EnsureVolume(context.Background(), a); err != nil {
-		t.Fatal(err)
-	}
-
-	var created, copied bool
-	for _, c := range fake.Calls {
-		line := c.String()
-		if strings.Contains(line, "volume create dev-agent-claude-config") {
-			created = true
-		}
-		// The copy runs in a container because the volumes live in the VM.
-		if strings.Contains(line, "source=dev2-agent-claude") &&
-			strings.Contains(line, "source=dev-agent-claude-config") {
-			copied = true
-		}
-	}
-	if !created {
-		t.Fatal("did not create the new volume")
-	}
-	if !copied {
-		t.Fatalf("did not copy the old volume in; calls:\n%s", callLines(fake))
-	}
-}
-
-// Narrowing the volume from the home directory to the config directory
-// renamed it, and the old one holds a login. A fresh empty volume would
-// read as the tool having logged the user out for no reason, so the config
-// directory inside the old home is carried across — and only that, or the
-// narrowing would undo itself on every machine that had run an agent
-// before.
-func TestEnsureVolumeCarriesTheConfigDirOutOfTheOldHomeVolume(t *testing.T) {
-	fake := runner.NewFake()
-	const orb = "orb -m vm sudo docker "
-	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 1}
-	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 0}
-
-	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
-	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
-	if err := r.EnsureVolume(context.Background(), a); err != nil {
-		t.Fatal(err)
-	}
-
-	var copied bool
-	for _, c := range fake.Calls {
-		line := c.String()
-		if !strings.Contains(line, "source=dev-agent-claude,") &&
-			!strings.Contains(line, "source=dev-agent-claude ") {
-			continue
-		}
-		if !strings.Contains(line, "/from/.claude/.") {
-			t.Errorf("the whole old home was copied, not just the config dir:\n%s", line)
-		}
-		copied = true
-	}
-	if !copied {
-		t.Fatalf("the old home volume was not read at all; calls:\n%s", callLines(fake))
-	}
-}
-
-// With nothing to adopt, it must not run a pointless container.
-func TestEnsureVolumeSkipsAdoptionWhenThereIsNoOldVolume(t *testing.T) {
-	fake := runner.NewFake()
-	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
-
-	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
-	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/c", Base: "b"}
-	if err := r.EnsureVolume(context.Background(), a); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range fake.Calls {
-		if strings.Contains(c.String(), "docker run") {
-			t.Fatalf("ran a container with nothing to adopt:\n%s", callLines(fake))
-		}
-	}
-}
-
 func callLines(f *runner.Fake) string {
 	var b strings.Builder
 	for _, c := range f.Calls {
@@ -814,21 +730,90 @@ func callLines(f *runner.Fake) string {
 	return b.String()
 }
 
-// An external review's first finding, and the sharpest kind: a command
-// that does the opposite of what it says. Migration keeps the old home
-// volume deliberately, and EnsureVolume imports from it whenever the
-// config volume is missing — which is precisely the state logout leaves.
-// So logout, run, and the credential came back.
-func TestLogoutDoesNotLeaveALoginToBeRestored(t *testing.T) {
+// A fresh install: no volumes yet. EnsureVolume creates the shared auth
+// volume and the project's config volume, seeds the login into the config
+// from auth (a no-op the first time, when auth is empty), and does not
+// fail. The first run logs in.
+func TestEnsureVolumeCreatesAuthAndPerProjectConfig(t *testing.T) {
 	fake := runner.NewFake()
-	const orb = "orb -m vm sudo docker "
-	// Both volumes exist, which is what a machine looks like after the
-	// migration ran.
-	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 0}
-	fake.Response[orb+"volume inspect dev-agent-claude"] = runner.Result{ExitCode: 0}
-
+	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
 	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
 	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+
+	if err := r.EnsureVolume(context.Background(), a, "/home/me/proj"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := a.ConfigVolume("/home/me/proj")
+	var madeAuth, madeConfig bool
+	for _, c := range fake.Calls {
+		line := c.String()
+		if strings.Contains(line, "volume create "+a.AuthVolume()) {
+			madeAuth = true
+		}
+		if strings.Contains(line, "volume create "+cfg) {
+			madeConfig = true
+		}
+	}
+	if !madeAuth {
+		t.Errorf("did not create the shared auth volume:\n%s", callLines(fake))
+	}
+	if !madeConfig {
+		t.Errorf("did not create the per-project config volume:\n%s", callLines(fake))
+	}
+}
+
+// An upgrade: the single pre-split config volume exists and holds a login.
+// EnsureVolume seeds the auth volume from its credential — so the user is
+// not logged out — copying only .credentials.json, not the settings and
+// hooks beside it, which is the crossing this split closes.
+func TestEnsureVolumeSeedsAuthFromThePreSplitConfig(t *testing.T) {
+	fake := runner.NewFake()
+	const orb = "orb -m vm sudo docker "
+	// Auth absent; the pre-split config present.
+	fake.Response[orb+"volume inspect dev-agent-claude-auth"] = runner.Result{ExitCode: 1}
+	fake.Response[orb+"volume inspect dev-agent-claude-config"] = runner.Result{ExitCode: 0}
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+
+	if err := r.EnsureVolume(context.Background(), a, "/home/me/proj"); err != nil {
+		t.Fatal(err)
+	}
+	var seeded bool
+	for _, c := range fake.Calls {
+		line := c.String()
+		// The credential copy: from the pre-split config, to the auth
+		// volume, and only the credential file.
+		if strings.Contains(line, "source=dev-agent-claude-config") &&
+			strings.Contains(line, "source=dev-agent-claude-auth") &&
+			strings.Contains(line, ".credentials.json") {
+			seeded = true
+		}
+	}
+	if !seeded {
+		t.Fatalf("the login was not seeded from the pre-split config:\n%s", callLines(fake))
+	}
+}
+
+// Logout discards the login and every project's config. The state is now
+// spread across one volume per project, so it is found by prefix — and the
+// pre-split volume goes too, so nothing is left holding an old login for a
+// later run to copy back.
+func TestLogoutRemovesAuthAndEveryProjectConfig(t *testing.T) {
+	fake := runner.NewFake()
+	const orb = "orb -m vm sudo docker "
+	fake.Response[orb+"volume ls"] = runner.Result{
+		Stdout: "dev-agent-claude-auth\n" +
+			"dev-agent-claude-aaaa1111-config\n" +
+			"dev-agent-claude-bbbb2222-config\n" +
+			"dev-agent-codex-cccc3333-config\n" + // another agent, must be left
+			"dev-agent-claude-pro-dddd4444-config\n" + // name begins with claude, must be left
+			"some-unrelated-volume\n",
+	}
+	// Everything the logout will look at exists.
+	fake.Default = runner.Result{ExitCode: 0}
+
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude"}
 	if err := r.Logout(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
@@ -839,12 +824,23 @@ func TestLogoutDoesNotLeaveALoginToBeRestored(t *testing.T) {
 			removed[strings.TrimSpace(line[strings.LastIndex(line, " ")+1:])] = true
 		}
 	}
-	if !removed["dev-agent-claude-config"] {
-		t.Errorf("logout left the config volume; removed: %v", removed)
+	for _, want := range []string{
+		"dev-agent-claude-auth",
+		"dev-agent-claude-aaaa1111-config",
+		"dev-agent-claude-bbbb2222-config",
+	} {
+		if !removed[want] {
+			t.Errorf("logout left %s; removed: %v", want, removed)
+		}
 	}
-	if !removed["dev-agent-claude"] {
-		t.Errorf("logout left the volume it was migrated from, so the next run "+
-			"copies the login back in; removed: %v", removed)
+	if removed["dev-agent-codex-cccc3333-config"] {
+		t.Error("logout removed another agent's config volume")
+	}
+	if removed["dev-agent-claude-pro-dddd4444-config"] {
+		t.Error("logout removed a differently-named agent whose name begins with claude")
+	}
+	if removed["some-unrelated-volume"] {
+		t.Error("logout removed an unrelated volume")
 	}
 }
 
@@ -869,5 +865,67 @@ func TestTheOverlayMarkerFollowsTheBaseImage(t *testing.T) {
 		Options{Agent: a}), "sha256:aaa")
 	if first != second {
 		t.Error("the marker is not stable for identical inputs")
+	}
+}
+
+// A review's critical, invisible to the other tests because the fake
+// returns exit 0 by default: on a fresh install the auth volume is empty,
+// so the start-of-run credential copy finds nothing. If that aborted the
+// run, it would deadlock — no run because no login, no login because the
+// run is where you log in. EnsureVolume must succeed with an empty auth.
+func TestEnsureVolumeSucceedsWithNoLoginYet(t *testing.T) {
+	fake := runner.NewFake()
+	// No volumes exist, and the credential-copy container reports "nothing
+	// to copy" (the empty-auth case).
+	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
+	fake.Response["orb -m vm sudo docker run"] = runner.Result{ExitCode: 3}
+
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+	if err := r.EnsureVolume(context.Background(), a, "/home/me/proj"); err != nil {
+		t.Fatalf("a fresh install deadlocked: EnsureVolume returned %v", err)
+	}
+}
+
+// The seed copy-in must be conditional and locked, or it overwrites a token
+// this project just refreshed, or reads one another project is mid-write.
+// Asserted on the rendered container command, since the logic lives in the
+// shell it runs.
+func TestTheSeedCopyInIsConditionalAndLocked(t *testing.T) {
+	fake := runner.NewFake()
+	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+	if err := r.EnsureVolume(context.Background(), a, "/home/me/proj"); err != nil {
+		t.Fatal(err)
+	}
+	var seedCmd string
+	for _, c := range fake.Calls {
+		line := c.String()
+		if strings.Contains(line, "/auth/.synclock") && strings.Contains(line, "-nt /config") {
+			seedCmd = line
+		}
+	}
+	if seedCmd == "" {
+		t.Fatalf("the seed copy-in is not locked-and-conditional:\n%s", callLines(fake))
+	}
+}
+
+func TestIsOwnConfigVolumeDoesNotMatchAnotherAgentByPrefix(t *testing.T) {
+	claude := &Agent{Name: "claude"}
+	// Its own, and a legitimate id.
+	if !claude.isOwnConfigVolume("dev-agent-claude-a1b2c3d4-config") {
+		t.Error("claude did not recognize its own config volume")
+	}
+	// Another agent whose name begins with "claude". Its volume shares the
+	// prefix, so logout must not treat it as claude's.
+	for _, other := range []string{
+		"dev-agent-claude-pro-a1b2c3d4-config", // the hyphenated-name collision
+		"dev-agent-claude-a1b2c3d4-cache",      // wrong suffix
+		"dev-agent-claude-notahex-config",      // id is not a path hash
+	} {
+		if claude.isOwnConfigVolume(other) {
+			t.Errorf("claude wrongly claimed %q", other)
+		}
 	}
 }

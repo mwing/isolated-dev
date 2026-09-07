@@ -210,11 +210,12 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 
 	spec.Mounts = []container.Mount{
 		{Source: o.workspaceSource(), Target: WorkspacePath},
-		// The agent's config directory is a named volume, so an OAuth login
-		// survives across runs without any credential touching the project
-		// tree. The rest of the home is not: it would be a channel between
-		// projects that have no other route to each other.
-		{Source: a.VolumeName(), Target: a.ConfigDir, Volume: true},
+		// The agent's config directory is a per-project named volume, so
+		// settings, hooks and MCP state do not cross between projects. The
+		// login is shared separately (AuthVolume), copied in before the run
+		// and back after; nothing here mounts it, so a hook one project
+		// wrote is never seen by another.
+		{Source: a.ConfigVolume(o.Project), Target: a.ConfigDir, Volume: true},
 	}
 
 	// Agent defaults first, sandbox variables second: docker takes the
@@ -423,39 +424,199 @@ func (r *Runner) SocketGID(ctx context.Context, image, hostSock string) (string,
 	return r.Engine.StatGroup(ctx, image, hostSock, SSHSockPath)
 }
 
-// EnsureVolume creates the agent's config volume if absent, adopting the
-// ones the tool used before.
+// EnsureVolume prepares the two volumes a run needs: the shared auth
+// volume holding the login, and this project's own config volume.
 //
-// Two moves have happened here: the rename from dev2 to dev, and the
-// narrowing from the whole home directory to the config directory. Both
-// changed the name of a volume holding an OAuth login. Creating a fresh
-// empty one would look like a bug — the agent simply asks you to log in
-// again, with nothing to explain why — so the contents are carried over
-// once and the old volume is left in place for anyone who wants to be sure
-// before deleting it.
-func (r *Runner) EnsureVolume(ctx context.Context, a *Agent) error {
-	exists, err := r.Engine.VolumeExists(ctx, a.VolumeName())
+// The login is copied from the auth volume into the project's config
+// volume so the agent starts authenticated; SyncAuthBack copies a refreshed
+// login back afterward. A fresh install has neither volume and the first
+// run logs in; an upgrade from the single shared-config volume seeds the
+// auth volume from its credential once, so the login carries over while its
+// settings and hooks — the crossing this split closes — do not.
+func (r *Runner) EnsureVolume(ctx context.Context, a *Agent, projectDir string) error {
+	if err := r.ensureAuthVolume(ctx, a); err != nil {
+		return err
+	}
+
+	configVol := a.ConfigVolume(projectDir)
+	exists, err := r.Engine.VolumeExists(ctx, configVol)
 	if err != nil {
 		return err
 	}
 	if exists {
-		return r.repairVolumeOwner(ctx, a)
-	}
-	if err := r.Engine.VolumeCreate(ctx, a.VolumeName()); err != nil {
+		if err := r.repairVolumeOwner(ctx, a, configVol); err != nil {
+			return err
+		}
+	} else if err := r.Engine.VolumeCreate(ctx, configVol); err != nil {
 		return err
 	}
-	// No ownership repair on this path. A new volume is seeded from the
-	// image, and the image tag carries the uid, so the one that seeds it
-	// was built for the uid this run uses. Probing here would be a
-	// container started to confirm something already true.
-	return r.adoptLegacyVolume(ctx, a)
+	// Seed the login into this project's config from the shared auth volume.
+	// Done every run, not only on creation: the auth volume is the source of
+	// truth for the credential, and another project's run may have refreshed
+	// it since this project last ran.
+	return r.seedConfigFromAuth(ctx, a, configVol)
 }
 
-// legacyHomeVolumes are the volumes this one replaced, newest first. Each
-// held a whole home directory, so what is wanted out of it is the config
-// directory inside it rather than the lot.
+// seedConfigFromAuth copies the shared login into a project's config at the
+// start of a run.
+//
+// Three properties, each learned from a review:
+//   - It never errors on a missing login. A fresh install has an empty auth
+//     volume, and the first run has to reach the container to log in — an
+//     error here would deadlock: no run because no login, no login because
+//     no run.
+//   - It copies only when the shared login is strictly newer than the
+//     project's, or the project has none. Copying unconditionally would
+//     overwrite a token this project just refreshed but has not synced back
+//     yet, losing the refresh.
+//   - It holds the same lock SyncAuthBack takes, so a copy-in and another
+//     project's copy-back cannot interleave and read a half-written file.
+func (r *Runner) seedConfigFromAuth(ctx context.Context, a *Agent, configVol string) error {
+	cred := a.CredentialFile()
+	script := fmt.Sprintf(
+		"[ -f /auth/%s ] || exit 0; "+
+			"flock /auth/.synclock sh -c '"+
+			"if [ /auth/%s -nt /config/%s ] || [ ! -f /config/%s ]; then "+
+			"cp -p /auth/%s /config/%s && chown %d:%d /config/%s; fi'",
+		cred, cred, cred, cred, cred, cred,
+		container.HostUID(), container.HostGID(), cred)
+	spec := container.RunSpec{
+		Image:   "alpine",
+		Remove:  true,
+		User:    "0:0",
+		Command: []string{"sh", "-c", script},
+		Mounts: []container.Mount{
+			{Source: a.AuthVolume(), Target: "/auth", Volume: true},
+			{Source: configVol, Target: "/config", Volume: true},
+		},
+	}
+	if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
+		// Not fatal: the worst case is a login the run performs itself.
+		fmt.Fprintf(r.Out, "⚠  could not seed the shared login into this project: %v\n", err)
+	}
+	return nil
+}
+
+// ensureAuthVolume makes sure the shared auth volume exists, seeding it from
+// a pre-split config volume the first time so an upgrade does not force a
+// re-login.
+func (r *Runner) ensureAuthVolume(ctx context.Context, a *Agent) error {
+	exists, err := r.Engine.VolumeExists(ctx, a.AuthVolume())
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if err := r.Engine.VolumeCreate(ctx, a.AuthVolume()); err != nil {
+		return err
+	}
+	// Carry the login out of whichever pre-split volume has one — the
+	// single shared config, or an older home volume. Only the credential:
+	// the settings and hooks beside it are exactly what this split stops
+	// sharing. A fresh install has none of these, and the first run logs in.
+	for _, old := range append([]string{sharedConfigVolume(a)}, legacyHomeVolumes(a)...) {
+		has, verr := r.Engine.VolumeExists(ctx, old)
+		if verr != nil || !has {
+			continue
+		}
+		if err := r.copyCredential(ctx, a, old, a.AuthVolume(), false); err == nil {
+			fmt.Fprintf(r.Out, "Carried the %s login into a shared login volume; "+
+				"its per-project settings now start fresh in each project.\n", a.Name)
+			return nil
+		}
+	}
+	return nil
+}
+
+// legacyHomeVolumes are the volumes this one replaced, newest first.
 func legacyHomeVolumes(a *Agent) []string {
 	return []string{homeVolumeName(a), legacyVolumeName(a)}
+}
+
+// legacyVolumeName is what a volume was called before the tool was renamed.
+func legacyVolumeName(a *Agent) string { return "dev2-agent-" + a.Name }
+
+// copyCredential copies the login file between two volumes, chowning it to
+// the run's account when it lands in a config volume (toConfig). The source
+// path is relative to how the volume stored it: a config or auth volume
+// keeps the file at its top level; a pre-split home volume keeps it under
+// the config subdirectory.
+//
+// Best-effort: a missing source is not an error (nothing to carry, or a
+// first login still to come), and only a genuine copy failure is reported.
+// Used only to seed the auth volume once from a pre-split volume; the
+// per-run copy-in is seedConfigFromAuth, which is conditional and locked.
+func (r *Runner) copyCredential(ctx context.Context, a *Agent, from, to string, toConfig bool) error {
+	cred := a.CredentialFile()
+	fromPath := "/from/" + cred
+	// A pre-split home volume held the credential under the config dir.
+	if from == homeVolumeName(a) || from == legacyVolumeName(a) {
+		fromPath = "/from/" + strings.TrimPrefix(a.ConfigDir, HomePath+"/") + "/" + cred
+	}
+	chown := ""
+	if toConfig {
+		chown = fmt.Sprintf(" && chown %d:%d /to/%s",
+			container.HostUID(), container.HostGID(), cred)
+	}
+	spec := container.RunSpec{
+		Image:  "alpine",
+		Remove: true,
+		User:   "0:0",
+		Command: []string{"sh", "-c", fmt.Sprintf(
+			"if [ ! -f %s ]; then exit 3; fi; cp -p %s /to/%s%s",
+			fromPath, fromPath, cred, chown)},
+		Mounts: []container.Mount{
+			{Source: from, Target: "/from", Volume: true, ReadOnly: true},
+			{Source: to, Target: "/to", Volume: true},
+		},
+	}
+	res, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard)
+	if err != nil {
+		return err
+	}
+	if res.ExitCode == 3 {
+		return errNoCredential
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("copying the login: exit %d", res.ExitCode)
+	}
+	return nil
+}
+
+var errNoCredential = fmt.Errorf("no login to copy")
+
+// SyncAuthBack copies a refreshed login from this project's config volume
+// back to the shared auth volume, so a login or token refresh in one
+// project reaches the others. Only when the config copy is newer, and under
+// a lock on the auth volume so two projects finishing at once serialize
+// rather than clobbering.
+//
+// Best-effort and quiet: the run has already happened, and a failure here
+// costs at most one extra login later, never the run.
+func (r *Runner) SyncAuthBack(ctx context.Context, a *Agent, projectDir string) {
+	cred := a.CredentialFile()
+	// -nt is true when /config's credential is strictly newer, or when the
+	// auth volume has none yet (a first login). flock serializes writers.
+	script := fmt.Sprintf(
+		"[ -f /config/%s ] || exit 0; "+
+			"flock /auth/.synclock sh -c '"+
+			"if [ /config/%s -nt /auth/%s ] || [ ! -f /auth/%s ]; then "+
+			"cp -p /config/%s /auth/%s; fi'",
+		cred, cred, cred, cred, cred, cred)
+	spec := container.RunSpec{
+		Image:   "alpine",
+		Remove:  true,
+		User:    "0:0",
+		Command: []string{"sh", "-c", script},
+		Mounts: []container.Mount{
+			{Source: a.ConfigVolume(projectDir), Target: "/config", Volume: true, ReadOnly: true},
+			{Source: a.AuthVolume(), Target: "/auth", Volume: true},
+		},
+	}
+	if _, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard); err != nil {
+		fmt.Fprintf(r.Out, "⚠  could not sync the login back to the shared volume: %v\n", err)
+	}
 }
 
 // repairVolumeOwner makes an existing config volume belong to the uid the
@@ -472,13 +633,8 @@ func legacyHomeVolumes(a *Agent) []string {
 //
 // Checked before changing anything, because doing it every run would be a
 // chown nobody asked for.
-func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
+func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent, configVol string) error {
 	want := fmt.Sprintf("%d:%d", container.HostUID(), container.HostGID())
-
-	// The volume mounts where the agent expects its config, so that is
-	// where the ownership has to be right — a chown of the home directory
-	// would now be a chown of the container's own filesystem, which is
-	// discarded when the run ends.
 	target := a.ConfigDir
 
 	var out bytes.Buffer
@@ -488,7 +644,7 @@ func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
 		User:    "0:0",
 		Command: []string{"stat", "-c", "%u:%g", target},
 		Mounts: []container.Mount{
-			{Source: a.VolumeName(), Target: target, Volume: true},
+			{Source: configVol, Target: target, Volume: true},
 		},
 	}
 	if _, err := r.Engine.Run(ctx, probe, nil, &out, io.Discard); err != nil {
@@ -506,94 +662,11 @@ func (r *Runner) repairVolumeOwner(ctx context.Context, a *Agent) error {
 		fmt.Fprintf(r.Out, "⚠  %s belongs to %s and this run is %s, so the agent may not be\n"+
 			"   able to save its login. Repair it with:\n"+
 			"     docker run --rm -u 0 -v %s:%s alpine chown -R %s %s\n",
-			a.VolumeName(), strings.TrimSpace(out.String()), want,
-			a.VolumeName(), target, want, target)
+			configVol, strings.TrimSpace(out.String()), want,
+			configVol, target, want, target)
 		return nil
 	}
-	fmt.Fprintf(r.Out, "Adjusted %s to uid %s, which this run uses.\n", a.VolumeName(), want)
-	return nil
-}
-
-// legacyVolumeName is what this volume was called before the tool was
-// renamed. It can be deleted once nobody is upgrading across that change.
-func legacyVolumeName(a *Agent) string { return "dev2-agent-" + a.Name }
-
-func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
-	for _, old := range legacyHomeVolumes(a) {
-		exists, err := r.Engine.VolumeExists(ctx, old)
-		if err != nil {
-			// Said rather than read as "there is no old volume". A daemon
-			// that cannot answer is not a daemon with nothing to carry, and
-			// the difference is a login.
-			fmt.Fprintf(r.Out, "⚠  could not check for %s, so a stored login may "+
-				"not have been carried over: %v\n", old, err)
-			continue
-		}
-		if !exists {
-			continue
-		}
-		// The source held a home directory, so the config directory is a
-		// subdirectory of it. Only that is carried over: the rest is what
-		// this change stopped persisting, and copying it forward would
-		// undo the change on every machine that had already run an agent.
-		rel := strings.TrimPrefix(a.ConfigDir, HomePath+"/")
-		if rel == a.ConfigDir {
-			// A config directory outside the home was never in that volume,
-			// so there is nothing of this agent's in it to carry.
-			continue
-		}
-		from := "/from/" + rel
-
-		// Copied inside a container because the volumes live in the VM, not
-		// on the host. Failure is reported and not fatal: the worst case is
-		// one login, and refusing to run the agent over it would be worse.
-		//
-		// The exit status is the whole point of the shape here. An earlier
-		// version ended in `|| true`, so it always succeeded — and then
-		// printed "carried the stored login" and told the user to delete the
-		// volume it had just failed to read. A claim followed by advice to
-		// delete the only copy is worse than no migration at all. Nothing
-		// there to copy is not a failure; a copy that broke, or a chown that
-		// did not stick, is.
-		spec := container.RunSpec{
-			Image:  "alpine",
-			Remove: true,
-			User:   "0:0",
-			Command: []string{"sh", "-c", fmt.Sprintf(
-				"if [ ! -d %s ]; then echo nothing-to-carry; exit 3; fi; "+
-					"cp -a %s/. /to/ && chown -R %d:%d /to",
-				from, from, container.HostUID(), container.HostGID())},
-			Mounts: []container.Mount{
-				{Source: old, Target: "/from", Volume: true, ReadOnly: true},
-				{Source: a.VolumeName(), Target: "/to", Volume: true},
-			},
-		}
-		res, err := r.Engine.Run(ctx, spec, nil, io.Discard, io.Discard)
-		switch {
-		case err != nil:
-			fmt.Fprintf(r.Out, "⚠  could not carry %s over to %s: %v\n", old, a.VolumeName(), err)
-			return nil
-		case res.ExitCode == 3:
-			// The old volume exists but this agent never stored anything in
-			// it. Silent: there is nothing for the user to do, and a warning
-			// about a volume they may not know they have is noise.
-			continue
-		case res.ExitCode != 0:
-			fmt.Fprintf(r.Out, "⚠  %s holds a login and copying it into %s failed "+
-				"(exit %d), so the agent may ask you to log in again.\n",
-				old, a.VolumeName(), res.ExitCode)
-			fmt.Fprintf(r.Out, "   Keep %s: it is still the only copy.\n", old)
-			return nil
-		}
-		fmt.Fprintf(r.Out, "Carried the stored login from %s into %s.\n", old, a.VolumeName())
-		fmt.Fprintf(r.Out, "  %s now holds the agent's configuration only, so nothing else\n",
-			a.VolumeName())
-		fmt.Fprintf(r.Out, "  in its home carries between projects. The old volume is left\n")
-		fmt.Fprintf(r.Out, "  alone until you say otherwise — `dev agent logout %s` discards\n", a.Name)
-		fmt.Fprintf(r.Out, "  both, or remove it now with:\n")
-		fmt.Fprintf(r.Out, "    docker volume rm %s\n", old)
-		return nil
-	}
+	fmt.Fprintf(r.Out, "Adjusted %s to uid %s, which this run uses.\n", configVol, want)
 	return nil
 }
 
@@ -611,22 +684,42 @@ func (r *Runner) adoptLegacyVolume(ctx context.Context, a *Agent) error {
 // version no longer keeps; leaving either behind after "discard my login"
 // would be the tool deciding it knows better.
 func (r *Runner) Logout(ctx context.Context, a *Agent) error {
-	if err := r.Engine.VolumeRemove(ctx, a.VolumeName()); err != nil {
+	// The shared login, and every project's config volume: logout discards
+	// the agent's state, and its state is now spread across one volume per
+	// project. Found by prefix, since the projects are not known ahead of
+	// time. The pre-split and legacy volumes go too, so nothing is left
+	// holding an old copy of the login.
+	if err := r.Engine.VolumeRemove(ctx, a.AuthVolume()); err != nil {
 		return err
 	}
-	for _, old := range legacyHomeVolumes(a) {
-		exists, err := r.Engine.VolumeExists(ctx, old)
-		if err != nil || !exists {
+	listed, err := r.Engine.VolumeList(ctx, a.configVolumePrefix())
+	if err != nil {
+		return err
+	}
+	// The prefix `dev-agent-<name>-` also matches another agent whose name
+	// begins with this one — `claude` matches `claude-pro` — since agent
+	// names may contain hyphens. So each listed volume is confirmed to be
+	// this agent's own config before removal.
+	var configVols []string
+	for _, v := range listed {
+		if a.isOwnConfigVolume(v) {
+			configVols = append(configVols, v)
+		}
+	}
+	remove := append(configVols, sharedConfigVolume(a))
+	remove = append(remove, legacyHomeVolumes(a)...)
+	for _, v := range remove {
+		if v == a.AuthVolume() {
+			continue // already removed
+		}
+		exists, verr := r.Engine.VolumeExists(ctx, v)
+		if verr != nil || !exists {
 			continue
 		}
-		if err := r.Engine.VolumeRemove(ctx, old); err != nil {
-			fmt.Fprintf(r.Out, "⚠  %s still holds a copy of the login and could not "+
-				"be removed: %v\n", old, err)
-			fmt.Fprintf(r.Out, "   Remove it with: docker volume rm %s\n", old)
-			continue
+		if rerr := r.Engine.VolumeRemove(ctx, v); rerr != nil {
+			fmt.Fprintf(r.Out, "⚠  %s could not be removed: %v\n   Remove it with: "+
+				"docker volume rm %s\n", v, rerr, v)
 		}
-		fmt.Fprintf(r.Out, "Removed %s as well: it held the copy this volume was "+
-			"migrated from.\n", old)
 	}
 	return nil
 }

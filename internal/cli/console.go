@@ -197,6 +197,10 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		if err != nil {
 			return err
 		}
+		// A login or refresh during the session lands in this project's
+		// config volume; copy it back to the shared login on the way out.
+		runner := &agent.Runner{Engine: eng, Out: env.Stderr}
+		defer runner.SyncAuthBack(context.WithoutCancel(ctx), agentOpts.Agent, p.Dir)
 		if workspaceDir != "" {
 			agentOpts.Workspace = workspaceDir
 		}
@@ -468,7 +472,7 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	if err != nil {
 		return nil, "", nil, err
 	}
-	if err := runner.EnsureVolume(ctx, a); err != nil {
+	if err := runner.EnsureVolume(ctx, a, p.Dir); err != nil {
 		return nil, "", nil, err
 	}
 

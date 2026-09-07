@@ -245,7 +245,8 @@ func newAgentLogoutCmd(env *Env) *cobra.Command {
 			if err := runner.Logout(cmd.Context(), a); err != nil {
 				return err
 			}
-			fmt.Fprintf(env.Stdout, "Removed %s (volume %s).\n", a.Name, a.VolumeName())
+			fmt.Fprintf(env.Stdout, "Logged out %s: removed its shared login and "+
+				"every project's config.\n", a.Name)
 			return nil
 		},
 	}
@@ -778,9 +779,12 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	if err != nil {
 		return err
 	}
-	if err := runner.EnsureVolume(ctx, a); err != nil {
+	if err := runner.EnsureVolume(ctx, a, opts.Project); err != nil {
 		return err
 	}
+	// A login or token refresh during the run lives in this project's config
+	// volume; copy it back to the shared login so the next project sees it.
+	defer runner.SyncAuthBack(context.WithoutCancel(ctx), a, opts.Project)
 
 	// Host file sharing decides the group that owns a forwarded socket, so
 	// it has to be read from inside a container rather than stat'ed here.
@@ -876,7 +880,8 @@ func authDescription(o agent.Options) string {
 		}
 		return "env (" + strings.Join(names, ", ") + ")"
 	}
-	return "volume " + o.Agent.VolumeName() + " (no host credentials)"
+	return "shared login " + o.Agent.AuthVolume() + ", config " +
+		o.Agent.ConfigVolume(o.Project) + " (per project, no host credentials)"
 }
 
 // projectSlug derives a docker-safe name fragment from a path.

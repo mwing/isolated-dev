@@ -385,6 +385,27 @@ func (e *Engine) VolumeRemove(ctx context.Context, name string) error {
 	return check(res, nil, "removing volume "+name)
 }
 
+// VolumeList returns the names of volumes whose name begins with prefix.
+// Used by logout to find an agent's per-project config volumes, which are
+// one per project and so cannot be named ahead of time.
+func (e *Engine) VolumeList(ctx context.Context, prefix string) ([]string, error) {
+	res, err := e.docker(ctx, "volume", "ls", "--format", "{{.Name}}")
+	if err != nil {
+		return nil, err
+	}
+	if err := check(res, nil, "listing volumes"); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && strings.HasPrefix(name, prefix) {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
 // VolumeExists reports whether a named volume is present.
 func (e *Engine) VolumeExists(ctx context.Context, name string) (bool, error) {
 	res, err := e.docker(ctx, "volume", "inspect", name)

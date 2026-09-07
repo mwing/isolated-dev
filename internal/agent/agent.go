@@ -7,7 +7,6 @@ package agent
 
 import (
 	"fmt"
-	"github.com/mwing/isolated-dev/internal/container"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,6 +14,9 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+
+	"github.com/mwing/isolated-dev/internal/container"
+	"github.com/mwing/isolated-dev/internal/project"
 )
 
 // Agent describes one coding agent.
@@ -189,32 +191,64 @@ func (a *Agent) Source() string {
 	return a.source
 }
 
-// VolumeName is the named volume holding the agent's configuration and
-// credentials. It is scoped per agent, not per project, so one login serves
-// every project.
+// ConfigVolume is the named volume holding an agent's configuration for one
+// project, mounted at ConfigDir. It is per project, so the config directory
+// — settings.json with its hooks, the MCP files and their auth, history,
+// session state — does not cross between projects. An agent working in
+// project A can no longer leave a hook or an MCP grant that an agent in
+// project B consumes: two projects with no route to each other on the
+// network and none through the config volume either.
 //
-// It covers the config directory and nothing else. It used to be the whole
-// home directory, which made it a channel between projects: an agent
-// working in project A could write a shell profile, a git config or an MCP
-// setting that an agent in project B then read, with no route between them
-// on the network and none intended here either. Everything outside the
-// config directory now lives and dies with the container, as it already
-// does for `dev run` and `dev shell`.
-//
-// What remains shared is the config directory itself, and that is inherent:
-// one login means one place the credential lives, and the agents that keep
-// a credential keep their settings beside it. See ConfigEnv.
-//
-// Named precisely, because "settings" undersells it. For the claude
-// built-in that directory holds settings.json, which can declare hooks —
-// commands the next run executes — as well as env and permissions. So an
-// agent working in project A can still arrange for a command to run in
-// project B's container. What this change removed is everything else: the
-// shell profile, the git config, the caches, the MCP files outside the
-// config directory. The remaining channel is the price of one login, and
-// closing it means a config directory per project, which is a login per
-// project. See BACKLOG B27.
-func (a *Agent) VolumeName() string { return "dev-agent-" + a.Name + "-config" }
+// The login is the one thing that stays shared, in AuthVolume, because one
+// login per project would be a login per project. The tool copies the
+// credential from AuthVolume into this volume at the start of a run and
+// back at the end if it changed. See BACKLOG B27, B37.
+func (a *Agent) ConfigVolume(projectDir string) string {
+	return "dev-agent-" + a.Name + "-" + project.PathID(projectDir) + "-config"
+}
+
+// configVolumePrefix matches every project's config volume for this agent,
+// so logout can find them all. It is a coarse filter: another agent whose
+// name begins with this one shares the prefix, so a listed name is
+// confirmed with isOwnConfigVolume before anything is removed.
+func (a *Agent) configVolumePrefix() string { return "dev-agent-" + a.Name + "-" }
+
+// isOwnConfigVolume reports whether name is exactly one of this agent's
+// per-project config volumes: the prefix, a path id, then "-config", and
+// nothing that belongs to a differently-named agent.
+func (a *Agent) isOwnConfigVolume(name string) bool {
+	mid, ok := strings.CutPrefix(name, a.configVolumePrefix())
+	if !ok {
+		return false
+	}
+	id, ok := strings.CutSuffix(mid, "-config")
+	if !ok || id == "" || strings.Contains(id, "-") {
+		return false
+	}
+	for _, r := range id {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// AuthVolume is the shared volume holding only the agent's login
+// (.credentials.json). One login serves every project; everything else the
+// agent stores is per-project in ConfigVolume.
+func (a *Agent) AuthVolume() string { return "dev-agent-" + a.Name + "-auth" }
+
+// CredentialFile is the login file inside ConfigDir that AuthVolume holds a
+// shared copy of. Claude Code keeps its OAuth token here; it is the only
+// part of the config that is shared across projects.
+func (a *Agent) CredentialFile() string { return ".credentials.json" }
+
+// sharedConfigVolume is what a single per-agent config volume was called
+// before configuration was split per project. It is a migration source: its
+// credential seeds AuthVolume so the login carries over, and nothing else
+// is taken, because carrying its settings and hooks forward is the crossing
+// this change closes.
+func sharedConfigVolume(a *Agent) string { return "dev-agent-" + a.Name + "-config" }
 
 // homeVolumeName is what the volume was called while it held the whole home
 // directory. Its config directory is carried into the new volume once.

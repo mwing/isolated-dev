@@ -854,6 +854,58 @@ restricted container rather than quarantining config paths on the host — is
 the right long-term direction and is recorded under the 1.0 plan, not done
 here.
 
+### B37. Project-scoped agent config, shared login — `done`
+
+The residual B27 left, and an external review's point 4: the agent config
+volume was one per agent, shared across every project. It holds
+`settings.json`, which can declare hooks — commands the next run executes —
+and the local MCP config and its auth. So an agent in project A could
+leave a hook or an MCP grant that an agent in project B consumed: a
+persistence channel between two projects that are otherwise sandboxed from
+each other.
+
+Now the config volume is per project (`dev-agent-<name>-<pathid>-config`,
+reusing B36's `PathID`), mounted at the config directory, so none of that
+crosses. The one thing that should stay shared — the login — is held in a
+separate `dev-agent-<name>-auth` volume and synced: the credential is
+copied into a project's config at the start of a run and, if it was
+refreshed, back to the auth volume at the end, under a flock so two
+projects finishing at once serialize. This composes with the MCP work:
+`--allow-mcp` gates the connector at the network, and per-project config
+scopes the *local* MCP servers and their auth tokens, so authorizing a
+connector in one project does not carry to another. (The cloud connectors
+remain account-level and server-fetched — the egress gate is still their
+only control.)
+
+On the credential race a review would ask about: it is no worse than the
+old single-volume model and better overall. Two concurrent runs used to
+mount one config volume and race on the credential *and* the settings and
+history directly; now only the credential is shared, its write-back is
+serialized and newest-wins, and everything else is isolated.
+
+Migration is login-only by the user's choice: the first run after upgrade
+seeds the auth volume from the pre-split config's credential — so no
+re-login — and each project's config starts clean. The old shared volume
+is kept, not deleted, so nothing is lost. `dev agent logout` now removes
+the shared login and every project's config, found by prefix.
+
+A coderabbit review caught a critical the live test missed: it exercised
+the *upgrade* path, where the auth volume is seeded non-empty, and not the
+*fresh install*, where it is empty. There the start-of-run credential copy
+found nothing, returned an error, and aborted the run before the container
+that would let you log in — a deadlock for every new user. The seed is now
+best-effort (no login is not an error), conditional (it copies only when
+the shared login is newer, so it cannot overwrite a token this project just
+refreshed), and holds the same lock as the sync-back (so a copy-in and
+another project's copy-back cannot read a half-written file). And logout's
+prefix match is tightened so `logout claude` cannot remove a `claude-pro`
+agent's volumes.
+
+Verified live both ways: an upgrade seeds auth from the existing login and
+the per-project config holds only the copied credential; a fresh install
+(no volumes at all) reaches the container and prompts for login rather than
+deadlocking.
+
 ## P2 — later, and only if wanted
 
 ### B28. Test the invariants, not the features — `done`

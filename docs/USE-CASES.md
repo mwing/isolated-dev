@@ -417,9 +417,18 @@ and its API endpoint. What it does not get: your keys, your environment,
 any host path but the project.
 
 The rest of its home is not kept. Only the configuration directory
-persists, and it persists per agent rather than per project — so one login
-serves every repository, and nothing else an agent writes in one project is
-there to be read in the next.
+persists, and it persists **per project**: an agent's settings, its hooks,
+its MCP setup and history live in a volume tied to that repository, so a
+hook or an MCP grant made in one project is not there for an agent in
+another to consume.
+
+The **login** is the one thing shared across projects — logging in per
+repository would be tedious and pointless. The tool keeps it in a separate
+shared volume and copies it into each project's config at the start of a
+run, and a refreshed login back out at the end, so you authenticate once
+and every project sees it. On first upgrade the existing login carries over
+automatically; each project's config starts fresh (your old settings are
+left in place, not deleted, if you want to copy anything across by hand).
 
 **MCP connectors are off unless you ask.** A claude.ai account's connectors
 — Gmail, Linear, Notion — reach accounts *outside* the sandbox with live
