@@ -1,0 +1,103 @@
+name: Tap token health
+
+# The tap token is a fine-grained PAT, and fine-grained PATs expire. The
+# failure lands at the worst possible moment: an expired-but-present token
+# fails the release mid-publish, during a tag, at the cask step — after the
+# binaries are already up. (An *absent* token degrades gracefully; a dead
+# one does not.)
+#
+# So the token is checked on a schedule, while there is still time to
+# rotate, and on demand (workflow_dispatch) right after a rotation to
+# confirm the new token actually works — the check a human cannot do
+# locally, because the secret is only readable inside Actions.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday morning. Paired with the 21-day threshold below, an
+    # expiry is warned about at least three Mondays before it lands.
+    #
+    # Known limit, accepted: GitHub disables scheduled workflows after ~60
+    # days without repo activity. A repo that quiet is not cutting releases
+    # either, and workflow_dispatch still works for checking a rotation.
+    - cron: "17 6 * * 1"
+
+# The job needs no access to this repository at all: it exercises only the
+# tap token it is given.
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Token can write to the tap, and is not about to expire
+        env:
+          # In env, never interpolated into the script: an expression in
+          # `run:` would put the secret into the rendered command, where a
+          # shell trace or an error message could echo it.
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_GITHUB_TOKEN:-}" ]; then
+            echo "::error::TAP_GITHUB_TOKEN is not set; releases will publish without updating the brew tap"
+            exit 1
+          fi
+
+          # A real write, not permission introspection. The repos API has a
+          # permissions.push field, but whose permissions it reflects for a
+          # fine-grained PAT — the token's grants or the owner's role — is
+          # not documented, and a check that false-passes is worse than
+          # none. Creating a blob is a write by definition: only a
+          # Contents:write credential gets a 201. The content is fixed, so
+          # every run produces the same blob sha — one unreferenced,
+          # invisible, GC-able object ever, not one per week.
+          #
+          # No -L, deliberately: curl forwards the Authorization header to
+          # cross-host redirect targets, so following a redirect could hand
+          # the token elsewhere. A renamed repo fails loudly instead.
+          headers=$(mktemp)
+          body=$(mktemp)
+          code=$(curl -sS --retry 3 -o "$body" -D "$headers" -w '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer ${TAP_GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d '{"content":"dev tap-token probe","encoding":"utf-8"}' \
+            https://api.github.com/repos/mwing/homebrew-tap/git/blobs) || code=000
+
+          case "$code" in
+            201) echo "tap token OK: wrote a probe blob to the tap" ;;
+            000)
+              echo "::error::could not reach api.github.com — a network problem, not necessarily the token"
+              exit 1 ;;
+            401)
+              echo "::error::the tap token is expired or revoked. Rotate it: fine-grained PAT, repo mwing/homebrew-tap only, Contents read/write, then 'gh secret set TAP_GITHUB_TOKEN'."
+              exit 1 ;;
+            403|404)
+              echo "::error::the tap token cannot write to mwing/homebrew-tap (HTTP $code), so the release will fail at the cask step. Recreate it with Contents: read and write."
+              exit 1 ;;
+            *)
+              echo "::error::unexpected HTTP $code from the tap write probe"
+              exit 1 ;;
+          esac
+
+          # Fine-grained PATs report their expiry in a response header; a
+          # non-expiring credential simply has none.
+          exp=$(grep -i '^github-authentication-token-expiration:' "$headers" \
+            | cut -d' ' -f2- | tr -d '\r' || true)
+          if [ -n "$exp" ]; then
+            # Parsed defensively: an unparseable date must say so, not feed
+            # garbage into the arithmetic and report "expires in -20000
+            # days".
+            if exp_s=$(date -d "$exp" +%s 2>/dev/null); then
+              days=$(( (exp_s - $(date +%s)) / 86400 ))
+              echo "token expires $exp ($days day(s) from now)"
+              if [ "$days" -lt 21 ]; then
+                echo "::error::the tap token expires in $days day(s); rotate TAP_GITHUB_TOKEN now, before a release fails mid-publish"
+                exit 1
+              fi
+            else
+              echo "::warning::could not parse the token expiration \"$exp\"; check it by eye"
+            fi
+          else
+            echo "token reports no expiration"
+          fi
