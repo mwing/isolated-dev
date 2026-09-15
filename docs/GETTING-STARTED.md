@@ -184,8 +184,17 @@ If that file is a hardened multi-stage build ending in a slim runtime,
 you get a container with your app and no shell tools, no test runner, no
 git. Nothing broke; it is simply not a dev environment. Options:
 
-- **Use the language template instead** — rename or move the production
-  Dockerfile out of the root, or work from a subdirectory that has none.
+- **Use the language template instead.** Once, for this project:
+
+  ```yaml
+  # .devenv.yaml
+  build_source: template
+  ```
+
+  Or for a single command: `dev shell --build-source template`. Your
+  Dockerfile stays where it is and keeps doing its job; dev simply builds
+  a stock image for the detected language instead. This is the usual
+  answer for a repository whose Dockerfile is its production image.
 - **Write a devcontainer.json** naming a dev image; dev reads it.
 - **Add a dev Dockerfile** deliberately, with the tools you need.
 

@@ -112,6 +112,7 @@ func (p PassEnv) Resolve(environ []string) []string {
 type File struct {
 	VMName          *string `yaml:"vm_name"`
 	DefaultTemplate *string `yaml:"default_template"`
+	BuildSource     *string `yaml:"build_source"`
 	ContainerPrefix *string `yaml:"container_prefix"`
 	AutoStartVM     *bool   `yaml:"auto_start_vm"`
 	MemoryLimit     *string `yaml:"memory_limit"`
@@ -149,8 +150,14 @@ type File struct {
 
 // Config is the resolved configuration.
 type Config struct {
-	VMName            string
-	DefaultTemplate   string
+	VMName          string
+	DefaultTemplate string
+	// BuildSource fixes what a build uses. Only "template" is meaningful:
+	// it ignores a repository's own Dockerfile, which narrows what runs and
+	// so needs no consent. "project" is deliberately not accepted here —
+	// that is the repository being trusted to supply build instructions,
+	// which is what `dev accept build_source` records per project.
+	BuildSource       string
 	ContainerPrefix   string
 	AutoStartVM       bool
 	MemoryLimit       string
@@ -248,6 +255,10 @@ func (c *Config) merge(f File, o Origin) {
 	if f.DefaultTemplate != nil {
 		c.DefaultTemplate = *f.DefaultTemplate
 		c.origins["default_template"] = o
+	}
+	if f.BuildSource != nil {
+		c.BuildSource = strings.TrimSpace(*f.BuildSource)
+		c.origins["build_source"] = o
 	}
 	if f.ContainerPrefix != nil {
 		c.ContainerPrefix = *f.ContainerPrefix
@@ -391,6 +402,7 @@ var deadKeys = map[string]string{
 var knownKeys = map[string]bool{
 	"vm_name":             true,
 	"default_template":    true,
+	"build_source":        true,
 	"container_prefix":    true,
 	"auto_start_vm":       true,
 	"memory_limit":        true,

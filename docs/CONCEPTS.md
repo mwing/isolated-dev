@@ -348,7 +348,12 @@ what your machine reached is not the repository's business.
   what a build fetches is governed by pinning. See ROADMAP 4.3.1. Because
   of that, a repository's own `Dockerfile` is not built until you accept it
   once — `dev accept build_source`, or `--build-source template` to build a
-  stock image for the language and ignore the file entirely.
+  stock image for the language and ignore the file entirely. Set
+  `build_source: template` to make that the standing answer for a project
+  whose Dockerfile is its production image. Configuration may pick the
+  template, never the Dockerfile: choosing the template narrows what runs,
+  while trusting the repository's own instructions is the decision
+  `dev accept` exists to record.
 
 ---
 

@@ -40,7 +40,7 @@ func resolveProject(env *Env) (config.Config, *project.Project, error) {
 }
 
 func newBuildCmd(env *Env) *cobra.Command {
-	var platform string
+	var platform, buildSource string
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Build this project's image",
@@ -50,19 +50,21 @@ func newBuildCmd(env *Env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return buildImage(cmd.Context(), env, cfg, p, platform)
+			return buildImageWith(cmd.Context(), env, cfg, p, platform, false, buildSource)
 		},
 	}
 	cmd.Flags().StringVar(&platform, "platform", "", "target platform, e.g. linux/amd64")
+	cmd.Flags().StringVar(&buildSource, "build-source", "",
+		"what to build: project (its Dockerfile) or template (the language's)")
 	return cmd
 }
 
 func buildImage(ctx context.Context, env *Env, cfg config.Config, p *project.Project, platform string) error {
-	return buildImageWith(ctx, env, cfg, p, platform, false)
+	return buildImageWith(ctx, env, cfg, p, platform, false, "")
 }
 
 func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project.Project,
-	platform string, noCache bool) error {
+	platform string, noCache bool, buildSource string) error {
 	// The last gate before instructions from the repository run over an
 	// unfiltered network. It is here rather than at each caller because a
 	// build is the thing being consented to, and every path to one — run,
@@ -71,8 +73,14 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	if err != nil {
 		return err
 	}
-	if !buildSourceAccepted(p, store) {
-		return resolveBuildSource(env, p, store, "")
+	choice, err := buildSourceChoice(buildSource, cfg)
+	if err != nil {
+		return err
+	}
+	if choice != "" || !buildSourceAccepted(p, store) {
+		if err := resolveBuildSource(env, p, store, choice); err != nil {
+			return err
+		}
 	}
 
 	dockerfile, err := p.RenderedDockerfile()
@@ -228,7 +236,7 @@ func imageIsCurrent(ctx context.Context, eng *container.Engine, cfg config.Confi
 // buildImageNoCache rebuilds every layer, which is what an update needs:
 // a cached install layer reinstalls exactly what it installed before.
 func buildImageNoCache(ctx context.Context, env *Env, cfg config.Config, p *project.Project) error {
-	return buildImageWith(ctx, env, cfg, p, "", true)
+	return buildImageWith(ctx, env, cfg, p, "", true, "")
 }
 
 func newRunCmd(env *Env) *cobra.Command {
@@ -471,11 +479,14 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 	if err != nil {
 		return err
 	}
-	// An explicit --build-source is applied before consent is checked:
-	// choosing the template removes the request rather than answering it,
-	// so a repository whose Dockerfile you never intend to build should not
-	// have to be accepted first.
-	if err := resolveBuildSource(env, p, store, o.BuildSource); err != nil {
+	// Applied before consent is checked: choosing the template removes the
+	// request rather than answering it, so a repository whose Dockerfile you
+	// never intend to build need not be accepted first.
+	choice, err := buildSourceChoice(o.BuildSource, cfg)
+	if err != nil {
+		return err
+	}
+	if err := resolveBuildSource(env, p, store, choice); err != nil {
 		return err
 	}
 	// A project file is a request; running the project is not consent.
@@ -544,7 +555,7 @@ func runWorkspace(ctx context.Context, env *Env, o workspaceOpts) error {
 			}
 		}
 		if o.Rebuild || !exists || !current {
-			if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+			if err := buildImageWith(ctx, env, cfg, p, "", false, o.BuildSource); err != nil {
 				return err
 			}
 		}

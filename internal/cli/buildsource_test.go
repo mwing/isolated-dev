@@ -252,3 +252,97 @@ func TestAnImageBuiltFromTheseInstructionsIsReused(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildSourceTemplateCanBeConfigured(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeLanguage(t, "demo", "name: demo\nversions: [\"1\"]\ndetection:\n  files: [demo.toml]\n")
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "demo.toml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDockerfile(t, h, "FROM alpine\nRUN echo production\n")
+	h.writeProject(t, "build_source: template\n")
+
+	if err := h.run(t, "run", "--tty", "off", "-c", "true"); err != nil {
+		t.Fatalf("a configured template still demanded consent: %v\n%s", err, h.stderr.String())
+	}
+	if strings.Contains(h.stdout.String(), "Dockerfile: "+filepath.Join(h.paths.ProjectDir, "Dockerfile")) {
+		t.Errorf("the project's own Dockerfile was built anyway:\n%s", h.stdout.String())
+	}
+}
+
+// Configuration may narrow what runs, never widen it.
+func TestBuildSourceProjectIsRefusedFromConfig(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\n")
+	h.writeProject(t, "build_source: project\n")
+
+	err := h.run(t, "run", "--tty", "off", "-c", "true")
+	if err == nil {
+		t.Fatal("a project file granted itself the build consent")
+	}
+	if !strings.Contains(err.Error(), "dev accept") {
+		t.Errorf("the refusal does not name the real way to record it: %v", err)
+	}
+}
+
+func TestBuildCommandTakesBuildSource(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.writeLanguage(t, "demo", "name: demo\nversions: [\"1\"]\ndetection:\n  files: [demo.toml]\n")
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "demo.toml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDockerfile(t, h, "FROM alpine\nRUN echo production\n")
+
+	if err := h.run(t, "build", "--build-source", "template"); err != nil {
+		t.Fatalf("dev build --build-source template: %v\n%s", err, h.stderr.String())
+	}
+	if !strings.Contains(h.stdout.String(), "language template") {
+		t.Errorf("dev build did not use the template:\n%s", h.stdout.String())
+	}
+}
+
+// The flag wins over configuration at every layer. buildImageWith used to
+// re-derive the choice with no knowledge of the flag, so a run could be
+// told one thing and build another.
+func TestAnExplicitFlagBeatsTheConfiguredBuildSource(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	h.writeLanguage(t, "demo", "name: demo\nversions: [\"1\"]\ndetection:\n  files: [demo.toml]\n")
+	if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "demo.toml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDockerfile(t, h, "FROM alpine\n")
+
+	// Configured to refuse; the flag must still rescue the run.
+	h.writeProject(t, "build_source: project\n")
+	if err := h.run(t, "build", "--build-source", "template"); err != nil {
+		t.Fatalf("--build-source template did not override build_source: project: %v\n%s",
+			err, h.stderr.String())
+	}
+	if !strings.Contains(h.stdout.String(), "language template") {
+		t.Errorf("the flag did not select the template:\n%s", h.stdout.String())
+	}
+}
+
+// The marker distinguishing a configured template from a flagged one is
+// internal; typing it must not reach that branch.
+func TestTheConfigSentinelIsNotAValidFlag(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	writeDockerfile(t, h, "FROM alpine\n")
+
+	err := h.run(t, "build", "--build-source", configuredTemplate)
+	if err == nil {
+		t.Fatal("the internal marker was accepted as a flag value")
+	}
+	if !strings.Contains(err.Error(), "unknown --build-source") {
+		t.Errorf("the refusal does not read as a bad flag value: %v", err)
+	}
+}

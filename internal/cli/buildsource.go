@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mwing/isolated-dev/internal/config"
 	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -32,6 +33,41 @@ import (
 // buildSourceKey is the consent key. It sits with the other settings so it
 // is reviewed by the same `dev accept` and recorded in the same file.
 const buildSourceKey = "build_source"
+
+// configuredTemplate marks a choice that came from `build_source: template`
+// in a config file rather than from the flag, so the error text can name
+// the right thing when there is no language to template.
+const configuredTemplate = "config:template"
+
+// buildSourceChoice resolves the effective choice; an explicit flag wins.
+//
+// Configuration may only pick the template. "project" there would be a
+// standing answer to the consent question — from a project file, the
+// repository answering on its own behalf — so it is refused in favour of
+// `dev accept`, which is per project and re-asks when the file changes.
+func buildSourceChoice(flag string, cfg config.Config) (string, error) {
+	switch flag {
+	case "":
+	case "project", "template", "auto":
+		return flag, nil
+	default:
+		return "", fmt.Errorf("unknown --build-source %q; use project or template", flag)
+	}
+	switch v := cfg.BuildSource; v {
+	case "":
+		return "", nil
+	case "template":
+		return configuredTemplate, nil
+	case "project":
+		return "", fmt.Errorf("build_source: project is not accepted in %s "+
+			"configuration: building a repository's own Dockerfile is a decision "+
+			"that is asked for and remembered per project.\nRecord it with: dev accept %s",
+			cfg.Origin("build_source"), buildSourceKey)
+	default:
+		return "", fmt.Errorf("unknown build_source %q in %s configuration; "+
+			"the only accepted value is template", v, cfg.Origin("build_source"))
+	}
+}
 
 // buildSourceAsk describes the project-supplied Dockerfile a build would
 // use, or nil when there is nothing to ask about.
@@ -100,6 +136,13 @@ func buildSourceAccepted(p *project.Project, store *trust.Store) bool {
 // repository they are inspecting should not have to accept anything first.
 func resolveBuildSource(env *Env, p *project.Project, store *trust.Store, choice string) error {
 	switch choice {
+	case configuredTemplate:
+		if !p.Detected.Found() {
+			return fmt.Errorf("build_source: template needs a detected language; "+
+				"%s has none, so there is no template to build instead", p.Dir)
+		}
+		p.UseTemplate()
+		return nil
 	case "template":
 		if !p.Detected.Found() {
 			return fmt.Errorf("--build-source template needs a detected language; " +
@@ -130,6 +173,8 @@ func resolveBuildSource(env *Env, p *project.Project, store *trust.Store, choice
 	fmt.Fprintf(env.Stderr, "\nAccept it once:      dev accept %s\n", buildSourceKey)
 	if p.Detected.Found() {
 		fmt.Fprintf(env.Stderr, "Or ignore the file:  --build-source template\n")
+		fmt.Fprintf(env.Stderr, "  ...for every run:  build_source: template  in %s\n",
+			env.Paths.Project)
 	}
 	fmt.Fprintf(env.Stderr, "Read it first:       %s\n", p.Dockerfile)
 	return fmt.Errorf("the build source has not been accepted")
