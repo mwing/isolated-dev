@@ -176,13 +176,21 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	}
 
 	eng := container.New(env.driver(cfg.VMName))
-	exists, err := eng.ImageExists(ctx, p.Image)
-	if err != nil {
-		return err
-	}
-	if rebuild || !exists {
-		if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+	// With an agent, prepareAgent resolves the base image, and agentBaseImage
+	// builds the project's own when there is one — with a staleness check
+	// this path does not have. Building here too fails a directory with
+	// nothing to detect, on an image the agent was never going to run on.
+	// --rebuild is the exception: it must force the build that
+	// agentBaseImage would otherwise skip as current.
+	if agentName == "" || (rebuild && projectIsBuildable(p)) {
+		exists, err := eng.ImageExists(ctx, p.Image)
+		if err != nil {
 			return err
+		}
+		if rebuild || !exists {
+			if err := buildImage(ctx, env, cfg, p, ""); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -193,7 +201,8 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		grants    project.Grants
 	)
 	if agentName != "" {
-		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName, command, run.allowMCP)
+		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName,
+			command, run.allowMCP, rebuild)
 		if err != nil {
 			return err
 		}
@@ -417,7 +426,8 @@ func paneSize() (cols, rows int) {
 // the same named volume, so a session started here is already
 // authenticated.
 func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
-	store *trust.Store, cfg config.Config, name string, command []string, allowMCP bool) (*agent.Options, string, []string, error) {
+	store *trust.Store, cfg config.Config, name string, command []string,
+	allowMCP, rebuild bool) (*agent.Options, string, []string, error) {
 	reg, err := registry(env)
 	if err != nil {
 		return nil, "", nil, err
@@ -468,7 +478,7 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	}
 
 	runner := &agent.Runner{Engine: eng, Out: env.Stdout}
-	image, err := runner.EnsureImage(ctx, opts, false)
+	image, err := runner.EnsureImage(ctx, opts, rebuild)
 	if err != nil {
 		return nil, "", nil, err
 	}
