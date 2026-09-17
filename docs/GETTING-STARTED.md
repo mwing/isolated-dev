@@ -69,6 +69,16 @@ dev allow api.mycompany.com           # persistent, this project
 dev run --allow-host api.example.com  # just this run
 ```
 
+A grant is recorded as typed, so authorizing a destination before anything
+asks for it works — and a misspelling looks identical to it. When the name
+you grant is a slip away from one this project was refused and still cannot
+reach, you are told:
+
+```
+⚠  Nothing in this project has asked for docs.typesage.ai.
+   docs.typesafe.ai was blocked and still is. Did you mean that?
+```
+
 If you want to be asked instead of told afterwards, the request can be
 *held* while you decide:
 

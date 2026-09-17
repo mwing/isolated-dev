@@ -636,20 +636,15 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 
 	// Preferences from the project apply directly: they change how the
 	// sandbox is built, not what it may reach or read.
-	if opts.Image == "" && request.Base != "" {
-		opts.Image = request.Base
+	prefs := store.Prefs(a.Name, request)
+	if opts.Image == "" {
+		opts.Image = prefs.Base
 	}
 	if opts.Memory == "" {
-		opts.Memory = request.Memory
+		opts.Memory = prefs.Memory
 	}
 	if opts.CPUs == "" {
-		opts.CPUs = request.CPUs
-	}
-
-	// Command-line flags win over the stored file; the file wins over the
-	// agent's built-in defaults.
-	if opts.Image == "" && saved.Base != "" {
-		opts.Image = saved.Base
+		opts.CPUs = prefs.CPUs
 	}
 	// With nothing chosen anywhere, the overlay goes on the project's own
 	// image rather than the agent's generic base, so the agent has the
@@ -669,23 +664,12 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			opts.Image = base
 		}
 	}
-	if opts.Memory == "" {
-		opts.Memory = saved.Memory
-	}
-	if opts.CPUs == "" {
-		opts.CPUs = saved.CPUs
-	}
 	// The overlay builds FROM upstream images too, so the project's pins
 	// reach it. Without this, the one build the tool performs itself was
 	// the one exempt from the rule it asks of every project.
 	opts.Pins = cfg.Pins
 
-	// Saved args are the project's stored defaults; args typed on the
-	// command line replace them rather than being appended, since a
-	// stored default is what you get when you say nothing.
-	if len(opts.Args) == 0 && len(saved.Args) > 0 {
-		opts.Args = append([]string(nil), saved.Args...)
-	}
+	opts.Args = firstArgs(opts.Args, prefs.Args)
 
 	// A ceiling when nothing else set one. An agent runs unattended for
 	// however long it takes, so "whatever the daemon permits" means a

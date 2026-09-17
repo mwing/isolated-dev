@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/history"
 	"github.com/mwing/isolated-dev/internal/netpolicy"
 	"github.com/mwing/isolated-dev/internal/trust"
 )
@@ -61,6 +62,17 @@ func newAllowCmd(env *Env) *cobra.Command {
 			if global {
 				where = "every project"
 			}
+			// Checked against everything asked for, not only what was newly
+			// added: a typo re-typed is still stored and still wrong, and
+			// the second attempt is exactly when it needs saying.
+			//
+			// Not for --global, whose grant is deliberately not about the
+			// one project whose history is being read.
+			if !global {
+				defer warnLikelyTypos(env, history.Path(store.Project.Path()),
+					agentName, args, coveringHosts(store, agentName))
+			}
+
 			if len(added) == 0 {
 				fmt.Fprintf(env.Stdout, "Already granted for %s.\n", where)
 				return nil

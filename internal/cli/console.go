@@ -448,10 +448,8 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	}
 
 	saved := store.Resolve(a.Name)
-	base := saved.Base
-	if base == "" {
-		base = request.Base
-	}
+	prefs := store.Prefs(a.Name, request)
+	base := prefs.Base
 	if base == "" {
 		// The project's own environment, so the agent has the toolchain of
 		// the thing it is working on. See agentBaseImage.
@@ -464,10 +462,10 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		Agent:       a,
 		Project:     p.Dir,
 		Interactive: true,
-		Args:        command,
+		Args:        firstArgs(command, prefs.Args),
 		Image:       base,
-		Memory:      firstSet(saved.Memory, request.Memory),
-		CPUs:        firstSet(saved.CPUs, request.CPUs),
+		Memory:      prefs.Memory,
+		CPUs:        prefs.CPUs,
 		AllowMCP:    allowMCP,
 		// Without this the agent cannot commit — the container has no
 		// ~/.gitconfig, so git refuses with "please tell me who you are",
@@ -494,13 +492,15 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 	return &opts, image, allowed, nil
 }
 
-func firstSet(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
+// firstArgs returns the first non-empty list, copied so a stored default
+// cannot be aliased into a run and mutated.
+func firstArgs(lists ...[]string) []string {
+	for _, l := range lists {
+		if len(l) > 0 {
+			return append([]string(nil), l...)
 		}
 	}
-	return ""
+	return nil
 }
 
 // runAgentInteractive runs an agent on a pseudo-terminal inside the

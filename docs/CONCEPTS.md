@@ -211,7 +211,22 @@ The agent runs on **your project's image**, with the agent added on top, so
 it has the toolchain of the thing it is working on — an agent that cannot
 run the project's tests cannot check its own work. `base:` in `.devenv.yaml`
 overrides that, and an agent's own base image is the fallback for a
-directory with no project to build. The clone also carries a git identity,
+directory with no project to build.
+
+Four places can name that base, and the most specific wins: a flag, then
+what you set for this project in `~/.dev-envs`, then what the repository
+requests, then your global default. The repository sits between your two
+scopes deliberately — a global default of yours should not silence what a
+project asks for, and a project should not override what you chose for that
+project. The same order settles `memory` and `cpus`.
+
+`args` is not among them. They are appended to the agent's command line
+after the flags that harden it, so a repository supplying them could undo
+`--strict-mcp-config` with an `--mcp-config` of its own, or add a prompt of
+its own choosing. Base, memory and cpus shape one container; argv is what
+the agent is told to do, and only you set that.
+
+The clone also carries a git identity,
 copied from the project, because a container has no `~/.gitconfig` and work
 that cannot be committed cannot come back.
 

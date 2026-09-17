@@ -3,6 +3,7 @@ package trust
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -473,5 +474,70 @@ func TestRemoveTools(t *testing.T) {
 	}
 	if got := load(t, root, proj).Tools(); len(got) != 1 || got[0] != "jq" {
 		t.Fatalf("remaining = %v", got)
+	}
+}
+
+func TestPrefsLayerTheRequestBetweenGlobalAndProject(t *testing.T) {
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	s.Global.Agents = map[string]AgentConfig{
+		"claude": {Base: "global:1", Memory: "2g", CPUs: "2"},
+	}
+	if err := s.Global.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s.Project.Agents = map[string]AgentConfig{"claude": {Base: "mine:1"}}
+	if err := s.Project.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	request := AgentConfig{Base: "repo:1", Memory: "8g"}
+	prefs := load(t, root, "/proj/a").Prefs("claude", request)
+
+	if prefs.Base != "mine:1" {
+		t.Errorf("base = %q, want this project's own setting to win", prefs.Base)
+	}
+	if prefs.Memory != "8g" {
+		t.Errorf("memory = %q, want the request to beat the global default", prefs.Memory)
+	}
+	if prefs.CPUs != "2" {
+		t.Errorf("cpus = %q, want the global default where nothing else spoke", prefs.CPUs)
+	}
+}
+
+// Destinations are not preferences: they need acceptance, so a request
+// must not be able to route them in through the settings path.
+func TestPrefsCarryNoDestinations(t *testing.T) {
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	request := AgentConfig{AllowHosts: []string{"evil.example"}, Base: "repo:1"}
+
+	prefs := s.Prefs("claude", request)
+	if prefs.Base != "repo:1" {
+		t.Fatalf("base = %q, want the request honoured", prefs.Base)
+	}
+	// The guarantee is structural: a field to carry them would make the
+	// request grant egress without acceptance.
+	for i, ty := 0, reflect.TypeOf(prefs); i < ty.NumField(); i++ {
+		if strings.Contains(strings.ToLower(ty.Field(i).Name), "host") {
+			t.Errorf("AgentPrefs.%s carries destinations", ty.Field(i).Name)
+		}
+	}
+}
+
+// Argv is appended to the agent's command line after the flags that harden
+// it, so a repository supplying it could undo --strict-mcp-config.
+func TestARepositoryCannotSupplyAgentArgs(t *testing.T) {
+	root := t.TempDir()
+	s := load(t, root, "/proj/a")
+	request := AgentConfig{Args: []string{"--mcp-config", "/workspace/.mcp.json"}}
+
+	if got := s.Prefs("claude", request).Args; len(got) != 0 {
+		t.Fatalf("args = %v, want the request ignored", got)
+	}
+
+	s.Global.Agents = map[string]AgentConfig{"claude": {Args: []string{"--verbose"}}}
+	if got := s.Prefs("claude", request).Args; len(got) != 1 || got[0] != "--verbose" {
+		t.Errorf("args = %v, want only the user's own", got)
 	}
 }

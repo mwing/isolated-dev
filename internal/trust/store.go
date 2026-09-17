@@ -189,21 +189,76 @@ func (f *File) Save() error {
 // Resolve returns the effective configuration for an agent: global
 // defaults, global per-agent, project defaults, then project per-agent.
 func (s *Store) Resolve(agentName string) AgentConfig {
-	var out AgentConfig
+	global, project := s.Scoped(agentName)
+	global.merge(project)
+	return global
+}
+
+// Scoped returns the user's global configuration and this project's
+// configuration separately.
+//
+// Resolve flattens the two, which is the wrong shape wherever the
+// repository's own request belongs between them. See Prefs.
+func (s *Store) Scoped(agentName string) (global, project AgentConfig) {
 	for _, layer := range []struct {
 		file *File
 		key  string
+		into *AgentConfig
 	}{
-		{s.Global, "default"},
-		{s.Global, agentName},
-		{s.Project, "default"},
-		{s.Project, agentName},
+		{s.Global, "default", &global},
+		{s.Global, agentName, &global},
+		{s.Project, "default", &project},
+		{s.Project, agentName, &project},
 	} {
 		if layer.file == nil {
 			continue
 		}
 		if cfg, ok := layer.file.Agents[layer.key]; ok {
-			out.merge(cfg)
+			layer.into.merge(cfg)
+		}
+	}
+	return global, project
+}
+
+// AgentPrefs are the settings that change how the sandbox is built rather
+// than what it may reach or read.
+type AgentPrefs struct {
+	Base         string
+	Memory, CPUs string
+	Args         []string
+}
+
+// Prefs layers the repository's request between the user's global
+// configuration and this project's: most specific wins, and at equal
+// specificity the user beats the repository. A global default must not
+// silence what a project asks for, and a project must not override what
+// the user set for that project.
+//
+// AllowHosts is deliberately absent. A request's destinations are not a
+// preference — they need acceptance, and layering them in here would grant
+// what `dev accept` exists to withhold.
+func (s *Store) Prefs(agentName string, request AgentConfig) AgentPrefs {
+	global, project := s.Scoped(agentName)
+	var out AgentPrefs
+	for _, layer := range []AgentConfig{global, request, project} {
+		if layer.Base != "" {
+			out.Base = layer.Base
+		}
+		if layer.Memory != "" {
+			out.Memory = layer.Memory
+		}
+		if layer.CPUs != "" {
+			out.CPUs = layer.CPUs
+		}
+	}
+	// Args skips the request layer. They are appended to the agent's command
+	// line after the flags that harden it, so a repository supplying them
+	// could undo --strict-mcp-config with an --mcp-config of its own, or add
+	// a prompt of its own choosing. Base, memory and cpus shape one
+	// container; argv is what the agent is told to do.
+	for _, layer := range []AgentConfig{global, project} {
+		if len(layer.Args) > 0 {
+			out.Args = append([]string(nil), layer.Args...)
 		}
 	}
 	return out
