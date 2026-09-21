@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -928,4 +929,32 @@ func TestIsOwnConfigVolumeDoesNotMatchAnotherAgentByPrefix(t *testing.T) {
 			t.Errorf("claude wrongly claimed %q", other)
 		}
 	}
+}
+
+// A volume docker just created belongs to root, and the agent runs
+// unprivileged: a config directory it cannot write is one where a refreshed
+// token cannot be saved, so the login reports success and the next call is
+// a 401. The ownership step ran only for volumes that already existed, so
+// every project's first run had it.
+func TestANewConfigVolumeIsOwnedByTheAgent(t *testing.T) {
+	fake := runner.NewFake()
+	fake.Response["orb -m vm sudo docker volume inspect"] = runner.Result{ExitCode: 1}
+	// What the probe reports for a fresh volume: docker made it root's.
+	fake.Default = runner.Result{Stdout: "0:0\n"}
+	r := &Runner{Engine: container.New(orbstack.New("vm", fake)), Out: io.Discard}
+	a := &Agent{Name: "claude", Binary: "claude", ConfigDir: "/home/dev/.claude", Base: "b"}
+
+	if err := r.EnsureVolume(context.Background(), a, "/home/me/proj"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := fmt.Sprintf("chown -R %d:%d %s",
+		container.HostUID(), container.HostGID(), a.ConfigDir)
+	for _, c := range fake.Calls {
+		if strings.Contains(c.String(), want) {
+			return
+		}
+	}
+	t.Errorf("a newly created volume was left owned by root; no %q:\n%s",
+		want, callLines(fake))
 }

@@ -443,11 +443,13 @@ func (r *Runner) EnsureVolume(ctx context.Context, a *Agent, projectDir string) 
 	if err != nil {
 		return err
 	}
-	if exists {
-		if err := r.repairVolumeOwner(ctx, a, configVol); err != nil {
+	if !exists {
+		if err := r.Engine.VolumeCreate(ctx, configVol); err != nil {
 			return err
 		}
-	} else if err := r.Engine.VolumeCreate(ctx, configVol); err != nil {
+	}
+	// Docker creates a volume owned by root, and the agent runs unprivileged.
+	if err := r.repairVolumeOwner(ctx, a, configVol); err != nil {
 		return err
 	}
 	// Seed the login into this project's config from the shared auth volume.
@@ -619,8 +621,8 @@ func (r *Runner) SyncAuthBack(ctx context.Context, a *Agent, projectDir string) 
 	}
 }
 
-// repairVolumeOwner makes an existing config volume belong to the uid the
-// agent now runs as.
+// repairVolumeOwner makes a config volume belong to the uid the agent now
+// runs as.
 //
 // The volume outlives the image, and docker only seeds one when it is
 // created — an existing volume keeps whatever ownership it was populated
