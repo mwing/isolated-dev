@@ -1201,12 +1201,20 @@ inheriting `mount_docker_socket: true`), which is why B2 could be dropped
 at all. So this is post-1.0 work, and the documentation duty from B2
 stands until it lands.
 
-### B14. Learning mode — `todo`
+### B14. Learning mode — `done`
 
 The honest replacement for B3: traffic still goes through the proxy and is
 recorded, unknown destinations are permitted for that run, and afterwards
 the run offers to save what it reached. Weaker for one run, auditable, and
 it converges on the right allowlist instead of away from it.
+
+**Done:** `--learn` on `dev agent run` and `dev console`. Per run only, never
+from configuration. What stays refused while learning: the machine policy's
+denies, loopback/private/metadata addresses, and — without `--allow-mcp` —
+the agent's connector hosts, which the ordinary gate blocks by leaving out
+of the allowlist and learning therefore has to deny outright. A learned
+name is shape-checked like a wildcard match. The run ends with the list of
+destinations no rule covered and asks for a typed `yes` to keep them for the project.
 
 ### B15. Plain-docker backend, after UID/GID — `done`
 

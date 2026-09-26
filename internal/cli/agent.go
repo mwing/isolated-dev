@@ -270,6 +270,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		useClone   bool
 		cloneDepth int
 		allowMCP   bool
+		learn      bool
 	)
 
 	cmd := &cobra.Command{
@@ -366,7 +367,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				defer captureCloneWork(cmd.Context(), env, opts.Project,
 					opts.Workspace, captureID(time.Now()))
 			}
-			return runAgent(cmd.Context(), env, cfg, opts, rebuild, dryRun, notifyMode)
+			return runAgent(cmd.Context(), env, cfg, opts, rebuild, dryRun, learn, notifyMode)
 		},
 	}
 
@@ -397,6 +398,8 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
 		"report blocked destinations: live (as they happen) or off (summary only)")
+	cmd.Flags().BoolVar(&learn, "learn", false,
+		"allow destinations not on the allowlist for this run, record them, and offer to keep them")
 	return cmd
 }
 
@@ -546,7 +549,7 @@ func sshHostOf(url string) (string, bool) {
 }
 
 func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Options,
-	rebuild, dryRun bool, notify NotifyMode) error {
+	rebuild, dryRun, learn bool, notify NotifyMode) error {
 	a := opts.Agent
 	eng := container.New(env.driver(cfg.VMName))
 
@@ -571,6 +574,11 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 	// therefore permits no agent.
 	if verr := pol.CheckNetwork(string(project.NetworkAllowlist)); verr != nil {
 		return verr
+	}
+	if learn {
+		if err := checkLearnPermitted(pol); err != nil {
+			return err
+		}
 	}
 	// Forbidden settings, checked the way the workspace path checks them:
 	// against what the project's own file asks for, whether or not this user
@@ -785,11 +793,17 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return err
 	}
 
+	deny := pol.DenyHosts
+	if learn {
+		deny = learnDenies(deny, &opts)
+		announceLearning(env, &opts)
+	}
 	side := &netpolicy.Sidecar{
 		Engine:   eng,
 		Image:    proxyImage,
 		Allow:    allowEntries,
-		Deny:     pol.DenyHosts,
+		Deny:     deny,
+		Learn:    learn,
 		Topology: topo,
 	}
 	live, err := side.Start(ctx)
@@ -797,25 +811,33 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return err
 	}
 	rec := runRecord{
-		Path:    history.Path(store.Project.Path()),
-		Start:   time.Now(),
-		Command: []string{"agent " + a.Name},
-		Image:   image,
-		Network: "allowlist",
+		Path:     history.Path(store.Project.Path()),
+		Start:    time.Now(),
+		Command:  []string{"agent " + a.Name},
+		Image:    image,
+		Network:  "allowlist",
+		Allow:    allowEntries,
+		Learning: learn,
+	}
+	if learn {
+		rec.Network = "learn"
 	}
 	defer func() {
-		summary, err := finishRun(ctx, env, side, rec)
+		outcome, err := finishRun(ctx, env, side, rec)
 		if err != nil {
 			fmt.Fprintf(env.Stderr, "\nwarning: reading egress log: %v\n", err)
 			return
 		}
 		fmt.Fprint(env.Stderr, "\r\n")
-		if len(summary) == 0 {
+		if learn {
+			reportLearned(env, store, a.Name, outcome.Learned, env.stdinIsTerminal() && ctx.Err() == nil)
+		}
+		if len(outcome.Blocked) == 0 {
 			fmt.Fprintln(env.Stderr, "Egress: nothing blocked.")
 			return
 		}
 		fmt.Fprintln(env.Stderr, "Egress: blocked destinations this run:")
-		for _, line := range summary {
+		for _, line := range outcome.Blocked {
 			fmt.Fprintf(env.Stderr, "  %s\n", line)
 		}
 		fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")

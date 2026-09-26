@@ -206,6 +206,10 @@ func (c *Control) mutate(op, host string, add bool) Response {
 		c.mu.Unlock()
 		return Response{Error: err.Error()}
 	}
+	// Parse drops learning.
+	if c.Proxy.Allowlist().Learning() {
+		allow = allow.WithLearning()
+	}
 	c.entry = next
 	rules := append([]string(nil), next...)
 	c.mu.Unlock()

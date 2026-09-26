@@ -727,12 +727,13 @@ func missingCommand(stderr string) bool {
 
 // startSidecar brings up the egress proxy for a workspace run.
 func startSidecar(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
-	allowed []string, mode EgressMode) (*netpolicy.Sidecar, netpolicy.Topology, error) {
-	return startSidecarWithPorts(ctx, env, eng, p, allowed, mode, nil)
+	allowed []string, mode EgressMode, tune ...func(*netpolicy.Sidecar)) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	return startSidecarWithPorts(ctx, env, eng, p, allowed, mode, nil, tune...)
 }
 
 func startSidecarWithPorts(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
-	allowed []string, mode EgressMode, ports []int) (*netpolicy.Sidecar, netpolicy.Topology, error) {
+	allowed []string, mode EgressMode, ports []int,
+	tune ...func(*netpolicy.Sidecar)) (*netpolicy.Sidecar, netpolicy.Topology, error) {
 	// The image every filtered run depends on, built or refreshed here.
 	// Only the agent path used to do this, so a plain run against a missing
 	// sidecar failed as "exited immediately with no output" — the daemon
@@ -780,6 +781,9 @@ func startSidecarWithPorts(ctx context.Context, env *Env, eng *container.Engine,
 			DNSPort:         53,
 		},
 	}
+	for _, t := range tune {
+		t(side)
+	}
 	topo, err := side.Start(ctx)
 	return side, topo, err
 }
@@ -819,17 +823,17 @@ func watchEgress(ctx context.Context, env *Env, eng *container.Engine,
 }
 
 func reportEgress(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRecord) {
-	summary, err := finishRun(ctx, env, side, rec)
+	outcome, err := finishRun(ctx, env, side, rec)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "\nwarning: reading egress log: %v\n", err)
 		return
 	}
 	fmt.Fprint(env.Stderr, "\r\n")
-	if len(summary) == 0 {
+	if len(outcome.Blocked) == 0 {
 		return
 	}
 	fmt.Fprintln(env.Stderr, "Egress: blocked destinations this run:")
-	for _, line := range summary {
+	for _, line := range outcome.Blocked {
 		fmt.Fprintf(env.Stderr, "  %s\n", line)
 	}
 	fmt.Fprintf(env.Stderr, "Allow once:       --allow-host HOST\n")

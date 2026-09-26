@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
@@ -185,6 +186,12 @@ func (p *Proxy) permitAddress(address string) error {
 	if err != nil {
 		return nil
 	}
+	// net.ParseIP returns nil for a zoned address such as fe80::1%eth0, so
+	// the check below would take it for a name. A zone exists only on scoped
+	// addresses, none of which are the internet.
+	if addr, perr := netip.ParseAddr(host); perr == nil && addr.Zone() != "" {
+		return &blockedAddress{Address: address, Host: host, Scoped: true}
+	}
 	ip := net.ParseIP(host)
 	if ip == nil || !isInfrastructure(ip) {
 		return nil
@@ -205,9 +212,16 @@ type blockedAddress struct {
 	// what a grant would have to name.
 	Address string
 	Host    string
+	// Scoped is a zoned address, which no rule can name: offering the
+	// grant as the remedy would send the user to one Parse refuses.
+	Scoped bool
 }
 
 func (e *blockedAddress) Error() string {
+	if e.Scoped {
+		return fmt.Sprintf("refused to connect to %s: a scoped (zoned) address "+
+			"is never the internet, and cannot be granted", e.Host)
+	}
 	// The remedy is named because this is the one refusal a legitimate
 	// setup hits: an internal service on a private network, reached by a
 	// name that resolves there. Granting the address says "I meant that
@@ -220,11 +234,74 @@ func (e *blockedAddress) Error() string {
 // isInfrastructure reports whether an address belongs to the machinery
 // around the sandbox rather than to the internet.
 func isInfrastructure(ip net.IP) bool {
+	if v4 := embeddedV4(ip); v4 != nil {
+		return isInfrastructure(v4)
+	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
 		// Carrier-grade NAT and the IPv6 unique-local range are neither
 		// private by Go's definition nor public in any useful sense.
-		ip.IsInterfaceLocalMulticast() || inCGNAT(ip) || isUniqueLocal(ip)
+		ip.IsInterfaceLocalMulticast() || inCGNAT(ip) || isUniqueLocal(ip) ||
+		inReservedV4(ip)
+}
+
+// reservedV4 are ranges Go does not call private that are still not the
+// internet. 0.0.0.0/8 matters most: OrbStack answers host.docker.internal
+// with 0.250.250.254, which is the Mac itself.
+//
+// Not 198.18.0.0/15, though it is reserved too: fake-IP DNS in Surge, Clash
+// and sing-box answers every public name from it, and on those machines
+// refusing it refuses the whole internet.
+var reservedV4 = []*net.IPNet{
+	mustCIDR("0.0.0.0/8"),
+	mustCIDR("192.0.0.0/24"),
+	mustCIDR("240.0.0.0/4"),
+}
+
+func inReservedV4(ip net.IP) bool {
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	for _, n := range reservedV4 {
+		if n.Contains(v4) {
+			return true
+		}
+	}
+	return false
+}
+
+// embeddedV4 returns the IPv4 address an IPv6 transition address carries —
+// NAT64 (64:ff9b::/96), 6to4 (2002::/16) and IPv4-compatible (::/96) — so it
+// is judged by where it leads rather than by its wrapper. Refusing the whole
+// ranges instead would break NAT64 on IPv6-only networks, where it is how
+// public IPv4 is reached.
+func embeddedV4(ip net.IP) net.IP {
+	if ip.To4() != nil || len(ip) != net.IPv6len {
+		return nil
+	}
+	switch {
+	case nat64.Contains(ip):
+		return net.IPv4(ip[12], ip[13], ip[14], ip[15])
+	case ip[0] == 0x20 && ip[1] == 0x02:
+		return net.IPv4(ip[2], ip[3], ip[4], ip[5])
+	case v4Compatible.Contains(ip) && !ip.IsUnspecified() && !ip.IsLoopback():
+		return net.IPv4(ip[12], ip[13], ip[14], ip[15])
+	}
+	return nil
+}
+
+var (
+	nat64        = mustCIDR("64:ff9b::/96")
+	v4Compatible = mustCIDR("::/96")
+)
+
+func mustCIDR(s string) *net.IPNet {
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(err)
+	}
+	return n
 }
 
 func inCGNAT(ip net.IP) bool {
@@ -472,11 +549,9 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The same name-shape check the CONNECT/SOCKS path and the resolver
-	// apply. Plain HTTP had it missing, so a workload could carry an
-	// over-length encoded label to a host under a wildcard grant by
-	// switching to http:// — the payload rides in the name, which the
-	// system resolver looks up before any connection. Shared across every
-	// protocol now, before the lookup.
+	// apply, and before the lookup: the payload rides in the name, which the
+	// system resolver sends upstream before any connection, so skipping it
+	// here would let http:// carry what the other paths refuse.
 	if why := p.exfilShape(host); why != "" {
 		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method, Reason: why})
 		denyResponse(w, host, port)

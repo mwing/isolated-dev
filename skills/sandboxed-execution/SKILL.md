@@ -134,7 +134,9 @@ error go away is the prompt-nobody-reads failure, performed at machine
 speed.
 
 **Never widen the network to make something work.** Not `--network open`,
-not `--offline` turned off, not `--allow-docker-socket`. If a run needs a
+not `--learn`, not `--offline` turned off, not `--allow-docker-socket`.
+`--learn` is recorded, but it still admits every destination for the run,
+so it is the user's to choose. If a run needs a
 destination, name it to the user and let them decide:
 
 > The install was blocked reaching `registry.example.com`. Allow it with

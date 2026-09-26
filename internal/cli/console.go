@@ -41,6 +41,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		cloneDepth int
 		dockSocket bool
 		allowMCP   bool
+		learn      bool
 	)
 
 	cmd := &cobra.Command{
@@ -58,7 +59,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
 				rebuild, extraHosts, shell, agentName, record,
 				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth},
-				runGrants{dockerSocket: dockSocket, allowMCP: allowMCP})
+				runGrants{dockerSocket: dockSocket, allowMCP: allowMCP, learn: learn})
 		},
 	}
 	addCloneFlag(cmd, &useCloneD, &cloneDepth)
@@ -75,6 +76,8 @@ func newConsoleCmd(env *Env) *cobra.Command {
 	cmd.Flags().BoolVar(&allowMCP, "allow-mcp", false,
 		"let the agent use its MCP connectors (off by default: a connector "+
 			"reaches an account outside the sandbox with a live token)")
+	cmd.Flags().BoolVar(&learn, "learn", false,
+		"allow destinations not on the allowlist for this run, record them, and offer to keep them")
 	cmd.Flags().StringVar(&record, "record", "",
 		"record the workload's output and terminal sizes to a file")
 	cmd.Flags().StringVar(&replay, "replay", "",
@@ -146,6 +149,11 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	// over the same run, so --allow-host means here what it means there.
 	if err := pol.CheckHosts(extraHosts); err != nil {
 		return err
+	}
+	if run.learn {
+		if err := checkLearnPermitted(pol); err != nil {
+			return err
+		}
 	}
 	if len(command) == 0 && agentName == "" {
 		command = []string{"/bin/bash"}
@@ -236,7 +244,12 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	// the console side door the second review found.
 	allowed = gateConnectorHosts(env, agentOpts, permittedHosts(env, pol, append(allowed, extraHosts...)))
 
-	side, topo, err := startSidecar(ctx, env, eng, p, allowed, EgressAsk)
+	var tune []func(*netpolicy.Sidecar)
+	if run.learn {
+		tune = append(tune, learning(agentOpts))
+		announceLearning(env, agentOpts)
+	}
+	side, topo, err := startSidecar(ctx, env, eng, p, allowed, EgressAsk, tune...)
 	if err != nil {
 		return err
 	}
@@ -328,11 +341,16 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	model.Term = term
 
 	rec := runRecord{
-		Path:    history.Path(store.Project.Path()),
-		Start:   time.Now(),
-		Command: command,
-		Image:   image,
-		Network: string(p.Network),
+		Path:     history.Path(store.Project.Path()),
+		Start:    time.Now(),
+		Command:  command,
+		Image:    image,
+		Network:  string(p.Network),
+		Allow:    allowed,
+		Learning: run.learn,
+	}
+	if run.learn {
+		rec.Network = "learn"
 	}
 	prog := tea.NewProgram(model, tea.WithContext(ctx))
 
@@ -363,9 +381,16 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 		captureCloneWork(ctx, env, p.Dir, workspaceDir, captureID(time.Now()))
 	}
 
-	summary, stopErr := finishRun(ctx, env, side, rec)
-	for _, line := range summary {
+	outcome, stopErr := finishRun(ctx, env, side, rec)
+	for _, line := range outcome.Blocked {
 		fmt.Fprintf(env.Stderr, "  %s\n", line)
+	}
+	if run.learn && stopErr == nil {
+		name := agentName
+		if name == "" {
+			name = "default"
+		}
+		reportLearned(env, store, name, outcome.Learned, env.stdinIsTerminal() && ctx.Err() == nil)
 	}
 	if stopErr != nil {
 		fmt.Fprintf(env.Stderr, "warning: %v\n", stopErr)

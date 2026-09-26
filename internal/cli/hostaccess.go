@@ -54,6 +54,8 @@ type runGrants struct {
 	// console-agent path reads it; a plain run has no agent and so no
 	// connectors.
 	allowMCP bool
+	// Console only; `dev agent run` takes it directly.
+	learn bool
 }
 
 // authorizes reports whether this run was given the key outright.

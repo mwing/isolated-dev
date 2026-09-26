@@ -127,8 +127,6 @@ func (f *Forward) handle(client net.Conn) {
 	// workload may simply not be listening yet — a server takes a moment to
 	// start — and there is no protocol here to say so in: this end of the
 	// forward is raw TCP, so an immediate close is the whole vocabulary.
-	// The comment here used to claim the client was told; it was not, and
-	// could not be.
 	// A dial with no timeout waits on the operating system's, which is
 	// minutes. The target is a container on the same host: it answers at
 	// once or it is not listening, and holding the accepted connection

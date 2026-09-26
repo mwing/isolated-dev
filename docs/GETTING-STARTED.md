@@ -104,6 +104,32 @@ so `--network open` is the one mode that cannot teach you what to allow.
 Reach for it when you already know a project needs unrestricted egress,
 not while trying to find out.
 
+**For an agent on a fresh project**, learning is the middle ground. Every
+destination is allowed for that one run, still through the proxy, and at
+the end you are shown what it reached that nothing covered, and asked
+whether to keep it:
+
+```sh
+dev console --agent claude --learn
+dev agent run claude --learn
+```
+
+```
+Learned: reached this run, not on the allowlist:
+  docs.typesafe.ai
+  pypi.org
+Allow all 2 for the claude agent in this project? Type yes to keep them:
+```
+
+Some things stay refused even while learning: hosts the machine policy
+denies and their subdomains, literal IP addresses, loopback, private and
+cloud-metadata addresses, and the agent's MCP connectors unless you also
+pass `--allow-mcp`. Denies are by name, so a different name that resolves
+to a denied host's address is not caught — learning is narrower than
+`--network open`, not a substitute for knowing what you run. It is a flag
+on the run and never a setting, so a repository cannot turn it on for
+itself.
+
 ---
 
 ## 3. Put the shareable parts in `.devenv.yaml`

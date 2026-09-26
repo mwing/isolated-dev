@@ -79,6 +79,7 @@ type Sidecar struct {
 	// AskTimeout holds denied connections while someone decides. Zero
 	// fails them immediately.
 	AskTimeout time.Duration
+	Learn      bool
 	// Forwards publish workload ports through the sidecar, since a
 	// workload on an internal network cannot publish them itself.
 	Forwards []string
@@ -162,6 +163,9 @@ func (s *Sidecar) Start(ctx context.Context) (Topology, error) {
 	}
 	if len(s.Deny) > 0 {
 		spec.Command = append(spec.Command, "--deny", strings.Join(s.Deny, ","))
+	}
+	if s.Learn {
+		spec.Command = append(spec.Command, "--learn")
 	}
 	for _, f := range s.Forwards {
 		spec.Command = append(spec.Command, "--forward", f)

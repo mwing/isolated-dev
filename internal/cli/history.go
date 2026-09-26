@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,20 +25,31 @@ type runRecord struct {
 	Command []string
 	Image   string
 	Network string
+	// Allow is the policy at start; hosts granted mid-run are not in it.
+	Allow    []string
+	Learning bool
 }
 
-// finishRun stops the sidecar, records what the run reached, and returns
-// the blocked destinations.
+type runOutcome struct {
+	Blocked []string
+	Learned []string
+}
+
+// finishRun stops the sidecar and records what the run reached.
 //
 // Recording happens here rather than in each caller because it must happen
 // on every exit path, including the ones that failed: a run that was
 // killed is exactly the run someone will want to look up later.
-func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRecord) ([]string, error) {
+func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRecord) (runOutcome, error) {
 	logs, err := side.StopAndLog(context.WithoutCancel(ctx))
 	if err != nil {
-		return nil, err
+		return runOutcome{}, err
 	}
 	_, denied := netpolicy.ParseEvents(logs)
+	out := runOutcome{Blocked: netpolicy.Summary(denied)}
+	if rec.Learning {
+		out.Learned = learnedEntries(rec.Allow, netpolicy.Destinations(logs))
+	}
 
 	if rec.Path != "" {
 		r := history.Run{
@@ -65,7 +79,37 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 			fmt.Fprintf(env.Stderr, "warning: recording run history: %v\n", err)
 		}
 	}
-	return netpolicy.Summary(denied), nil
+	return out, nil
+}
+
+// A contact on 80 or 443 becomes the bare host, which is what a person
+// types and what covers both; any other port is kept, since a bare host
+// would not grant it.
+func learnedEntries(allow []string, dests []netpolicy.Destination) []string {
+	rules, err := netpolicy.Parse(allow)
+	if err != nil {
+		rules = nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, d := range dests {
+		if d.Denied || d.Host == "" || rules.Covers(d.Host, d.Port) {
+			continue
+		}
+		// Normalized because Grant dedupes on the string, and the workload
+		// chooses the spelling: Example.COM. and example.com are one host.
+		host := strings.ToLower(strings.TrimSuffix(d.Host, "."))
+		entry := host
+		if d.Port != 0 && d.Port != 80 && d.Port != 443 {
+			entry = net.JoinHostPort(host, strconv.Itoa(d.Port))
+		}
+		if !seen[entry] {
+			seen[entry] = true
+			out = append(out, entry)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func newHistoryCmd(env *Env) *cobra.Command {

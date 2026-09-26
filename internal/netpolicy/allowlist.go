@@ -44,6 +44,35 @@ type Allowlist struct {
 	// saw the deny at all. Here every check goes through one predicate, so
 	// deny-before-allow holds for CONNECT, plain HTTP, SOCKS and DNS alike.
 	deny []Rule
+	// learn admits names no rule names — never literal addresses. Denies and
+	// the infrastructure check still apply, and a name admitted this way is
+	// shape-checked like a wildcard match, because nobody chose it.
+	learn bool
+}
+
+// WithLearning returns a copy, leaving the receiver unchanged: the proxy's
+// current allowlist is read concurrently, and its lock guards the pointer,
+// not the struct.
+func (a *Allowlist) WithLearning() *Allowlist {
+	c := Allowlist{}
+	if a != nil {
+		c = *a
+	}
+	c.learn = true
+	return &c
+}
+
+func (a *Allowlist) Learning() bool { return a != nil && a.learn }
+
+// Covers reports whether a rule names the destination, ignoring learning:
+// what a run reached that Covers rejects is what learning let through.
+func (a *Allowlist) Covers(host string, port int) bool {
+	if a == nil {
+		return false
+	}
+	strict := *a
+	strict.learn = false
+	return strict.Allows(host, port)
 }
 
 // WithDeny returns the allowlist with a set of denied destinations layered
@@ -89,7 +118,9 @@ func (a *Allowlist) denied(host string) bool {
 				return true
 			}
 		default:
-			if h == r.Host {
+			// Subdomains too, matching policy.CheckHost: a learning run grants
+			// nothing, so no grant-time check ever sees its hosts.
+			if h == r.Host || strings.HasSuffix(h, "."+r.Host) {
 				return true
 			}
 		}
@@ -272,7 +303,17 @@ func (a *Allowlist) Allows(host string, port int) bool {
 			}
 		}
 	}
-	return false
+	// Names only, so a denied host cannot be reached by dialling its
+	// address directly. A name that resolves there is not stopped by this.
+	return a.learn && ip == nil && learnable(h)
+}
+
+// learnable admits only names shaped like something a grant could name. A
+// zoned literal such as fe80::1%eth0 is not an IP to net.ParseIP, so without
+// this it would pass as a name and reach the link-local gateway; the same
+// check stops spaces, wildcards and non-ASCII lookalikes no rule could name.
+func learnable(h string) bool {
+	return checkASCIIHost(h) == nil && checkHostShape(h, h) == nil
 }
 
 // AllowsName reports whether a name may be resolved. The resolver uses this
@@ -300,7 +341,7 @@ func (a *Allowlist) AllowsName(name string) bool {
 			}
 		}
 	}
-	return false
+	return a.learn && learnable(h)
 }
 
 func portAllowed(r Rule, port int) bool {
@@ -346,10 +387,11 @@ func (r Rule) String() string {
 }
 
 // Empty reports whether the allowlist permits nothing at all.
-func (a *Allowlist) Empty() bool { return a == nil || len(a.rules) == 0 }
+func (a *Allowlist) Empty() bool { return a == nil || (len(a.rules) == 0 && !a.learn) }
 
 // matchedByWildcard reports whether a name is permitted only because a
-// wildcard rule covers it, rather than by a rule naming it exactly.
+// wildcard rule covers it, or learning admitted it, rather than by a rule
+// naming it exactly.
 //
 // The distinction decides whether the name's shape is the user's choice or
 // the workload's: an exact grant is a destination someone chose, a wildcard
@@ -371,7 +413,7 @@ func (a *Allowlist) matchedByWildcard(host string) bool {
 			wild = true
 		}
 	}
-	return wild
+	return wild || a.learn
 }
 
 // AllowsIP reports whether a rule names this address literally.

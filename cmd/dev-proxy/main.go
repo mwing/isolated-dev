@@ -43,6 +43,8 @@ func run() error {
 			"unix socket for live policy changes; empty disables it")
 		askTimeout = flag.Duration("ask-timeout", 0,
 			"hold a denied connection this long while someone decides; 0 fails immediately")
+		learn = flag.Bool("learn", false,
+			"allow names no rule names, and record them; literal addresses still need a rule, and denies and the infrastructure check still apply")
 		forwards multiFlag
 	)
 	flag.Var(&forwards, "forward",
@@ -79,12 +81,17 @@ func run() error {
 		fmt.Fprintf(os.Stderr, "dev-proxy: denying %s (wins over allows)\n", *denyFlag)
 	}
 
+	if *learn {
+		allow = allow.WithLearning()
+		fmt.Fprintln(os.Stderr, "dev-proxy: learning: names no rule names are allowed and recorded")
+	}
+
 	// An empty policy is legal and means "deny everything". Say so out
 	// loud: a silent deny-all looks identical to a broken proxy.
 	rules := allow.Rules()
-	if len(rules) == 0 {
+	if len(rules) == 0 && !*learn {
 		fmt.Fprintln(os.Stderr, "dev-proxy: empty allowlist; all egress will be denied")
-	} else {
+	} else if len(rules) > 0 {
 		names := make([]string, 0, len(rules))
 		for _, r := range rules {
 			names = append(names, r.String())
