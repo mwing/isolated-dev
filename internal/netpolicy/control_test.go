@@ -587,7 +587,7 @@ func TestAllowsIPConsultsTheDeny(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if al.AllowsIP(net.ParseIP("10.0.0.5")) {
+	if al.AllowsIP(net.ParseIP("10.0.0.5"), 443) {
 		t.Error("a denied IP was permitted through AllowsIP")
 	}
 }

@@ -246,7 +246,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 
 	var tune []func(*netpolicy.Sidecar)
 	if run.learn {
-		tune = append(tune, learning(agentOpts))
+		tune = append(tune, learning(agentOpts, connectorHosts(env)))
 		announceLearning(env, agentOpts)
 	}
 	side, topo, err := startSidecar(ctx, env, eng, p, allowed, EgressAsk, tune...)

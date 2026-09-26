@@ -64,8 +64,8 @@ func (a *Allowlist) WithLearning() *Allowlist {
 
 func (a *Allowlist) Learning() bool { return a != nil && a.learn }
 
-// Covers reports whether a rule names the destination, ignoring learning:
-// what a run reached that Covers rejects is what learning let through.
+// Covers is Allows ignoring learning: what a run reached that Covers rejects
+// is what learning let through.
 func (a *Allowlist) Covers(host string, port int) bool {
 	if a == nil {
 		return false
@@ -386,7 +386,6 @@ func (r Rule) String() string {
 	return strings.Join(parts, ",")
 }
 
-// Empty reports whether the allowlist permits nothing at all.
 func (a *Allowlist) Empty() bool { return a == nil || (len(a.rules) == 0 && !a.learn) }
 
 // matchedByWildcard reports whether a name is permitted only because a
@@ -416,14 +415,16 @@ func (a *Allowlist) matchedByWildcard(host string) bool {
 	return wild || a.learn
 }
 
-// AllowsIP reports whether a rule names this address literally.
+// The port matters because the address is reached by any name that
+// resolves to it: a grant of 127.0.0.1:443 that ignored the port would let a
+// learned name resolving to 127.0.0.1 reach every service on it.
 //
 // Used by the proxy to let a deliberate grant of an address on a private
 // network through the infrastructure check. A hostname rule never matches
 // here: that is the same distinction Allows makes, for the same reason —
 // resolving a name to an address must not be a way to reach an address
 // nobody granted.
-func (a *Allowlist) AllowsIP(ip net.IP) bool {
+func (a *Allowlist) AllowsIP(ip net.IP, port int) bool {
 	if a == nil {
 		return false
 	}
@@ -436,7 +437,7 @@ func (a *Allowlist) AllowsIP(ip net.IP) bool {
 		return false
 	}
 	for _, r := range a.rules {
-		if r.IP != nil && r.IP.Equal(ip) {
+		if r.IP != nil && r.IP.Equal(ip) && portAllowed(r, port) {
 			return true
 		}
 	}

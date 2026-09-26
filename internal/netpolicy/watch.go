@@ -167,7 +167,7 @@ func (w *Watcher) Totals() map[string]int {
 // where the value is formed, is what stops the next printer from being the
 // one that forgot.
 func destinationKey(e Event) string {
-	host := textsafe.Sanitize(e.Host)
+	host := textsafe.Name(e.Host)
 	if e.Method == "DNS" {
 		return host
 	}

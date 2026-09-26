@@ -61,6 +61,17 @@ func Sanitize(s string) string {
 	return b.String()
 }
 
+// Name is Sanitize for one field on one line — a hostname, a key — where a
+// newline or a tab is not formatting but a way to forge the lines after it.
+func Name(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return replacement
+		}
+		return r
+	}, Sanitize(s))
+}
+
 // Lines applies Sanitize to text meant to be printed as a block, dropping a
 // trailing newline so callers can format around it.
 func Lines(s string) string {

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/netip"
 	"sort"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 // evil.example.com x3") without parsing prose.
 type Event struct {
 	Time    time.Time `json:"time"`
-	Action  string    `json:"action"` // "allow" or "deny"
+	Action  string    `json:"action"` // open, allow, deny, pending, granted, timeout, error
 	Host    string    `json:"host"`
 	Port    int       `json:"port"`
 	Method  string    `json:"method"`
@@ -182,13 +183,15 @@ func (p *Proxy) exfilShape(host string) string {
 // service on their own network has said so explicitly, which is exactly the
 // distinction the literal-IP rule already makes for the allowlist.
 func (p *Proxy) permitAddress(address string) error {
-	host, _, err := net.SplitHostPort(address)
+	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil
 	}
+	port, _ := strconv.Atoi(portText)
 	// net.ParseIP returns nil for a zoned address such as fe80::1%eth0, so
-	// the check below would take it for a name. A zone exists only on scoped
-	// addresses, none of which are the internet.
+	// the check below would take it for a name. Resolver answers never carry
+	// a zone, so only a literal the workload wrote does, and it is refused
+	// whatever address it wraps.
 	if addr, perr := netip.ParseAddr(host); perr == nil && addr.Zone() != "" {
 		return &blockedAddress{Address: address, Host: host, Scoped: true}
 	}
@@ -196,7 +199,7 @@ func (p *Proxy) permitAddress(address string) error {
 	if ip == nil || !isInfrastructure(ip) {
 		return nil
 	}
-	if a := p.Allowlist(); a != nil && a.AllowsIP(ip) {
+	if a := p.Allowlist(); a != nil && a.AllowsIP(ip, port) {
 		return nil
 	}
 	return &blockedAddress{Address: address, Host: host}
@@ -237,10 +240,16 @@ func isInfrastructure(ip net.IP) bool {
 	if v4 := embeddedV4(ip); v4 != nil {
 		return isInfrastructure(v4)
 	}
+	// Local-use NAT64 (RFC 8215) is by definition a translator on this
+	// network, never the internet, and its embedding depends on a prefix
+	// length only the operator knows — so it is refused whole.
+	if localNAT64.Contains(ip) {
+		return true
+	}
 	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() || ip.IsUnspecified() ||
-		// Carrier-grade NAT and the IPv6 unique-local range are neither
-		// private by Go's definition nor public in any useful sense.
+		// Carrier-grade NAT is neither private by Go's definition nor public
+		// in any useful sense.
 		ip.IsInterfaceLocalMulticast() || inCGNAT(ip) || isUniqueLocal(ip) ||
 		inReservedV4(ip)
 }
@@ -248,6 +257,10 @@ func isInfrastructure(ip net.IP) bool {
 // reservedV4 are ranges Go does not call private that are still not the
 // internet. 0.0.0.0/8 matters most: OrbStack answers host.docker.internal
 // with 0.250.250.254, which is the Mac itself.
+//
+// 192.0.0.9 and 192.0.0.10 stay refused although IANA lists them as global:
+// they are PCP and TURN anycast, which route to the nearest operator — on
+// most networks the local gateway or the ISP.
 //
 // Not 198.18.0.0/15, though it is reserved too: fake-IP DNS in Surge, Clash
 // and sing-box answers every public name from it, and on those machines
@@ -292,6 +305,7 @@ func embeddedV4(ip net.IP) net.IP {
 }
 
 var (
+	localNAT64   = mustCIDR("64:ff9b:1::/48")
 	nat64        = mustCIDR("64:ff9b::/96")
 	v4Compatible = mustCIDR("::/96")
 )
@@ -461,13 +475,14 @@ func (p *Proxy) authorizeTunnel(ctx context.Context, host string, port int,
 			Reason: "upstream dial failed: " + err.Error()})
 		return nil, &refusal{reason: "upstream unreachable", kind: refusedUnreachable}
 	}
+	p.opened(host, port, method)
 	return upstream, nil
 }
 
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	host, port, err := splitTarget(r.Host, 443)
 	if err != nil {
-		p.emit(Event{Action: "deny", Host: r.Host, Method: r.Method, Reason: err.Error()})
+		p.emit(Event{Action: "deny", Host: r.Host, Method: eventMethod(r), Reason: err.Error()})
 		http.Error(w, "invalid CONNECT target", http.StatusBadRequest)
 		return
 	}
@@ -521,12 +536,34 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		// from a flaky network; this reaches the developer staring at the
 		// failed request, which is what denyResponse does for plain HTTP.
 		_, _ = client.Write(tlsAccessDenied)
-		p.emit(Event{Action: "deny", Host: m.Host(), Port: port, Method: r.Method,
+		p.emit(Event{Action: "deny", Host: m.Host(), Port: port, Method: eventMethod(r),
 			Bytes: n, Reason: m.Error()})
 		return
 	}
-	p.emit(Event{Action: "allow", Host: host, Port: port, Method: r.Method,
+	p.emit(Event{Action: "allow", Host: host, Port: port, Method: eventMethod(r),
 		Bytes: n, Latency: p.now().Sub(start).String()})
+}
+
+// The "allow" event is written at close, and a connection that never closes
+// — the far end holding it, or an opening TLS record never finished —
+// would otherwise never reach the log the sidecar is stopped with.
+//
+// Called after the address check, never before: a refused or failed dial is
+// not a contact. A tunnel SNI later refuses is still recorded, because its
+// first bytes have already reached the far end by then.
+func (p *Proxy) opened(host string, port int, method string) {
+	p.emit(Event{Action: "open", Host: host, Port: port, Method: method})
+}
+
+// eventMethod keeps the resolver's "DNS" marker unforgeable. On plain HTTP
+// the method is the workload's to choose, and every reader takes "DNS" to
+// mean a name lookup: `curl -X DNS` would make a completed upload vanish
+// from history and a refusal read as the resolver's.
+func eventMethod(r *http.Request) string {
+	if r.Method == http.MethodConnect {
+		return r.Method
+	}
+	return "HTTP " + r.Method
 }
 
 // tlsAccessDenied is a TLS record carrying a fatal access_denied alert. It
@@ -544,7 +581,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	host, port, err := splitTarget(r.URL.Host, 80)
 	if err != nil {
-		p.emit(Event{Action: "deny", Host: r.URL.Host, Method: r.Method, Reason: err.Error()})
+		p.emit(Event{Action: "deny", Host: r.URL.Host, Method: eventMethod(r), Reason: err.Error()})
 		http.Error(w, "invalid target", http.StatusBadRequest)
 		return
 	}
@@ -553,7 +590,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// system resolver sends upstream before any connection, so skipping it
 	// here would let http:// carry what the other paths refuse.
 	if why := p.exfilShape(host); why != "" {
-		p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method, Reason: why})
+		p.emit(Event{Action: "deny", Host: host, Port: port, Method: eventMethod(r), Reason: why})
 		denyResponse(w, host, port)
 		return
 	}
@@ -562,15 +599,21 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// is http:// — so leaving this path out made the prompt look broken
 	// for the most ordinary command someone would type.
 	if !p.Allowlist().Allows(host, port) {
-		if !p.awaitDecision(r.Context(), host, port, r.Method) {
-			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+		if !p.awaitDecision(r.Context(), host, port, eventMethod(r)) {
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: eventMethod(r),
 				Reason: "not in allowlist"})
 			denyResponse(w, host, port)
 			return
 		}
 	}
 
-	outreq := r.Clone(r.Context())
+	// GotConn fires only after the dialer's address check has passed, and
+	// before the body is sent: an upload whose far end reads it and never
+	// answers is still recorded.
+	trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+		p.opened(host, port, eventMethod(r))
+	}}
+	outreq := r.Clone(httptrace.WithClientTrace(r.Context(), trace))
 	outreq.RequestURI = ""
 	removeHopByHop(outreq.Header)
 
@@ -582,12 +625,12 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		// the run's history to explain what had happened.
 		var blocked *blockedAddress
 		if errors.As(err, &blocked) {
-			p.emit(Event{Action: "deny", Host: host, Port: port, Method: r.Method,
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: eventMethod(r),
 				Reason: blocked.Error()})
 			http.Error(w, "proxy: "+blocked.Error(), http.StatusForbidden)
 			return
 		}
-		p.emit(Event{Action: "error", Host: host, Port: port, Method: r.Method,
+		p.emit(Event{Action: "error", Host: host, Port: port, Method: eventMethod(r),
 			Reason: "upstream error: " + err.Error()})
 		http.Error(w, "proxy: upstream error", http.StatusBadGateway)
 		return
@@ -602,7 +645,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.StatusCode)
 	n, _ := io.Copy(w, resp.Body)
-	p.emit(Event{Action: "allow", Host: host, Port: port, Method: r.Method, Bytes: n})
+	p.emit(Event{Action: "allow", Host: host, Port: port, Method: eventMethod(r), Bytes: n})
 }
 
 // roundTripper returns the one transport the plain-HTTP path uses.

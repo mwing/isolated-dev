@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/mwing/isolated-dev/internal/agent"
@@ -24,27 +25,61 @@ func checkLearnPermitted(pol *policy.Policy) error {
 }
 
 // The connector gate works by leaving connector hosts out of the allowlist,
-// and under learning an absent host is admitted, so without --allow-mcp
-// they have to become denies instead.
-func learnDenies(machine []string, o *agent.Options) []string {
+// and under learning an absent host is admitted, so they have to become
+// denies instead. Every known agent's, not only the selected one's: a plain
+// console has no agent to ask, and an agent that does not declare a
+// connector host would otherwise leave it open. --allow-mcp reopens only
+// the selected agent's own.
+func learnDenies(machine []string, o *agent.Options, connectors []string) []string {
+	open := map[string]bool{}
+	if o != nil && o.AllowMCP {
+		for _, h := range o.Agent.MCPHosts {
+			open[h] = true
+		}
+	}
 	out := append([]string(nil), machine...)
-	if o != nil && !o.AllowMCP {
-		out = append(out, o.Agent.MCPHosts...)
+	seen := map[string]bool{}
+	add := func(hosts []string) {
+		for _, h := range hosts {
+			if !open[h] && !seen[h] {
+				seen[h] = true
+				out = append(out, h)
+			}
+		}
+	}
+	add(connectors)
+	if o != nil {
+		add(o.Agent.MCPHosts)
 	}
 	return out
 }
 
-func learning(o *agent.Options) func(*netpolicy.Sidecar) {
+// A registry that fails to load — one unparseable file in ~/.dev-envs/agents
+// is enough — falls back to the built-in agents rather than to no connector
+// denies: that direction fails open.
+func connectorHosts(env *Env) []string {
+	reg, err := registry(env)
+	if err != nil {
+		reg = agent.NewRegistry()
+	}
+	var out []string
+	for _, a := range reg.List() {
+		out = append(out, a.MCPHosts...)
+	}
+	return out
+}
+
+func learning(o *agent.Options, connectors []string) func(*netpolicy.Sidecar) {
 	return func(s *netpolicy.Sidecar) {
 		s.Learn = true
-		s.Deny = learnDenies(s.Deny, o)
+		s.Deny = learnDenies(s.Deny, o, connectors)
 	}
 }
 
 func announceLearning(env *Env, o *agent.Options) {
-	blocked := "Denied hosts, literal IPs and private or metadata addresses stay blocked."
-	if o != nil && !o.AllowMCP && len(o.Agent.MCPHosts) > 0 {
-		blocked = "Denied hosts, MCP connectors, literal IPs and private or metadata addresses stay blocked."
+	blocked := "Denied hosts, MCP connectors, literal IPs and private or metadata addresses stay blocked."
+	if o != nil && o.AllowMCP {
+		blocked = "Denied hosts, other agents' MCP connectors, literal IPs and private or metadata addresses stay blocked."
 	}
 	fmt.Fprintln(env.Stderr, "Learning: names not on the allowlist are allowed for this run and recorded.")
 	fmt.Fprintln(env.Stderr, "          "+blocked)
@@ -77,6 +112,13 @@ func reportLearned(env *Env, store *trust.Store, agentName string, learned []str
 		return
 	}
 
+	// The workload wrote to this terminal until a moment ago and can have left
+	// it concealing text, colouring it to match the background, or confined
+	// to a one-line scroll region. A soft reset (DECSTR), the scroll region
+	// and attributes put it back before anything the user is asked to trust.
+	if f, ok := env.Stderr.(*os.File); ok && isTerminal(f) {
+		fmt.Fprint(env.Stderr, "\x1b[!p\x1b[r\x1b[0m\x1b[?25h\r\n")
+	}
 	fmt.Fprintln(env.Stderr, "Learned: reached this run, not on the allowlist:")
 	for _, e := range keep {
 		fmt.Fprintf(env.Stderr, "  %s\n", e)

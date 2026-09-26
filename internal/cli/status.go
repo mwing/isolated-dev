@@ -89,7 +89,7 @@ func showStatus(ctx context.Context, env *Env, all bool) error {
 		if err != nil {
 			continue
 		}
-		summary := netpolicy.Summary(netpolicy.ParseDenials(logs))
+		summary := printable(netpolicy.Summary(netpolicy.ParseDenials(logs)))
 		if len(summary) == 0 {
 			continue
 		}

@@ -368,6 +368,11 @@ func Destinations(logs string) []Destination {
 		denied bool
 	}
 	counts := map[ident]int{}
+	// A reached connection logs "open" when it connects and "allow" when
+	// it ends, and one held open by the far end never ends. Counted as the
+	// larger of the two, a destination is never lost; a request the HTTP
+	// transport retries on a fresh connection counts twice.
+	opens := map[ident]int{}
 	order := []ident{}
 
 	sc := bufio.NewScanner(strings.NewReader(logs))
@@ -382,7 +387,11 @@ func Destinations(logs string) []Destination {
 			continue
 		}
 		var id ident
+		opening := false
 		switch e.Action {
+		case "open":
+			opening = true
+			id = ident{host: e.Host, port: e.Port, method: e.Method}
 		case "deny":
 			id = ident{host: e.Host, port: e.Port, method: e.Method, denied: true}
 		case "allow":
@@ -398,17 +407,27 @@ func Destinations(logs string) []Destination {
 		if id.method != "DNS" {
 			id.method = "connect"
 		}
-		if _, seen := counts[id]; !seen {
+		_, seenClose := counts[id]
+		_, seenOpen := opens[id]
+		if !seenClose && !seenOpen {
 			order = append(order, id)
 		}
-		counts[id]++
+		if opening {
+			opens[id]++
+		} else {
+			counts[id]++
+		}
 	}
 
 	out := make([]Destination, 0, len(order))
 	for _, id := range order {
+		n := counts[id]
+		if opens[id] > n {
+			n = opens[id]
+		}
 		out = append(out, Destination{
 			Host: id.host, Port: id.port, Method: id.method,
-			Count: counts[id], Denied: id.denied,
+			Count: n, Denied: id.denied,
 		})
 	}
 	return out

@@ -795,7 +795,7 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 
 	deny := pol.DenyHosts
 	if learn {
-		deny = learnDenies(deny, &opts)
+		deny = learnDenies(deny, &opts, connectorHosts(env))
 		announceLearning(env, &opts)
 	}
 	side := &netpolicy.Sidecar{

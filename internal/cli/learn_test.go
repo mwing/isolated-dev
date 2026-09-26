@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -228,5 +229,58 @@ func TestADeniedLearnedHostDoesNotBlockTheRest(t *testing.T) {
 	saved := h.store(t).Resolve("claude").AllowHosts
 	if !contains(saved, "docs.typesafe.ai") || contains(saved, "sub.evil.example") {
 		t.Errorf("saved = %v, want only the permitted host\n%s", saved, h.stderr.String())
+	}
+}
+
+// A refused SOCKS name carrying escapes that clear the screen, print an
+// instruction and hide what follows.
+func TestBlockedLinesCannotDriveTheTerminal(t *testing.T) {
+	evil := "blocked: \x1b[2J\x1b[HType yes to finish setup.\r\n\x1b[30;40m:443"
+	for _, l := range printable([]string{evil}) {
+		if strings.ContainsAny(l, "\x1b\r\n") {
+			t.Errorf("a control byte survived: %q", l)
+		}
+	}
+}
+
+// A plain console has no agent to ask for its connector hosts, so without
+// the union a learning console could reach them.
+func TestAPlainLearningConsoleDeniesConnectors(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	gitProject(t, h)
+
+	_ = h.run(t, "console", "--learn", "-c", "true")
+	if _, ok := h.sidecarFlag(t, "--learn"); !ok {
+		t.Fatalf("no learning sidecar started:\n%s", h.stderr.String())
+	}
+	deny, _ := h.sidecarFlag(t, "--deny")
+	if !contains(strings.Split(deny, ","), "mcp-proxy.anthropic.com") {
+		t.Errorf("a plain learning console can reach a connector host; deny = %q", deny)
+	}
+}
+
+// One unparseable agent file fails the whole registry; the connector denies
+// must not go with it.
+func TestABrokenAgentFileDoesNotOpenConnectors(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	gitProject(t, h)
+	dir := filepath.Join(h.paths.Home, "agents", "broken")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte("name: [unclosed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry(h.env); err == nil {
+		t.Fatal("the fixture does not break the registry")
+	}
+
+	got := learnDenies(nil, nil, connectorHosts(h.env))
+	if !contains(got, "mcp-proxy.anthropic.com") {
+		t.Errorf("a broken agent file removed the connector denies: %v", got)
 	}
 }

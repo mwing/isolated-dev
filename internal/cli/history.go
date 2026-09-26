@@ -35,8 +35,6 @@ type runOutcome struct {
 	Learned []string
 }
 
-// finishRun stops the sidecar and records what the run reached.
-//
 // Recording happens here rather than in each caller because it must happen
 // on every exit path, including the ones that failed: a run that was
 // killed is exactly the run someone will want to look up later.
@@ -46,7 +44,7 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 		return runOutcome{}, err
 	}
 	_, denied := netpolicy.ParseEvents(logs)
-	out := runOutcome{Blocked: netpolicy.Summary(denied)}
+	out := runOutcome{Blocked: printable(netpolicy.Summary(denied))}
 	if rec.Learning {
 		out.Learned = learnedEntries(rec.Allow, netpolicy.Destinations(logs))
 	}
@@ -80,6 +78,16 @@ func finishRun(ctx context.Context, env *Env, side *netpolicy.Sidecar, rec runRe
 		}
 	}
 	return out, nil
+}
+
+// printable: each line embeds a host the workload chose, and an escape in it
+// could redraw the screen around it.
+func printable(lines []string) []string {
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, textsafe.Name(l))
+	}
+	return out
 }
 
 // A contact on 80 or 443 becomes the bare host, which is what a person
@@ -194,7 +202,7 @@ func destinations(in []history.Dest) []destJSON {
 	out := make([]destJSON, 0, len(in))
 	for _, d := range in {
 		out = append(out, destJSON{
-			Host:   textsafe.Sanitize(d.Host),
+			Host:   textsafe.Name(d.Host),
 			Port:   d.Port,
 			Method: d.Method,
 			Count:  d.Count,
@@ -292,7 +300,7 @@ func names(dests []history.Dest, n int) []string {
 func refusalLines(dests []history.Dest) []string {
 	out := make([]string, 0, len(dests))
 	for _, d := range dests {
-		name := textsafe.Sanitize(history.Key(d.Host, d.Port))
+		name := textsafe.Name(history.Key(d.Host, d.Port))
 		if d.Method == history.MethodDNS {
 			name += " (DNS)"
 		}
