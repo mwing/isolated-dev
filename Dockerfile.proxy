@@ -5,7 +5,13 @@
 # the workload can reach, so it carries no shell, no package manager and
 # nothing to pivot to. Its policy arrives as argv at startup and there is no
 # control plane to rewrite it through (ROADMAP 4.3).
-FROM golang:1.26 AS build
+
+# Pinned to a patch and a digest, not '1.26': this binary parses hostile
+# traffic with net/http and crypto/tls, and a floating tag builds from
+# whatever golang:1.26 the machine has cached, since the build does not pull.
+# Move it when govulncheck does, together with the Go version in
+# .github/workflows and the toolchain line in go.mod.
+FROM golang:1.26.10@sha256:670bb5aa5349ae03b8516764718486f4f16399134bdc9acd0c46a23f043ab05c AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
