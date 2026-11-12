@@ -219,6 +219,7 @@ func gatherFacts(ctx context.Context, env *Env) (wizard.Facts, error) {
 		f.Grants = store.Project.Hosts("default")
 		f.Tools = store.Tools()
 		f.PendingGrants = store.Pending("default", cfg.Agents["default"])
+		_ = applyConfiguredTemplate(cfg, p)
 		f.PendingSettings = len(store.PendingSettings(projectAsks(cfg, p)))
 		if runs, herr := history.Load(history.Path(store.Project.Path())); herr == nil {
 			f.Runs = len(runs)

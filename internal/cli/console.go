@@ -134,6 +134,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	if err != nil {
 		return err
 	}
+	if err := applyConfiguredTemplate(cfg, p); err != nil {
+		return err
+	}
 	if err := enforceConsent(env, cfg, p, store, run); err != nil {
 		return err
 	}

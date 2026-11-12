@@ -580,6 +580,13 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			return err
 		}
 	}
+	store, err := trust.Load(env.Paths.Home, opts.Project)
+	if err != nil {
+		return err
+	}
+	if err := applyConfiguredTemplate(cfg, p); err != nil {
+		return err
+	}
 	// Forbidden settings, checked the way the workspace path checks them:
 	// against what the project's own file asks for, whether or not this user
 	// has already accepted it.
@@ -594,10 +601,6 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return verr
 	}
 
-	store, err := trust.Load(env.Paths.Home, opts.Project)
-	if err != nil {
-		return err
-	}
 	saved := store.Resolve(a.Name)
 	// Filtered here rather than only at the end, because these two are what
 	// the run reports back to the user. Printing "granted: evil.example"

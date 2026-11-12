@@ -69,6 +69,21 @@ func buildSourceChoice(flag string, cfg config.Config) (string, error) {
 	}
 }
 
+// Must run before consent, policy and the freshness check: all three read p,
+// and a Dockerfile left on it is one they ask about and compare against.
+// Not in `dev accept`: there it would hide the Dockerfile that an explicit
+// --build-source project asks to be accepted. Without a detected language it
+// does nothing: a build raises that error itself, and an agent on its own base
+// image never needed a template.
+func applyConfiguredTemplate(cfg config.Config, p *project.Project) error {
+	choice, err := buildSourceChoice("", cfg)
+	if err != nil || choice != configuredTemplate || !p.Detected.Found() {
+		return err
+	}
+	p.UseTemplate()
+	return nil
+}
+
 // buildSourceAsk describes the project-supplied Dockerfile a build would
 // use, or nil when there is nothing to ask about.
 //

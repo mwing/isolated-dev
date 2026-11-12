@@ -141,7 +141,17 @@ func enforceConsent(env *Env, cfg config.Config, p *project.Project, store *trus
 			fmt.Fprintf(env.Stderr, "For this run only:   %s\n", breakGlassFlag(a.Key))
 		}
 	}
-	fmt.Fprintf(env.Stderr, "Or ignore the file:  --network allowlist\n")
+	for _, a := range pending {
+		switch a.Key {
+		case "network":
+			fmt.Fprintf(env.Stderr, "Or ignore it:        --network allowlist\n")
+		case buildSourceKey:
+			if p.Detected.Found() && cfg.BuildSource != "template" {
+				fmt.Fprintf(env.Stderr, "Or ignore the file:  build_source: template  in %s\n",
+					env.Paths.Project)
+			}
+		}
+	}
 	return fmt.Errorf("unaccepted project settings")
 }
 

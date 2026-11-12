@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mwing/isolated-dev/internal/config"
+	"github.com/mwing/isolated-dev/internal/project"
 	"github.com/mwing/isolated-dev/internal/runner"
 )
 
@@ -344,5 +346,151 @@ func TestTheConfigSentinelIsNotAValidFlag(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown --build-source") {
 		t.Errorf("the refusal does not read as a bad flag value: %v", err)
+	}
+}
+
+func templateProject(t *testing.T, h *harness) {
+	t.Helper()
+	gitProject(t, h)
+	for name, body := range map[string]string{
+		"Dockerfile":   "FROM gcr.io/distroless/nodejs22\n",
+		"package.json": `{"name":"app"}` + "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.writeProject(t, "build_source: template\n")
+}
+
+// The consent gate runs before the build, so the template has to be applied
+// before it: asked about a Dockerfile the run will never read, the gate
+// blocks the project for following its own advice.
+func TestAConfiguredTemplateIsBuiltWithoutDockerfileConsent(t *testing.T) {
+	for _, args := range [][]string{
+		{"console", "--agent", "claude", "--in-place"},
+		{"agent", "run", "claude", "--in-place", "--tty", "off"},
+	} {
+		h := newHarness(t)
+		h.readyBackend()
+		h.readySidecar()
+		templateProject(t, h)
+		_, p, err := resolveProject(h.env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.fake.Response[dockerKey("image", "inspect", p.Image)] = runner.Result{ExitCode: 1}
+
+		err = h.run(t, args...)
+		if err != nil && strings.Contains(err.Error(), "unaccepted project settings") {
+			t.Errorf("%v: asked to trust a Dockerfile the template ignores:\n%s", args, h.stderr.String())
+			continue
+		}
+		out := h.stdout.String() + h.stderr.String()
+		if !strings.Contains(out, "language template") {
+			t.Errorf("%v: the template was not what got built:\n%s", args, out)
+		}
+	}
+}
+
+// Configuration may narrow the build, and must not stand in for consent when
+// a flag widens it again.
+func TestAnExplicitProjectBuildStillNeedsConsent(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	templateProject(t, h)
+
+	err := h.run(t, "run", "--build-source", "project", "-c", "true")
+	if err == nil || !strings.Contains(err.Error(), "not been accepted") && !strings.Contains(err.Error(), "unaccepted") {
+		t.Fatalf("an unaccepted Dockerfile was built because the config chose the template: %v\n%s",
+			err, h.stderr.String())
+	}
+}
+
+// The freshness check must compare against the Dockerfile the run builds, not
+// the repo's; otherwise a template image never matches and every agent run
+// rebuilds it. The repo Dockerfile is accepted so consent cannot be what stops
+// the run.
+func freshnessRun(t *testing.T, label func(cfg config.Config, p *project.Project) string) string {
+	t.Helper()
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	templateProject(t, h)
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.acceptSettings(t, *buildSourceAsk(p))
+	h.fake.Response[dockerKey("image", "inspect", "--format",
+		fmt.Sprintf("{{index .Config.Labels %q}}", imageSourceLabel), p.Image)] =
+		runner.Result{Stdout: label(cfg, p) + "\n"}
+
+	if err := h.run(t, "agent", "run", "claude", "--in-place", "--tty", "off"); err != nil {
+		t.Fatalf("agent run: %v\n%s", err, h.stderr.String())
+	}
+	return h.stdout.String() + h.stderr.String()
+}
+
+func TestATemplateImageIsNotRebuiltEveryRun(t *testing.T) {
+	out := freshnessRun(t, func(cfg config.Config, p *project.Project) string {
+		tp := *p
+		tp.UseTemplate()
+		want, err := finalDockerfile(cfg, &tp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sourceMarker(want)
+	})
+	if strings.Contains(out, "Rebuilding ") && strings.Contains(out, "different instructions than this project") {
+		t.Errorf("a current template image was rebuilt:\n%s", out)
+	}
+}
+
+// An image built from the repo Dockerfile before the template was configured
+// is the wrong image, and has to be rebuilt rather than reused.
+func TestARepoDockerfileImageIsRebuiltFromTheTemplate(t *testing.T) {
+	out := freshnessRun(t, func(cfg config.Config, p *project.Project) string {
+		want, err := finalDockerfile(cfg, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sourceMarker(want)
+	})
+	if !strings.Contains(out, "language template") {
+		t.Errorf("an image from the repo Dockerfile was reused under a configured template:\n%s", out)
+	}
+}
+
+// A directory with nothing to detect has no template to switch to, and an
+// agent there runs on its own base image; configuring the template must not
+// make that an error.
+func TestAConfiguredTemplateWithNoLanguageStillRunsAnAgent(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	gitProject(t, h)
+	h.writeProject(t, "build_source: template\n")
+
+	if err := h.run(t, "agent", "run", "claude", "--in-place", "--tty", "off"); err != nil {
+		t.Fatalf("an agent in a directory with no language failed: %v\n%s", err, h.stderr.String())
+	}
+}
+
+// `dev run --build-source project` points at `dev accept`; with the template
+// configured, accept must still be able to record the Dockerfile.
+func TestAcceptCanRecordTheDockerfileUnderAConfiguredTemplate(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	h.readySidecar()
+	templateProject(t, h)
+
+	if err := h.run(t, "accept", "build_source"); err != nil {
+		t.Fatalf("accept: %v\n%s", err, h.stderr.String())
+	}
+	err := h.run(t, "run", "--build-source", "project", "-c", "true")
+	if err != nil && strings.Contains(err.Error(), "unaccepted") {
+		t.Errorf("accepting did not satisfy --build-source project: %v\n%s", err, h.stderr.String())
 	}
 }
