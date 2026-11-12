@@ -459,10 +459,10 @@ dev console --agent claude --account-features
 ```
 
 Claude Code then sends usage telemetry to Anthropic's own endpoints. Its
-Datadog telemetry stays blocked, since those hosts are not on the
-allowlist, and each run reports them refused. To make it your default, set `account_features: true` in your own
-config (`~/.dev-envs/config.yaml`); a repository's `.devenv.yaml` cannot set
-it.
+Datadog intake hosts are denied for that run, so they are refused without a
+question, even in the console, and show as refused in the summary. To make
+it your default, set `account_features: true` in your own config
+(`~/.dev-envs/config.yaml`); a repository's `.devenv.yaml` cannot set it.
 
 **The other direction: an agent on your host, reaching for this.** The
 above puts the agent inside the sandbox. The reverse arrangement — Claude

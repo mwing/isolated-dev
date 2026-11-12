@@ -267,8 +267,12 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	allowed = gateConnectorHosts(env, agentOpts, permittedHosts(env, pol, append(allowed, extraHosts...)))
 
 	var tune []func(*netpolicy.Sidecar)
-	if agentOpts != nil && agentOpts.AccountFeatures && len(agentOpts.Agent.FlagsOffEnv) > 0 {
-		fmt.Fprintln(env.Stderr, "Account: "+accountFeaturesNotice)
+	if agentOpts != nil && agentOpts.AccountFeatures {
+		if len(agentOpts.Agent.FlagsOffEnv) > 0 {
+			fmt.Fprintln(env.Stderr, "Account: "+accountFeaturesNotice)
+		}
+		hosts := agentOpts.Agent.TelemetryHosts
+		tune = append(tune, func(s *netpolicy.Sidecar) { s.Deny = append(s.Deny, hosts...) })
 	}
 	if run.learn {
 		tune = append(tune, learning(agentOpts, connectorHosts(env)))

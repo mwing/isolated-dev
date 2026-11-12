@@ -133,7 +133,7 @@ func (r *Resolver) deny(name string) {
 		}
 	}
 	r.mu.Unlock()
-	r.emit(Event{Action: "deny", Host: name, Method: "DNS", Reason: "not in allowlist"})
+	r.emit(Event{Action: "deny", Host: name, Method: "DNS", Reason: r.Allowlist().refusalReason(name)})
 }
 
 func (r *Resolver) emit(e Event) {

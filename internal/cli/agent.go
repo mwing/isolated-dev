@@ -104,8 +104,8 @@ func flagOr(cmd *cobra.Command, name string, flag, configured bool) bool {
 	return configured
 }
 
-const accountFeaturesNotice = "feature flags on — Claude Code also sends usage telemetry " +
-	"to Anthropic; its Datadog telemetry stays blocked and is reported as refused"
+const accountFeaturesNotice = "feature flags on — the agent also sends usage telemetry to its " +
+	"vendor; its third-party telemetry hosts stay denied and show as refused"
 
 const accountFeaturesHelp = "let the agent fetch your account's feature flags, which gated " +
 	"models (e.g. Mythos) need; Claude Code then also sends usage telemetry to Anthropic. " +
@@ -818,7 +818,10 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 		return err
 	}
 
-	deny := pol.DenyHosts
+	deny := append([]string(nil), pol.DenyHosts...)
+	if opts.AccountFeatures {
+		deny = append(deny, a.TelemetryHosts...)
+	}
 	if learn {
 		deny = learnDenies(deny, &opts, connectorHosts(env))
 		announceLearning(env, &opts)

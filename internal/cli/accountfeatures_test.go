@@ -148,3 +148,23 @@ func TestTheConsoleAnnouncesAccountFeatures(t *testing.T) {
 		}
 	}
 }
+
+// Once the switch is off, the agent's third-party telemetry hosts are denied,
+// so the console refuses them instead of asking whether to allow them.
+func TestAccountFeaturesDenyTheTelemetryHosts(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"agent", "run", "claude", "--tty", "off"}, false},
+		{[]string{"agent", "run", "claude", "--account-features", "--tty", "off"}, true},
+		{[]string{"console", "--agent", "claude", "--account-features"}, true},
+	} {
+		h := accountFeaturesRun(t, "", "", c.args...)
+		deny, _ := h.sidecarFlag(t, "--deny")
+		got := contains(strings.Split(deny, ","), "http-intake.logs.us5.datadoghq.com")
+		if got != c.want {
+			t.Errorf("%v: telemetry host denied = %v, want %v (deny = %q)", c.args, got, c.want, deny)
+		}
+	}
+}

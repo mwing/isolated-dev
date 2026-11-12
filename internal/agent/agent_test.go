@@ -462,6 +462,9 @@ func TestAnOldPinStillHonoursAccountFeatures(t *testing.T) {
 	if a.Version != "2.1.322" {
 		t.Fatalf("the pin was not loaded: %s", a.Version)
 	}
+	if len(a.TelemetryHosts) == 0 {
+		t.Error("an old pin did not inherit the telemetry hosts to deny")
+	}
 	for _, e := range (Options{Agent: a, AccountFeatures: true}).agentEnv() {
 		if envName(e) == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" {
 			t.Errorf("an old pin kept the switch under --account-features")

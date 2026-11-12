@@ -83,6 +83,10 @@ type Agent struct {
 	// pinned before this field existed carries them there. An explicitly
 	// empty list still inherits the built-in's, which fails closed.
 	FlagsOffEnv []string `yaml:"flags_off_env"`
+	// TelemetryHosts are where the agent sends telemetry once FlagsOffEnv no
+	// longer stops it. Off the allowlist already; denied outright under
+	// --account-features, so the console refuses them rather than asking.
+	TelemetryHosts []string `yaml:"telemetry_hosts"`
 	// AuthEnv names environment variables that carry an API key in `env`
 	// auth mode. Values are never taken implicitly: the user must ask.
 	AuthEnv []string `yaml:"auth_env"`
@@ -308,8 +312,8 @@ func NewRegistry() *Registry {
 
 // LoadDir adds definitions from <dir>/<name>/agent.yaml, overriding
 // built-ins of the same name so a user can pin or adjust one without
-// forking the tool. FlagsOffEnv is the exception: an override without it
-// inherits the built-in's.
+// forking the tool. FlagsOffEnv and TelemetryHosts are the exception: an
+// override without them inherits the built-in's.
 func (r *Registry) LoadDir(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -344,8 +348,13 @@ func (r *Registry) LoadDir(dir string) error {
 		// A definition written by `dev agent update` before FlagsOffEnv
 		// existed has none, and would make --account-features a no-op for
 		// the agent it pins.
-		if prior, ok := r.agents[a.Name]; ok && len(a.FlagsOffEnv) == 0 {
-			a.FlagsOffEnv = prior.FlagsOffEnv
+		if prior, ok := r.agents[a.Name]; ok {
+			if len(a.FlagsOffEnv) == 0 {
+				a.FlagsOffEnv = prior.FlagsOffEnv
+			}
+			if len(a.TelemetryHosts) == 0 {
+				a.TelemetryHosts = prior.TelemetryHosts
+			}
 		}
 		r.agents[a.Name] = &a
 	}

@@ -448,9 +448,9 @@ func (p *Proxy) authorizeTunnel(ctx context.Context, host string, port int,
 	method string) (net.Conn, error) {
 	if !p.Allowlist().Allows(host, port) {
 		if !p.awaitDecision(ctx, host, port, method) {
-			p.emit(Event{Action: "deny", Host: host, Port: port, Method: method,
-				Reason: "not in allowlist"})
-			return nil, &refusal{reason: "not in allowlist", kind: refusedByPolicy}
+			why := p.Allowlist().refusalReason(host)
+			p.emit(Event{Action: "deny", Host: host, Port: port, Method: method, Reason: why})
+			return nil, &refusal{reason: why, kind: refusedByPolicy}
 		}
 	}
 	if why := p.exfilShape(host); why != "" {
@@ -503,11 +503,11 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 			case refusedAddress:
 				http.Error(w, "proxy: "+ref.reason, http.StatusForbidden)
 			default:
-				denyResponse(w, host, port)
+				p.denyResponse(w, host, port)
 			}
 			return
 		}
-		denyResponse(w, host, port)
+		p.denyResponse(w, host, port)
 		return
 	}
 	defer func() { _ = upstream.Close() }()
@@ -591,7 +591,7 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// here would let http:// carry what the other paths refuse.
 	if why := p.exfilShape(host); why != "" {
 		p.emit(Event{Action: "deny", Host: host, Port: port, Method: eventMethod(r), Reason: why})
-		denyResponse(w, host, port)
+		p.denyResponse(w, host, port)
 		return
 	}
 	// Plain HTTP holds for a decision exactly as CONNECT does. Anything
@@ -601,8 +601,8 @@ func (p *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if !p.Allowlist().Allows(host, port) {
 		if !p.awaitDecision(r.Context(), host, port, eventMethod(r)) {
 			p.emit(Event{Action: "deny", Host: host, Port: port, Method: eventMethod(r),
-				Reason: "not in allowlist"})
-			denyResponse(w, host, port)
+				Reason: p.Allowlist().refusalReason(host)})
+			p.denyResponse(w, host, port)
 			return
 		}
 	}
@@ -686,6 +686,12 @@ func (p *Proxy) awaitDecision(ctx context.Context, host string, port int, method
 	if p.isRefused(host) {
 		return false
 	}
+	// A denied destination is not a question either: no grant overrides a
+	// deny, so holding it would only make someone wait to answer one that
+	// cannot change anything.
+	if p.Allowlist().denied(host) {
+		return false
+	}
 	p.emit(Event{Action: "pending", Host: host, Port: port, Method: method,
 		Reason: "waiting for a decision"})
 
@@ -717,10 +723,17 @@ func (p *Proxy) awaitDecision(ctx context.Context, host string, port int, method
 }
 
 // denyResponse explains the block in a way that reaches the developer
-// staring at a failed request, not just the log.
-func denyResponse(w http.ResponseWriter, host string, port int) {
+// staring at a failed request, not just the log. A denied host gets no
+// --allow-host remedy: the grant would be refused, so offering it is a dead
+// end.
+func (p *Proxy) denyResponse(w http.ResponseWriter, host string, port int) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusForbidden)
+	if p.Allowlist().denied(host) {
+		fmt.Fprintf(w, "blocked by isolated-dev egress policy: %s:%d is denied on this machine, "+
+			"and no grant can allow it\n", host, port)
+		return
+	}
 	fmt.Fprintf(w, "blocked by isolated-dev egress policy: %s:%d is not on the allowlist\n\n",
 		host, port)
 	fmt.Fprintf(w, "If this destination is needed, re-run with:\n  --allow-host %s\n", host)

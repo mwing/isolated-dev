@@ -378,3 +378,61 @@ func recorded(c *collector, host string) bool {
 	}
 	return false
 }
+
+// A grant never overrides a deny, so holding a denied destination for an
+// answer only makes someone wait on a question that changes nothing.
+func TestADeniedHostIsNotHeldForADecision(t *testing.T) {
+	a, err := mustParse(t, "known.example.com").WithDeny([]string{"denied.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &collector{}
+	p := NewProxy(a)
+	p.Emit = c.emit
+	p.AskTimeout = 5 * time.Second
+
+	start := time.Now()
+	if p.awaitDecision(context.Background(), "denied.example.com", 443, "CONNECT") {
+		t.Fatal("a denied host was allowed")
+	}
+	if waited := time.Since(start); waited > time.Second {
+		t.Errorf("a denied host was held for %v", waited)
+	}
+	for _, e := range c.all() {
+		if e.Action == "pending" {
+			t.Errorf("a denied host was put to the user: %+v", e)
+		}
+	}
+}
+
+// A host no grant can open is told so, and is not sent to a remedy the
+// policy would refuse.
+func TestADeniedHostIsReportedAsDenied(t *testing.T) {
+	a, err := mustParse(t, "known.example.com").WithDeny([]string{"denied.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &collector{}
+	p := NewProxy(a)
+	p.Emit = c.emit
+	conn, err := net.Dial("tcp", startProxy(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	fmt.Fprintf(conn, "GET http://denied.example.com/ HTTP/1.1\r\nHost: denied.example.com\r\nConnection: close\r\n\r\n")
+	body, _ := io.ReadAll(conn)
+	if strings.Contains(string(body), "--allow-host") {
+		t.Errorf("a denied host was offered --allow-host:\n%s", body)
+	}
+	var reason string
+	for _, e := range c.all() {
+		if e.Action == "deny" {
+			reason = e.Reason
+		}
+	}
+	if reason != "denied by policy" {
+		t.Errorf("deny reason = %q, want it to say the policy denied it", reason)
+	}
+}

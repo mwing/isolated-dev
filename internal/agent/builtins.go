@@ -3,7 +3,7 @@ package agent
 // builtins are the agents that ship with the tool. They are ordinary
 // definitions with no special status: a user file at
 // ~/.dev-envs/agents/<name>/agent.yaml replaces one, except that it inherits
-// flags_off_env when it sets none (see LoadDir).
+// flags_off_env and telemetry_hosts when it sets none (see LoadDir).
 //
 // Allowlists are deliberately tight. Each host is here because the agent
 // cannot function without it, and every entry is a destination the agent
@@ -40,6 +40,10 @@ func builtins() []Agent {
 			// traffic off at the source: nothing to block, nothing to
 			// report, no noise in the notices.
 			FlagsOffEnv: []string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"},
+			TelemetryHosts: []string{
+				"http-intake.logs.us5.datadoghq.com",
+				"browser-intake-us5-datadoghq.com",
+			},
 			// Hosts per Claude Code's documented network requirements.
 			AllowHosts: []string{
 				"api.anthropic.com",
