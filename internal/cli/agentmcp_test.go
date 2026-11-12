@@ -1,9 +1,14 @@
 package cli
 
 import (
-	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/mwing/isolated-dev/internal/agent"
+	"github.com/mwing/isolated-dev/internal/container"
+	"github.com/mwing/isolated-dev/internal/netpolicy"
+	"github.com/mwing/isolated-dev/internal/trust"
 )
 
 // The leak this closes: an agent running untrusted code could reach the
@@ -61,14 +66,25 @@ func TestConsoleAgentBlocksMCPByDefault(t *testing.T) {
 	gitProject(t, h)
 	h.writeGlobal(t, "agent_clone: false\n")
 
-	// The console needs a terminal to draw; -c with no tty runs the agent
-	// non-interactively, which is enough to inspect the workload run.
+	// Without a terminal the console stops after starting the sidecar but
+	// before the agent.
 	_ = h.run(t, "console", "--agent", "claude")
 
-	for _, run := range h.runsWithRole("agent") {
-		if !contains(run, "--strict-mcp-config") {
-			t.Errorf("console --agent did not block MCP by default:\n%s", argv(run))
-		}
+	cfg, p, err := resolveProject(h.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := trust.Load(h.paths.Home, p.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts, _, _, err := prepareAgent(context.Background(), h.env,
+		container.New(h.env.driver(cfg.VMName)), p, store, cfg, "claude", nil, false, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd := agent.Spec(*opts, netpolicy.Topology{SidecarIP: "10.0.0.2"}).Command; !contains(cmd, "--strict-mcp-config") {
+		t.Errorf("console --agent did not block MCP by default: %v", cmd)
 	}
 	if contains(h.sidecarAllow(t), "mcp-proxy.anthropic.com") {
 		t.Errorf("console --agent allowed the connector host by default: %v",

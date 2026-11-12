@@ -61,8 +61,15 @@ are off by default — a connector reaches an account outside the sandbox
 (Gmail, Linear) with a live token — and this turns them on for a run you
 trust with them.
 
+`--account-features` is on `agent run` and `console`. It lets the agent
+fetch its account's feature flags, which models an account is gated into
+need, at the cost of Claude Code's usage telemetry going to Anthropic.
+`account_features: true` in your own config makes it the default, and
+`--account-features=false` turns it off for one run.
+
 `console` takes `--allow-host`, `--clone`, `--clone-depth`, `--in-place`,
-`--allow-docker-socket`, `--rebuild` and `--agent`. It has no `--offline`,
+`--allow-docker-socket`, `--rebuild`, `--agent`, `--allow-mcp`,
+`--account-features` and `--learn`. It has no `--offline`,
 `--network` or
 `--egress-prompt`: it requires `network: allowlist` — with nothing filtered
 there is nothing to decide — and holding blocked requests is what it does

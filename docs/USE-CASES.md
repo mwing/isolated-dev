@@ -447,6 +447,23 @@ Even then, defence in depth holds: a connector is reachable only because
 `--allow-mcp` adds its host to the allowlist, so it is still a named,
 reviewable destination in `dev history` like any other.
 
+**Models your account is gated into need `--account-features`.** Access to
+a model like Mythos arrives as an account feature flag, and the sandbox keeps
+Claude Code's nonessential traffic off, which stops its telemetry and its
+flags together. As of Claude Code 2.1.x there is no switch that silences
+telemetry and still fetches flags — `DISABLE_TELEMETRY` stops them too. So a
+run that needs those models says so:
+
+```sh
+dev console --agent claude --account-features
+```
+
+Claude Code then sends usage telemetry to Anthropic's own endpoints. Its
+Datadog telemetry stays blocked, since those hosts are not on the
+allowlist, and each run reports them refused. To make it your default, set `account_features: true` in your own
+config (`~/.dev-envs/config.yaml`); a repository's `.devenv.yaml` cannot set
+it.
+
 **The other direction: an agent on your host, reaching for this.** The
 above puts the agent inside the sandbox. The reverse arrangement — Claude
 Code running normally on your machine, choosing to run untrusted commands

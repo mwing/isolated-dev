@@ -75,6 +75,14 @@ type Agent struct {
 	// so an agent definition cannot override the proxy settings that make
 	// egress control work.
 	Env []string `yaml:"env"`
+	// FlagsOffEnv also stop the agent fetching its account's feature flags,
+	// which carry access to models the account is gated into. For Claude
+	// Code 2.1.x every switch tried that silences telemetry, DISABLE_TELEMETRY
+	// included, also stops the flags, so the two cannot be had separately.
+	// --account-features strips these names from Env too: a definition
+	// pinned before this field existed carries them there. An explicitly
+	// empty list still inherits the built-in's, which fails closed.
+	FlagsOffEnv []string `yaml:"flags_off_env"`
 	// AuthEnv names environment variables that carry an API key in `env`
 	// auth mode. Values are never taken implicitly: the user must ask.
 	AuthEnv []string `yaml:"auth_env"`
@@ -300,7 +308,8 @@ func NewRegistry() *Registry {
 
 // LoadDir adds definitions from <dir>/<name>/agent.yaml, overriding
 // built-ins of the same name so a user can pin or adjust one without
-// forking the tool.
+// forking the tool. FlagsOffEnv is the exception: an override without it
+// inherits the built-in's.
 func (r *Registry) LoadDir(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -332,6 +341,12 @@ func (r *Registry) LoadDir(dir string) error {
 			return fmt.Errorf("agent: %s: %w", path, err)
 		}
 		a.source = path
+		// A definition written by `dev agent update` before FlagsOffEnv
+		// existed has none, and would make --account-features a no-op for
+		// the agent it pins.
+		if prior, ok := r.agents[a.Name]; ok && len(a.FlagsOffEnv) == 0 {
+			a.FlagsOffEnv = prior.FlagsOffEnv
+		}
 		r.agents[a.Name] = &a
 	}
 	return nil

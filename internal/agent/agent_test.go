@@ -405,14 +405,67 @@ func TestTelemetryIsDisabledAtSourceNotAllowlisted(t *testing.T) {
 		}
 	}
 
-	var found bool
-	for _, e := range a.Env {
-		if e == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" {
-			found = true
+	if !containsEntry(Options{Agent: a}.agentEnv(), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1") {
+		t.Error("telemetry not disabled at the source by default; notices will be noisy")
+	}
+}
+
+func containsEntry(env []string, want string) bool {
+	for _, e := range env {
+		if e == want {
+			return true
 		}
 	}
-	if !found {
-		t.Error("telemetry not disabled at the source; notices will be noisy")
+	return false
+}
+
+// Gated models arrive as account feature flags, and Claude Code fetches those
+// only with nonessential traffic on; the opt-in is what lets them through.
+func TestAccountFeaturesDropTheTrafficSwitch(t *testing.T) {
+	a, err := NewRegistry().Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := Options{Agent: a, AccountFeatures: true}.agentEnv()
+	for _, e := range env {
+		if envName(e) == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" {
+			t.Errorf("--account-features left the switch set: %v", env)
+		}
+	}
+	if !containsEntry(env, "DISABLE_AUTOUPDATER=1") {
+		t.Errorf("--account-features dropped an unrelated setting: %v", env)
+	}
+}
+
+// A definition pinned by `dev agent update` before flags_off_env existed has
+// the switch in env, where only inheritance lets the opt-in find it.
+func TestAnOldPinStillHonoursAccountFeatures(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "name: claude\nversion: 2.1.322\ninstall: npm install -g @anthropic-ai/claude-code@{{VERSION}}\n" +
+		"binary: claude\nconfig_dir: /home/dev/.claude\nbase: debian:bookworm-slim\n" +
+		"allow_hosts:\n- api.anthropic.com\n" +
+		"env:\n- CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1\n- DISABLE_AUTOUPDATER=1\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude", "agent.yaml"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRegistry()
+	if err := r.LoadDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	a, err := r.Get("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Version != "2.1.322" {
+		t.Fatalf("the pin was not loaded: %s", a.Version)
+	}
+	for _, e := range (Options{Agent: a, AccountFeatures: true}).agentEnv() {
+		if envName(e) == "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" {
+			t.Errorf("an old pin kept the switch under --account-features")
+		}
 	}
 }
 

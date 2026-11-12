@@ -124,6 +124,7 @@ type File struct {
 	// AgentClone decides whether `dev agent run` works in a private copy
 	// of the repository. Default true.
 	AgentClone        *bool    `yaml:"agent_clone"`
+	AccountFeatures   *bool    `yaml:"account_features"`
 	MountDockerSocket *bool    `yaml:"mount_docker_socket"`
 	ForwardPorts      *string  `yaml:"forward_ports"`
 	PassEnvVars       *PassEnv `yaml:"pass_env_vars"`
@@ -167,6 +168,7 @@ type Config struct {
 	MinDiskSpace      int
 	MountGitConfig    bool
 	AgentClone        bool
+	AccountFeatures   bool
 	MountDockerSocket bool
 	ForwardPorts      string
 	PassEnvVars       PassEnv
@@ -296,6 +298,16 @@ func (c *Config) merge(f File, o Origin) {
 		c.AgentClone = *f.AgentClone
 		c.origins["agent_clone"] = o
 	}
+	if f.AccountFeatures != nil {
+		if o != OriginProject {
+			c.AccountFeatures = *f.AccountFeatures
+			c.origins["account_features"] = o
+		} else {
+			c.Notes = append(c.Notes, Note{Key: "account_features",
+				Text: "ignored from your project file (.devenv.yaml): it lets the agent " +
+					"send telemetry to its vendor, so it is a setting in your own config"})
+		}
+	}
 	if f.MountDockerSocket != nil {
 		c.MountDockerSocket = *f.MountDockerSocket
 		c.origins["mount_docker_socket"] = o
@@ -411,6 +423,8 @@ var knownKeys = map[string]bool{
 	"cache_max_size":      true,
 	"min_disk_space":      true,
 	"mount_git_config":    true,
+	"agent_clone":         true,
+	"account_features":    true,
 	"mount_docker_socket": true,
 	"forward_ports":       true,
 	"pass_env_vars":       true,

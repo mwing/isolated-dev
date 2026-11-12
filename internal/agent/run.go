@@ -80,6 +80,8 @@ type Options struct {
 	// Off by default, because a connector reaches an account outside the
 	// sandbox with a live token, which is the reach the sandbox withholds.
 	AllowMCP bool
+	// See Agent.FlagsOffEnv.
+	AccountFeatures bool
 }
 
 // Allowlist is the effective policy for a run: the agent's defaults plus
@@ -104,6 +106,31 @@ func (o Options) Allowlist() []string {
 // accepts and flags, and it has to match by the sidecar's own rules so a
 // port suffix or a wildcard cannot slip a connector host past a string
 // compare. See gateConnectorHosts in internal/cli.
+
+func (o Options) agentEnv() []string {
+	a := o.Agent
+	if !o.AccountFeatures {
+		return append(append([]string(nil), a.Env...), a.FlagsOffEnv...)
+	}
+	off := map[string]bool{}
+	for _, e := range a.FlagsOffEnv {
+		off[envName(e)] = true
+	}
+	var out []string
+	for _, e := range a.Env {
+		if !off[envName(e)] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func envName(entry string) string {
+	if i := strings.IndexByte(entry, '='); i >= 0 {
+		return entry[:i]
+	}
+	return entry
+}
 
 // BaseImage returns the image the overlay is built on.
 func (o Options) BaseImage() string {
@@ -221,7 +248,7 @@ func Spec(o Options, topo netpolicy.Topology) container.RunSpec {
 	// Agent defaults first, sandbox variables second: docker takes the
 	// last --env for a name, so the topology's proxy settings win over
 	// anything an agent definition declares.
-	spec.Env = append(spec.Env, a.Env...)
+	spec.Env = append(spec.Env, o.agentEnv()...)
 	spec.Env = append(spec.Env, topo.Env()...)
 	spec.Env = append(spec.Env,
 		"HOME="+HomePath,

@@ -2,7 +2,8 @@ package agent
 
 // builtins are the agents that ship with the tool. They are ordinary
 // definitions with no special status: a user file at
-// ~/.dev-envs/agents/<name>/agent.yaml replaces one entirely.
+// ~/.dev-envs/agents/<name>/agent.yaml replaces one, except that it inherits
+// flags_off_env when it sets none (see LoadDir).
 //
 // Allowlists are deliberately tight. Each host is here because the agent
 // cannot function without it, and every entry is a destination the agent
@@ -29,16 +30,16 @@ func builtins() []Agent {
 			Runtime:      "node",
 			RuntimeImage: "node:22-bookworm-slim",
 			Install:      "npm install -g @anthropic-ai/claude-code@{{VERSION}}",
-			// Rather than allowlist the telemetry endpoints, turn the
-			// traffic off at the source: nothing to block, nothing to
-			// report, no noise in the notices.
 			Env: []string{
-				"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
 				// An agent that self-updates inside the sandbox changes
 				// what runs between two invocations, which defeats the
 				// point of pinning the image.
 				"DISABLE_AUTOUPDATER=1",
 			},
+			// Rather than allowlist the telemetry endpoints, turn the
+			// traffic off at the source: nothing to block, nothing to
+			// report, no noise in the notices.
+			FlagsOffEnv: []string{"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"},
 			// Hosts per Claude Code's documented network requirements.
 			AllowHosts: []string{
 				"api.anthropic.com",

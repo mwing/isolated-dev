@@ -56,6 +56,8 @@ type runGrants struct {
 	allowMCP bool
 	// Console only; `dev agent run` takes it directly.
 	learn bool
+	// Console only; `dev agent run` takes it directly.
+	accountFeatures *bool
 }
 
 // authorizes reports whether this run was given the key outright.

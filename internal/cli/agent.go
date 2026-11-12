@@ -95,6 +95,22 @@ func moved(env *Env, cmd *cobra.Command, from, to string) *cobra.Command {
 	return cmd
 }
 
+// flagOr lets a flag given on the command line win in both directions over a
+// configured default; a bool alone cannot tell "not given" from "false".
+func flagOr(cmd *cobra.Command, name string, flag, configured bool) bool {
+	if cmd.Flags().Changed(name) {
+		return flag
+	}
+	return configured
+}
+
+const accountFeaturesNotice = "feature flags on — Claude Code also sends usage telemetry " +
+	"to Anthropic; its Datadog telemetry stays blocked and is reported as refused"
+
+const accountFeaturesHelp = "let the agent fetch your account's feature flags, which gated " +
+	"models (e.g. Mythos) need; Claude Code then also sends usage telemetry to Anthropic. " +
+	"Set account_features: true in your own config to make it the default"
+
 // gateConnectorHosts removes an agent's MCP connector hosts from a finished
 // allowlist unless the run enabled MCP, and says which it removed.
 //
@@ -271,6 +287,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		cloneDepth int
 		allowMCP   bool
 		learn      bool
+		accountFts bool
 	)
 
 	cmd := &cobra.Command{
@@ -305,12 +322,13 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 				// A TTY is only valid when stdin is one AND the backend
 				// transport carries it through. Auto-detection covers the
 				// common cases; --tty overrides it when it guesses wrong.
-				Interactive: wantTTY(tty, env.Stdin),
-				Memory:      memory,
-				CPUs:        cpus,
-				Args:        args[1:],
-				Safe:        safe,
-				AllowMCP:    allowMCP,
+				Interactive:     wantTTY(tty, env.Stdin),
+				Memory:          memory,
+				CPUs:            cpus,
+				Args:            args[1:],
+				Safe:            safe,
+				AllowMCP:        allowMCP,
+				AccountFeatures: flagOr(cmd, "account-features", accountFts, cfg.AccountFeatures),
 			}
 
 			opts.GitIdentity = gitIdentity(env)
@@ -398,6 +416,7 @@ func newAgentRunCmd(env *Env) *cobra.Command {
 		"keep the agent's own permission prompts instead of auto-approving inside the sandbox")
 	cmd.Flags().StringVar(&notify, "egress-notify", "live",
 		"report blocked destinations: live (as they happen) or off (summary only)")
+	cmd.Flags().BoolVar(&accountFts, "account-features", false, accountFeaturesHelp)
 	cmd.Flags().BoolVar(&learn, "learn", false,
 		"allow destinations not on the allowlist for this run, record them, and offer to keep them")
 	return cmd
@@ -737,6 +756,9 @@ func runAgent(ctx context.Context, env *Env, cfg config.Config, opts agent.Optio
 			filepath.Base(env.Paths.Project), strings.Join(accepted, " "))
 	}
 	fmt.Fprintf(env.Stdout, "Auth:      %s\n", authDescription(opts))
+	if opts.AccountFeatures && len(opts.Agent.FlagsOffEnv) > 0 {
+		fmt.Fprintf(env.Stdout, "Account:   %s\n", accountFeaturesNotice)
+	}
 	if opts.Memory != "" || opts.CPUs != "" {
 		note := ""
 		if defaulted {

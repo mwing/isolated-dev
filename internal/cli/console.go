@@ -42,6 +42,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 		dockSocket bool
 		allowMCP   bool
 		learn      bool
+		accountFts bool
 	)
 
 	cmd := &cobra.Command{
@@ -59,7 +60,8 @@ func newConsoleCmd(env *Env) *cobra.Command {
 			return runConsole(cmd.Context(), env, splitCommand(command, args),
 				rebuild, extraHosts, shell, agentName, record,
 				cloneOpts{use: useCloneD, inPlace: inPlace, depth: cloneDepth},
-				runGrants{dockerSocket: dockSocket, allowMCP: allowMCP, learn: learn})
+				runGrants{dockerSocket: dockSocket, allowMCP: allowMCP, learn: learn,
+					accountFeatures: optionalFlag(cmd, "account-features", accountFts)})
 		},
 	}
 	addCloneFlag(cmd, &useCloneD, &cloneDepth)
@@ -76,6 +78,7 @@ func newConsoleCmd(env *Env) *cobra.Command {
 	cmd.Flags().BoolVar(&allowMCP, "allow-mcp", false,
 		"let the agent use its MCP connectors (off by default: a connector "+
 			"reaches an account outside the sandbox with a live token)")
+	cmd.Flags().BoolVar(&accountFts, "account-features", false, accountFeaturesHelp)
 	cmd.Flags().BoolVar(&learn, "learn", false,
 		"allow destinations not on the allowlist for this run, record them, and offer to keep them")
 	cmd.Flags().StringVar(&record, "record", "",
@@ -85,6 +88,22 @@ func newConsoleCmd(env *Env) *cobra.Command {
 	cmd.Flags().StringVar(&replaySize, "replay-size", "",
 		"replay at a fixed WxH, ignoring the recorded resizes")
 	return cmd
+}
+
+// optionalFlag is nil when the flag was not given, so a configured default
+// can apply; see flagOr.
+func optionalFlag(cmd *cobra.Command, name string, v bool) *bool {
+	if !cmd.Flags().Changed(name) {
+		return nil
+	}
+	return &v
+}
+
+func valueOr(v *bool, fallback bool) bool {
+	if v == nil {
+		return fallback
+	}
+	return *v
 }
 
 // replayRecording renders a recorded session, showing the sizes the
@@ -213,7 +232,7 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	)
 	if agentName != "" {
 		agentOpts, image, allowed, err = prepareAgent(ctx, env, eng, p, store, cfg, agentName,
-			command, run.allowMCP, rebuild)
+			command, run.allowMCP, valueOr(run.accountFeatures, cfg.AccountFeatures), rebuild)
 		if err != nil {
 			return err
 		}
@@ -248,6 +267,9 @@ func runConsole(ctx context.Context, env *Env, command []string, rebuild bool,
 	allowed = gateConnectorHosts(env, agentOpts, permittedHosts(env, pol, append(allowed, extraHosts...)))
 
 	var tune []func(*netpolicy.Sidecar)
+	if agentOpts != nil && agentOpts.AccountFeatures && len(agentOpts.Agent.FlagsOffEnv) > 0 {
+		fmt.Fprintln(env.Stderr, "Account: "+accountFeaturesNotice)
+	}
 	if run.learn {
 		tune = append(tune, learning(agentOpts, connectorHosts(env)))
 		announceLearning(env, agentOpts)
@@ -455,7 +477,7 @@ func paneSize() (cols, rows int) {
 // authenticated.
 func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *project.Project,
 	store *trust.Store, cfg config.Config, name string, command []string,
-	allowMCP, rebuild bool) (*agent.Options, string, []string, error) {
+	allowMCP, accountFeatures, rebuild bool) (*agent.Options, string, []string, error) {
 	reg, err := registry(env)
 	if err != nil {
 		return nil, "", nil, err
@@ -487,14 +509,15 @@ func prepareAgent(ctx context.Context, env *Env, eng *container.Engine, p *proje
 		}
 	}
 	opts := agent.Options{
-		Agent:       a,
-		Project:     p.Dir,
-		Interactive: true,
-		Args:        firstArgs(command, prefs.Args),
-		Image:       base,
-		Memory:      prefs.Memory,
-		CPUs:        prefs.CPUs,
-		AllowMCP:    allowMCP,
+		Agent:           a,
+		Project:         p.Dir,
+		Interactive:     true,
+		Args:            firstArgs(command, prefs.Args),
+		Image:           base,
+		Memory:          prefs.Memory,
+		CPUs:            prefs.CPUs,
+		AllowMCP:        allowMCP,
+		AccountFeatures: accountFeatures,
 		// Without this the agent cannot commit — the container has no
 		// ~/.gitconfig, so git refuses with "please tell me who you are",
 		// and in a clone that means the work has no way back out. `dev agent
