@@ -79,8 +79,7 @@ type Options struct {
 	// MCPHosts are added to the allowlist and its MCPOffArgs are not passed.
 	// Off by default, because a connector reaches an account outside the
 	// sandbox with a live token, which is the reach the sandbox withholds.
-	AllowMCP bool
-	// See Agent.FlagsOffEnv.
+	AllowMCP        bool
 	AccountFeatures bool
 }
 

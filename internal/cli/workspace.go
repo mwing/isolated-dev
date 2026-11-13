@@ -67,8 +67,8 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 	platform string, noCache bool, buildSource string) error {
 	// The last gate before instructions from the repository run over an
 	// unfiltered network. It is here rather than at each caller because a
-	// build is the thing being consented to, and every path to one — run,
-	// shell, console, update, tools — goes through this function.
+	// build is the thing being consented to, and every path to one — build,
+	// run, shell, console, agents, update — goes through this function.
 	store, err := trust.Load(env.Paths.Home, p.Dir)
 	if err != nil {
 		return err
@@ -83,6 +83,19 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 		}
 	}
 
+	// Policy outranks an acceptance recorded before the rule, and `dev build`
+	// and `dev update` never reach enforceConsent, where it is otherwise
+	// checked.
+	pol, err := loadPolicy(env)
+	if err != nil {
+		return err
+	}
+	if p.Dockerfile != "" {
+		if verr := pol.CheckSetting(buildSourceKey); verr != nil {
+			return fmt.Errorf("%s supplies its own Dockerfile, but %w", p.Dir, verr)
+		}
+	}
+
 	dockerfile, err := p.RenderedDockerfile()
 	if err != nil {
 		return err
@@ -92,11 +105,6 @@ func buildImageWith(ctx context.Context, env *Env, cfg config.Config, p *project
 		return err
 	}
 	unpinned := project.BaseImages(project.ApplyPins(dockerfile, cfg.Pins))
-
-	pol, err := loadPolicy(env)
-	if err != nil {
-		return err
-	}
 	for _, image := range project.BaseImages(dockerfile) {
 		if verr := pol.CheckRegistry(image); verr != nil {
 			return verr

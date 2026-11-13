@@ -79,13 +79,13 @@ type Agent struct {
 	// which carry access to models the account is gated into. For Claude
 	// Code 2.1.x every switch tried that silences telemetry, DISABLE_TELEMETRY
 	// included, also stops the flags, so the two cannot be had separately.
-	// --account-features strips these names from Env too: a definition
-	// pinned before this field existed carries them there. An explicitly
+	// --account-features strips these names from Env too, where a definition
+	// pinned by `dev agent update` may carry them. An explicitly
 	// empty list still inherits the built-in's, which fails closed.
 	FlagsOffEnv []string `yaml:"flags_off_env"`
-	// TelemetryHosts are where the agent sends telemetry once FlagsOffEnv no
-	// longer stops it. Off the allowlist already; denied outright under
-	// --account-features, so the console refuses them rather than asking.
+	// TelemetryHosts are off the allowlist already; denying them outright
+	// under --account-features is what makes the console refuse them rather
+	// than ask.
 	TelemetryHosts []string `yaml:"telemetry_hosts"`
 	// AuthEnv names environment variables that carry an API key in `env`
 	// auth mode. Values are never taken implicitly: the user must ask.
@@ -345,9 +345,8 @@ func (r *Registry) LoadDir(dir string) error {
 			return fmt.Errorf("agent: %s: %w", path, err)
 		}
 		a.source = path
-		// A definition written by `dev agent update` before FlagsOffEnv
-		// existed has none, and would make --account-features a no-op for
-		// the agent it pins.
+		// A definition pinned by `dev agent update` may lack either field,
+		// which would make --account-features a no-op for the agent it pins.
 		if prior, ok := r.agents[a.Name]; ok {
 			if len(a.FlagsOffEnv) == 0 {
 				a.FlagsOffEnv = prior.FlagsOffEnv

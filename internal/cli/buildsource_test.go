@@ -448,8 +448,6 @@ func TestATemplateImageIsNotRebuiltEveryRun(t *testing.T) {
 	}
 }
 
-// An image built from the repo Dockerfile before the template was configured
-// is the wrong image, and has to be rebuilt rather than reused.
 func TestARepoDockerfileImageIsRebuiltFromTheTemplate(t *testing.T) {
 	out := freshnessRun(t, func(cfg config.Config, p *project.Project) string {
 		want, err := finalDockerfile(cfg, p)
@@ -492,5 +490,50 @@ func TestAcceptCanRecordTheDockerfileUnderAConfiguredTemplate(t *testing.T) {
 	err := h.run(t, "run", "--build-source", "project", "-c", "true")
 	if err != nil && strings.Contains(err.Error(), "unaccepted") {
 		t.Errorf("accepting did not satisfy --build-source project: %v\n%s", err, h.stderr.String())
+	}
+}
+
+// Policy outranks an acceptance recorded before the rule, and `dev build`
+// never reaches enforceConsent, where it is otherwise checked.
+func TestABuildHonoursForbidBuildSourceAfterAcceptance(t *testing.T) {
+	for _, args := range [][]string{
+		{"build"},
+		{"build", "--build-source", "project"},
+	} {
+		h := newHarness(t)
+		h.readyBackend()
+		if err := os.WriteFile(filepath.Join(h.paths.ProjectDir, "Dockerfile"),
+			[]byte("FROM alpine\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, p, err := resolveProject(h.env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.acceptSettings(t, *buildSourceAsk(p))
+		h.writePolicy(t, "forbid: [build_source]\n")
+
+		err = h.run(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "build_source") {
+			t.Errorf("%v: built a Dockerfile the machine forbids: %v", args, err)
+		}
+		for _, run := range h.dockerArgs() {
+			if len(run) > 0 && run[0] == "build" {
+				t.Errorf("%v: a build was started: %v", args, run)
+			}
+		}
+	}
+}
+
+// The policy forbids the repository's Dockerfile, not building: the template
+// still has to work under it.
+func TestATemplateBuildIsNotForbiddenByBuildSourcePolicy(t *testing.T) {
+	h := newHarness(t)
+	h.readyBackend()
+	templateProject(t, h)
+	h.writePolicy(t, "forbid: [build_source]\n")
+
+	if err := h.run(t, "build", "--build-source", "template"); err != nil {
+		t.Fatalf("a template build was refused under forbid: build_source: %v\n%s", err, h.stderr.String())
 	}
 }

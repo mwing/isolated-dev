@@ -90,8 +90,6 @@ func newConsoleCmd(env *Env) *cobra.Command {
 	return cmd
 }
 
-// optionalFlag is nil when the flag was not given, so a configured default
-// can apply; see flagOr.
 func optionalFlag(cmd *cobra.Command, name string, v bool) *bool {
 	if !cmd.Flags().Changed(name) {
 		return nil

@@ -55,8 +55,7 @@ type runGrants struct {
 	// connectors.
 	allowMCP bool
 	// Console only; `dev agent run` takes it directly.
-	learn bool
-	// Console only; `dev agent run` takes it directly.
+	learn           bool
 	accountFeatures *bool
 }
 

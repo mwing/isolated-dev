@@ -405,8 +405,6 @@ func TestADeniedHostIsNotHeldForADecision(t *testing.T) {
 	}
 }
 
-// A host no grant can open is told so, and is not sent to a remedy the
-// policy would refuse.
 func TestADeniedHostIsReportedAsDenied(t *testing.T) {
 	a, err := mustParse(t, "known.example.com").WithDeny([]string{"denied.example.com"})
 	if err != nil {

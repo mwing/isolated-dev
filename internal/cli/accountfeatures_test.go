@@ -119,7 +119,6 @@ func TestTheConsoleAgentHonoursAccountFeatures(t *testing.T) {
 	}
 }
 
-// A configured default must still be switchable off for one run.
 func TestTheFlagOverridesAConfiguredDefault(t *testing.T) {
 	h := accountFeaturesRun(t, "account_features: true\n", "",
 		"agent", "run", "claude", "--account-features=false", "--tty", "off")
@@ -149,8 +148,6 @@ func TestTheConsoleAnnouncesAccountFeatures(t *testing.T) {
 	}
 }
 
-// Once the switch is off, the agent's third-party telemetry hosts are denied,
-// so the console refuses them instead of asking whether to allow them.
 func TestAccountFeaturesDenyTheTelemetryHosts(t *testing.T) {
 	for _, c := range []struct {
 		args []string

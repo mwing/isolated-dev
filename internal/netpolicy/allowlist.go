@@ -96,8 +96,8 @@ func (a *Allowlist) WithDeny(entries []string) (*Allowlist, error) {
 	return a, nil
 }
 
-// refusalReason is what a refusal of host is recorded as. A denied host is
-// one no grant can open, which is a different answer for whoever reads it.
+// A denied host is one no grant can open, which is a different answer for
+// whoever reads the refusal.
 func (a *Allowlist) refusalReason(host string) string {
 	if a.denied(host) {
 		return "denied by policy"

@@ -437,8 +437,8 @@ func TestAccountFeaturesDropTheTrafficSwitch(t *testing.T) {
 	}
 }
 
-// A definition pinned by `dev agent update` before flags_off_env existed has
-// the switch in env, where only inheritance lets the opt-in find it.
+// A pinned definition may carry the switch in env and have no
+// flags_off_env; only inheritance lets the opt-in find it there.
 func TestAnOldPinStillHonoursAccountFeatures(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "claude"), 0o755); err != nil {
