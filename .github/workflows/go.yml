@@ -33,7 +33,7 @@ jobs:
           # toolchain when the constraint allows it, so a range can stay on a
           # patch older than the one carrying a stdlib security fix — and the
           # stdlib is compiled into every released binary.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       - name: Verify formatting
         run: |
@@ -65,7 +65,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Exact patch; see the note in the `test` job.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       - name: Integration tests against a real docker daemon
         env:
           DEV_BACKEND: docker
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Exact patch; see the note in the `test` job.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       # v7 of the action, because the config is golangci-lint v2 and v6 of
       # the action refuses a v2 version outright. That mismatch is why this
       # job had been failing on every push: `version: latest` resolved to a
@@ -115,7 +115,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Exact patch; see the note in the `test` job.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       - name: Fuzz ${{ matrix.target }}
         env:
           FUZZTIME: ${{ github.event_name == 'schedule' && '600s' || '60s' }}
@@ -163,7 +163,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Exact patch; see the note in the `test` job.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           # The same version the release uses. Checking against a different
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           # Exact patch; see the note in the `test` job.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0

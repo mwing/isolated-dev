@@ -26,7 +26,7 @@ jobs:
           # toolchain when the constraint allows it, so a range can stay on a
           # patch older than the one carrying a stdlib security fix — and the
           # stdlib is compiled into every released binary.
-          go-version: '1.26.10'
+          go-version: '1.26.11'
 
       # The suite runs on every push already; it runs again here because a
       # tag is the one build that people install without reading anything.

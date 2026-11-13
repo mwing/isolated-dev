@@ -51,7 +51,7 @@ signature is bound to the workflow that built it.
 <details>
 <summary>From source</summary>
 
-Requires Go 1.26.10 or newer. An older 1.26 fetches it automatically, through
+Requires Go 1.26.11 or newer. An older 1.26 fetches it automatically, through
 the toolchain line in go.mod, unless `GOTOOLCHAIN=local` is set.
 
 ```sh
